@@ -1,0 +1,15 @@
+name = "Scidonia"
+version = "0.1.0"
+defaultTargets = ["scidonia"]
+
+[[require]]
+name = "std"
+git = "https://github.com/leanprover/std4"
+rev = "main"
+
+[[lean_lib]]
+name = "Scidonia"
+
+[[lean_exe]]
+name = "scidonia"
+root = "Main"

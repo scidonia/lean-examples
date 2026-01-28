@@ -1,0 +1,15 @@
+{"version": "1.1.0",
+ "packagesDir": ".lake/packages",
+ "packages":
+ [{"url": "https://github.com/leanprover/std4",
+   "type": "git",
+   "subDir": null,
+   "scope": "",
+   "rev": "cabbb5a025bfbbc50af9184ed2dfdde6ea4f53a7",
+   "name": "std",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": "main",
+   "inherited": false,
+   "configFile": "lakefile.toml"}],
+ "name": "Scidonia",
+ "lakeDir": ".lake"}
