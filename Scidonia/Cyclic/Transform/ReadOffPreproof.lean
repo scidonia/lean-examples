@@ -85,8 +85,7 @@ theorem ppRuleOk (root : V) (b : ReadOff.Builder) (v : V) :
     v ∈ (graphOf root b).verts →
     Rule b (ppLabel b v) (((graphOf root b).succ v).map (ppLabel b)) := by
   intro _
-  unfold Rule ppLabel
-  cases h : labelOf b v <;> simp [labelOf] at h <;> simp [h]
+  cases hnode : labelOf b v <;> simp [Rule, ppLabel, hnode]
 
 /-- Package a builder as a preproof. -/
 def preproofOf (root : V) (b : ReadOff.Builder) : Preproof Judgement (Rule b) V :=

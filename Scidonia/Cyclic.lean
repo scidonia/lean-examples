@@ -5,3 +5,6 @@ import Scidonia.Cyclic.Progress.Ranking
 import Scidonia.Cyclic.Syntax.StrictPos
 import Scidonia.Cyclic.Syntax.Term
 import Scidonia.Cyclic.Judgement.Typing
+import Scidonia.Cyclic.Transform.ReadOff
+import Scidonia.Cyclic.Transform.Extract
+import Scidonia.Cyclic.Transform.ReadOffPreproof

@@ -12,6 +12,8 @@ namespace Extract
 /-- A fixpoint environment mapping cycle-target vertices to de Bruijn indices. -/
 abbrev FixEnv : Type := List (Nat × Nat)
 
+instance : Inhabited Tm := ⟨Tm.var 0⟩
+
 namespace FixEnvAssoc
 
 def lookup (xs : List (Nat × Nat)) (k : Nat) : Option Nat :=
@@ -59,7 +61,7 @@ def extractList
 mutual
 
   /-- Extract a term from a vertex, synthesizing `Tm.fix` at cycle targets. -/
-  def extractV : Nat → ReadOff.Builder → FixEnv → Nat → Tm
+  partial def extractV : Nat → ReadOff.Builder → FixEnv → Nat → Tm
     | 0, _, _, _ => Tm.var 0
     | Nat.succ fuel, b, ρ, v =>
         match FixEnvAssoc.lookup ρ v with
@@ -78,7 +80,7 @@ mutual
                 extractNode fuel b ρ v
 
   /-- Extract a term from the node label at a vertex. -/
-  def extractNode : Nat → ReadOff.Builder → FixEnv → Nat → Tm
+  partial def extractNode : Nat → ReadOff.Builder → FixEnv → Nat → Tm
     | 0, _, _, _ => Tm.var 0
     | Nat.succ fuel, b, ρ, v =>
         match lookupNode b v with
@@ -108,13 +110,13 @@ mutual
             let ps := xs.take nparams
             let rs := xs.drop nparams
             Tm.roll ind ctor
-              (extractList extractV (Nat.succ fuel) b ρ ps)
-              (extractList extractV (Nat.succ fuel) b ρ rs)
+              (extractList extractV fuel b ρ ps)
+              (extractList extractV fuel b ρ rs)
         | ReadOff.Node.nCase ind nbrs =>
             match lookupSucc b v with
             | vScrut :: vC :: brs =>
                 Tm.case ind (extractV fuel b ρ vScrut) (extractV fuel b ρ vC)
-                  (extractList extractV (Nat.succ fuel) b ρ (brs.take nbrs))
+                  (extractList extractV fuel b ρ (brs.take nbrs))
             | _ => Tm.var 0
         | ReadOff.Node.nSubstNil _ => Tm.var 0
         | ReadOff.Node.nSubstCons _ => Tm.var 0
@@ -127,7 +129,7 @@ mutual
             | _ => Tm.var 0
 
   /-- Extract substitution arguments from an explicit substitution chain. -/
-  def substArgs : Nat → ReadOff.Builder → FixEnv → Nat → List Tm
+  partial def substArgs : Nat → ReadOff.Builder → FixEnv → Nat → List Tm
     | 0, _, _, _ => []
     | Nat.succ fuel, b, ρ, sv =>
         match lookupNode b sv with
