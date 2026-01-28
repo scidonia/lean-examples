@@ -27,7 +27,7 @@ inductive Node : Type
     or it points to a cycle-target vertex (`some v`). -/
 abbrev BackEnv : Type := List (Option Nat)
 
-/-- A lightweight finite map as an association list with shadowing inserts. -/
+/- A lightweight finite map as an association list with shadowing inserts. -/
 namespace Assoc
 
 def lookup {α : Type} (xs : List (Nat × α)) (k : Nat) : Option α :=
@@ -80,22 +80,14 @@ def appView : Tm → Tm × List Tm
       (h, args ++ [u])
   | t => (t, [])
 
-/-- Fuel measure that accounts for list compilation. -/
-def fuelList (fuelElem : Tm → Nat) : List Tm → Nat
-  | [] => 0
-  | t :: ts => Nat.succ (fuelElem t + fuelList fuelElem ts)
+/-- Compilation fuel for terms.
 
-/-- Compilation fuel for terms. -/
-def fuelTm : Tm → Nat
-  | Tm.var _ => 2
-  | Tm.sort _ => 2
-  | Tm.ind _ => 2
-  | Tm.pi A B => Nat.succ (fuelTm A + fuelTm B)
-  | Tm.lam A t => Nat.succ (fuelTm A + fuelTm t)
-  | Tm.app t u => Nat.succ (fuelTm t + fuelTm u)
-  | Tm.fix A t => Nat.succ (fuelTm A + fuelTm t)
-  | Tm.roll _ _ params recs => Nat.succ (fuelList fuelTm params + fuelList fuelTm recs)
-  | Tm.case _ scrut C brs => Nat.succ (fuelTm scrut + fuelTm C + fuelList fuelTm brs)
+We use a simple size-based upper bound. This intentionally over-approximates the
+fuel needed by `compileTm`/`compileList`, but keeps this pass purely
+computational without additional termination proofs.
+ -/
+def fuelTm (t : Tm) : Nat :=
+  2 * Nat.succ (Tm.size t)
 
 /-- Build a substitution evidence chain from a list of argument vertices.
 
