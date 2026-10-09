@@ -1,10 +1,10 @@
 /-
-The ghost ledger behind the fractional-permission array interface.
+The ghost ledger behind the fractional-permission object interface.
 
 A `Ledger` records the reads currently lent out to the caller as pairs of a
 ghost identifier and a fraction. It is pure specification: no `Ledger` value
 is ever built at run time, and every proposition about one lives in `Prop`,
-so the compiler erases it (see `Scidonia.FracPerm.HoareArray`).
+so the compiler erases it (see `Scidonia.FracPerm.Hoare`).
 
 The identifier of an entry is ghost state too. It exists only so that a
 `ReadTok` can name *which* entry it is entitled to return: the fraction `q`
