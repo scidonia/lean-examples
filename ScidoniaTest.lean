@@ -1,0 +1,2 @@
+-- Root module for the compile-time checks of the `Scidonia` library.
+import ScidoniaTest.FracPerm

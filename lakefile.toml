@@ -10,6 +10,16 @@ rev = "main"
 [[lean_lib]]
 name = "Scidonia"
 
+[[lean_lib]]
+name = "ScidoniaTest"
+
+[[lean_lib]]
+name = "ScidoniaExamples"
+
 [[lean_exe]]
 name = "scidonia"
 root = "Main"
+
+[[lean_exe]]
+name = "inplace"
+root = "ScidoniaInPlace.Main"
