@@ -30,6 +30,11 @@ must copy — and the child processes are what carry
   With a live reference to the log held outside the structure, `record` copies
   the log — its address changes and the outside reference keeps its values —
   while the structure itself is still updated in place.
+* the structured interface's `structured-unique` and `structured-closure`
+  programs, run through `Scidonia.FracPerm.Structured.runFresh`, whose array is
+  created inside the executor; the value assertions are all the parent can see
+  of the array. Their checked children exit zero, which is what shows that
+  every `set` of those programs updated in place.
 * child processes launched as `lake exe inplace unique|shared|counter-…` with
   `SCIDONIA_CHECK_INPLACE=1`. The shared cases must exit nonzero with the
   write site named on standard error, the unique cases must exit zero having
@@ -352,6 +357,81 @@ def counterSharedBumpCase (name : String) : IO (Array String) := do
       ++ disagree name "the log the outside reference still reads" #[10, 11, 12, 13] keptAfter
   return failures
 
+/-! ## The structured interface
+
+`Scidonia.FracPerm.Structured` is the structured interface: a `Reader` with no
+write, a `Program` whose one write is `Program.set`, and a notional
+`Reader.parallel` whose shipped executor runs the branches one after the other.
+The array is created inside `runFresh` and never leaves the executor, so these
+cases observe the programs' results, and the checked children add the one thing
+a value cannot show: that every `set` of these programs updated in place.
+
+The detector is the same `assertExclusiveArray` the existing interface runs
+before `update`: `set` calls it with the site
+`Scidonia.FracPerm.Structured.set`, and `HSt.write` calls it with the site
+`Scidonia.FracPerm.HSt.write`. Two existing cases are its controls, and they
+control different things. `checked-abort` is the armed-check control: it shows
+the check terminating a child process, with a write site on standard error, when
+the write really would copy. `shared-copies` is the address control beside it:
+it shows the copy itself, by the array's address changing under a live second
+reference while the original keeps its values. A harness-only hook that shared a
+structured session's array would be a third control, and it cannot exist under
+the sealed design — Lean privacy is per module, so a hook that reached the
+private interpreter would be importable by every client, and `runFresh` is the
+only runner of the sealed executor. -/
+
+open Scidonia.FracPerm.Structured
+
+/-- The structured program of the `structured-unique` case: write, then a read
+phase with nested parallel readers and a size observation, then two more
+writes. The read phase sits between writes, so what it observes is what the
+first write left. -/
+def structuredProgram :
+    Program (Option UInt64 × Option UInt64 × Nat × Bool × Bool × Bool) := do
+  let w0 ← Program.set 0 17
+  let r ← Program.readPhase
+    (Reader.parallel (Reader.parallel (Reader.get 0) (Reader.get 1)) Reader.size)
+  let w1 ← Program.set 1 23
+  let w2 ← Program.set 2 29
+  return (r.1.1, r.1.2, r.2, w0, w1, w2)
+
+/-- The reader of the `structured-closure` case: it returns a closure over the
+observations it made. The closure captures an `Option UInt64` and a `Nat`, not
+the array, which is the point of the case. -/
+def structuredClosureReader : Reader (Nat → Nat) := do
+  let a ← Reader.get 0
+  let n ← Reader.size
+  return fun k => match a with
+    | some v => v.toNat + k
+    | none => n + k
+
+/-- The structured program of the `structured-closure` case: write, a read
+phase whose result is a closure, then a second write, which must still be in
+place once the closure has crossed the join. -/
+def structuredClosureProgram : Program (Nat × Bool) := do
+  let w0 ← Program.set 0 17
+  let r ← Program.readPhase structuredClosureReader
+  let w1 ← Program.set 1 5
+  return (r 3, w0 && w1)
+
+/-- What the structured cases start from. The fill comes from the caller, so the
+compiler cannot turn `Array.replicate` into a persistent constant on the path
+the harness measures. -/
+def structuredInit (fill : UInt64) : Init := { size := 8, fill }
+
+/-- The `structured-unique` case: the value is what the program's writes and
+observations require. -/
+def structuredUniqueCase (name : String) (fill : UInt64) : IO (Array String) := do
+  let r ← runFresh (structuredInit fill) structuredProgram
+  return disagree name "the value the program returned"
+    (some 17, some fill, 8, true, true, true) r
+
+/-- The `structured-closure` case: the closure returned by the read phase is
+applied after the phase, and the second write still returns `true`. -/
+def structuredClosureCase (name : String) (fill : UInt64) : IO (Array String) := do
+  let r ← runFresh (structuredInit fill) structuredClosureProgram
+  return disagree name "the value the program returned" (20, true) r
+
 /-! ## Child processes
 
 The check turns a copied write into a terminated process, so the case that
@@ -432,6 +512,28 @@ def counterCheckedBumpCase : IO (Array String) := do
       ++ markerFailure "counter-checked-bump" "the child's standard output" "ok   counter-shared-bump" out.stdout
   return failures
 
+/-- The `structured-unique` case in a child with the check enabled: the check
+is armed and does not fire on any of the three writes, so the child exits zero
+having reported the check enabled and the case ok. -/
+def checkedStructuredUniqueCase : IO (Array String) := do
+  let out ← launchChecked "structured-unique"
+  let failures :=
+    markerFailure "structured-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "structured-checked-unique" 0 out
+      ++ markerFailure "structured-checked-unique" "the child's standard output" "ok   structured-unique" out.stdout
+  return failures
+
+/-- The `structured-closure` case in a child with the check enabled: the closure
+the read phase returned is live across the second write, which must still be in
+place. -/
+def checkedStructuredClosureCase : IO (Array String) := do
+  let out ← launchChecked "structured-closure"
+  let failures :=
+    markerFailure "structured-checked-closure" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "structured-checked-closure" 0 out
+      ++ markerFailure "structured-checked-closure" "the child's standard output" "ok   structured-closure" out.stdout
+  return failures
+
 /-! ## The entry point -/
 
 /-- Print one case's verdict and count it. -/
@@ -452,6 +554,9 @@ def runAll : IO UInt32 := do
     return 2
   -- A value the compiler cannot know, so that the literal case's write runs.
   let seed := (← IO.monoMsNow) % 97 + 1
+  -- The structured cases start from the same kind of run-time value, so that
+  -- `Array.replicate` cannot become a persistent constant on their path.
+  let fill : UInt64 := (seed % 89 + 1).toUInt64
   let cases : Array (String × Array String) := #[
     ("p1-unique", ← uniqueCase "p1-unique"),
     ("p2-unique", ← readersCase "p2-unique"),
@@ -460,11 +565,15 @@ def runAll : IO UInt32 := do
     ("counter-unique", ← counterUniqueCase "counter-unique"),
     ("counter-shared-log", ← counterSharedCase "counter-shared-log"),
     ("counter-shared-log-bump", ← counterSharedBumpCase "counter-shared-log-bump"),
+    ("structured-unique", ← structuredUniqueCase "structured-unique" fill),
+    ("structured-closure", ← structuredClosureCase "structured-closure" fill),
     ("checked-abort", ← checkedAbortCase),
     ("checked-unique", ← checkedUniqueCase),
     ("counter-checked-unique", ← counterCheckedUniqueCase),
     ("counter-checked-shared-log", ← counterCheckedAbortCase),
-    ("counter-checked-shared-log-bump", ← counterCheckedBumpCase)
+    ("counter-checked-shared-log-bump", ← counterCheckedBumpCase),
+    ("structured-checked-unique", ← checkedStructuredUniqueCase),
+    ("structured-checked-closure", ← checkedStructuredClosureCase)
   ]
   let mut status : UInt32 := 0
   for (name, failures) in cases do
@@ -474,12 +583,15 @@ def runAll : IO UInt32 := do
 /-- The child's run of one case: report the switch, then the case. -/
 def runChild (command : String) : IO UInt32 := do
   IO.println s!"check-enabled={inplaceCheckEnabled}"
+  let fill : UInt64 := ((← IO.monoMsNow) % 89 + 1).toUInt64
   match command with
   | "unique" => report "unique" (← uniqueCase "unique")
   | "shared" => report "shared" (← sharedCase "shared")
   | "counter-unique" => report "counter-unique" (← counterUniqueCase "counter-unique")
   | "counter-shared" => report "counter-shared" (← counterSharedCase "counter-shared")
   | "counter-shared-bump" => report "counter-shared-bump" (← counterSharedBumpCase "counter-shared-bump")
+  | "structured-unique" => report "structured-unique" (← structuredUniqueCase "structured-unique" fill)
+  | "structured-closure" => report "structured-closure" (← structuredClosureCase "structured-closure" fill)
   | _ => do
     IO.eprintln s!"inplace: unknown command {command}"
     return 2
@@ -489,5 +601,5 @@ def main (args : List String) : IO UInt32 := do
   | [] => runAll
   | [command] => runChild command
   | _ => do
-    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump]"
+    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure]"
     return 2

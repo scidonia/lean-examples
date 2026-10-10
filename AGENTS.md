@@ -2,7 +2,8 @@
 
 Lean 4 development of the Scidonia proof machinery: the cyclic-proof port under
 `Scidonia/Cyclic/` (see `README_LEAN_CYCLIC.md`) and the fractional-permission
-object interface under `Scidonia/FracPerm/`.
+object interface under `Scidonia/FracPerm/`, with the structured
+`Reader`/`Program` interface beside it under `Scidonia/FracPerm/Structured/`.
 
 ## Toolchain
 
@@ -67,7 +68,98 @@ the array's unique, shared and literal runs; the counter's, whose mutable state
 is a field of a structure, so a live reference to `log` held outside the
 counter shares the field while leaving the counter itself exclusive; and the
 children, which show the check firing for `record` and *not* firing for `bump`,
-whose write does not touch the log.
+whose write does not touch the log. Two more children, `structured-unique` and
+`structured-closure`, run programs of `Scidonia.FracPerm.Structured` with the
+check armed: the array of a structured session is created inside
+`runFresh` and never leaves the executor, so those cases are what show that
+every `set` of those programs updated in place. The detector those children
+show *not* firing is the same `assertExclusiveArray` the existing interface runs
+before `update`; the case that shows the check terminating a process is
+`checked-abort`, and `shared-copies` is the address control beside it, which
+shows the copy itself. See the structured section below for why a structured
+case cannot be the one that fires it.
+
+`ScidoniaTest/Structured.lean` checks `Scidonia.FracPerm.Structured` from
+outside, in the same library and the same style. Its behavioural checks are
+`#eval`s of `runFresh`, because `runFresh` creates the array and so is an `IO`
+action: a local `check` throws when a run's value is not the expected one, and
+a thrown error fails the elaboration of the module. Its sealing checks are
+`#guard_msgs` around commands whose elaboration must fail, with the message
+pinned — the private field, the private constructor, the sealed executor's
+private array-taking interpreter, and the fact that neither a `Program` nor a
+`Reader` is a function that an array can be applied to — each paired with the
+affirmative controls: the protocol runs, the eliminators exposing a command tree
+and nothing else, and the model's public evaluators running a tree on an array
+the client supplies.
+
+## The structured interface
+
+`Scidonia.FracPerm.Structured` is the second interface: a read-only `Reader`, an
+exclusive `Program`, and a notional `Reader.parallel`, with the fractions
+internal. A program enters a read phase with `Program.readPhase`, runs a tree
+of readers there, and writes with `Program.set` only outside one; `runFresh
+init p` creates the array from `init` (a size and a fill value), runs the
+program, and returns its result. Clients see no fraction, no ghost id, no
+ledger and no closing proof, and each of the two computation types carries its
+command tree behind a private constructor and a private field, so no client can
+build one or project one. The array-taking interpreter (`execP`/`execR` in
+`Structured/Executor.lean`) is private to its module, so `runFresh` is the only
+runner of the sealed executor and no public function of the sealed executor
+accepts an array; the trees the generated eliminators and
+`Reader.treeOf`/`Program.treeOf` do expose are recipes — reads, writes, forks
+and pure continuations over observations — and carry no state. The model's own
+evaluators, `Model.run`/`val`/`pval`, are public and pure: they take the array
+from the caller, they are what the theorems are stated about, and they are not
+a route to the array a `runFresh` session creates.
+
+`Structured/Model.lean` is the semantics. Threads are running read phases, and
+its small-step relation has a step for every interleaving of a fork's branches,
+which is what makes `parallel` notional: the shipped executor runs the left
+branch and then the right one, and the model proves that every interleaving
+computes what the sequential denotation computes (`eval_of_run`,
+`complete_run_value`), that a `get` or `size` step hands its continuation
+exactly `s[i]?` or `s.size` and leaves the store alone (`step_get`,
+`step_size`, `reading_step_store`), that a reader's result is a function of its
+observations alone (`replay_trace`), that a well-formed thread's leaf shares sum
+to its share and stay positive (`wf_leafSum`, `wf_sharesPositive`), that no
+`set` step has a source while a read phase runs and a well-formed reading
+configuration leaves the writer no authority (`reading_step_is_read_or_leave`,
+`writer_authority_add`), that a `wait` becomes a `run` only when both children
+have finished (`wait_step`), and that a `set` preserves the array's size and is
+in bounds exactly when it yields `true` (`set_step`, `set_step_size`). Each
+theorem's docstring states what it covers; the module note states what the
+model assumes — that continuations are arbitrary pure Lean functions of
+observations, that the heap is abstracted to the one array, and that in-place
+updating is run-time evidence and not a theorem.
+
+The structured interface's fractions are specification too, and more so than
+the object interface's: there is no token and no ledger on the run-time path at
+all. `WF`, `leafSum` and the share arithmetic live in `Prop` in the model, and
+the compiled executor threads one array and the command trees, so a read phase
+costs no allocation for permissions — only the continuations the trees already
+carry.
+
+The executor's interpreters are the model's recursions with
+`assertExclusiveArray` in front of each update (`Executor.execR_eq_val`,
+`Executor.execP_eq_pval`, and `runFresh_eq_pval` for the runner), so the
+equations that relate the shipped code to the semantics are themselves proved.
+
+`parallel` is notional, and a real concurrent backend would need more than
+permissions. The reason is measured on this toolchain: a run-time-built array
+captured by a `Task.spawn` closure answers `false` to `isExclusiveUnsafe` after
+the task has been joined — it is marked as shared between threads, and
+`lean_is_exclusive` refuses it from then on — and the next `set!` returns an
+array at a different address, a copy, while the same write on an untasked array
+keeps its address. Getting the array back to a single owner is work the
+permission discipline does not do. The structured harness cases therefore run
+the sequential executor with the check armed; the case that shows that check
+terminating a process is the existing `checked-abort` case, and `shared-copies`
+is the address control beside it, which shows the copy itself. Neither is a
+structured case: a hook that shared a structured session's array would have to
+reach the private interpreter, and Lean privacy is per module, so such a hook
+would be importable by every client of the library — which is exactly what the
+interface's promise, that `runFresh` is the only runner of the sealed executor
+and no public route reaches the array a session creates, rules out.
 
 ## Writing an instance
 
@@ -173,6 +265,26 @@ No specification mentions any of it.
 Sharing an object is legal — the write copies it, which is not an error — and
 the check only turns that copy into a terminated process.
 
+The structured executor's generated C is what shows its array reaching `set`
+with one reference. `execP` compiles to a loop that carries the array in a
+local, and its `set` case passes that local to `assertExclusiveArrayImpl`
+with no `lean_inc` in front of it, then hands `lean_array_set`'s result back to
+the loop; its `phase` case passes the same local to `execR`, whose array
+parameter is `@&` and is therefore borrowed rather than taken, so a read phase
+costs no second reference. `runFresh`'s `Array.replicate` is a `lean_mk_array`
+at run time and is handed to `execP` owned. The relevant function in the
+generated C is:
+
+```bash
+nix develop -c grep -n "assertExclusiveArrayImpl" \
+  .lake/build/ir/Scidonia/FracPerm/Structured/Executor.c
+```
+
+The call site is the one the `structured-unique` and `structured-closure`
+children exercise: they exit zero with the check armed, having printed
+`check-enabled=true`, so the check was in the write path and had nothing to
+report.
+
 ## Layout
 
 | Path | Contents |
@@ -180,9 +292,14 @@ the check only turns that copy into a terminated process.
 | `Scidonia.lean` | Root module of the `Scidonia` library |
 | `Scidonia/Cyclic/` | Cyclic-proof machinery: graphs, preproofs, ranking progress, terms |
 | `Scidonia/FracPerm/` | Fractional-permission objects: `Ledger`, the `FracObject` class and `HSt` in `Hoare`, the `Array` instance, the primitives, `withRead` |
+| `Scidonia/FracPerm/Structured/Surface.lean` | The structured interface: `Reader`, `Program`, their command trees, `Init` |
+| `Scidonia/FracPerm/Structured/Executor.lean` | The sequential executor: the private interpreters and the sealed runner, `runFresh` |
+| `Scidonia/FracPerm/Structured/Model.lean` | The small-step model, the shares, and the ownership theorems |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
+| `ScidoniaTest/Structured.lean` | The structured interface's protocol and sealing checks |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
+| `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
 | `Main.lean` | Entry point of the `scidonia` executable |
