@@ -12,3 +12,5 @@ import Scidonia.FracPerm.StateVar.Surface
 import Scidonia.FracPerm.StateVar.Model
 import Scidonia.FracPerm.StateVar.Heap
 import Scidonia.FracPerm.StateVar.Array
+import Scidonia.FracPerm.StateVar.Description
+import Scidonia.FracPerm.StateVar.Slot
