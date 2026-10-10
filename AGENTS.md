@@ -445,6 +445,9 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
   --prose Slides/permissions.md \
   --example Slides/RoundTrip.lean \
   --prose Slides/runtime.md \
+  --prose Slides/models.md \
+  --example Slides/NoRefEverywhere.lean \
+  --prose Slides/outlook.md \
   --title "Fractional permissions in Lean 4" \
   --subtitle "Erased ghost state, Hoare monads and in-place update" \
   --output Slides/fracperm.html
@@ -484,5 +487,5 @@ repository, not this one, so quote code here as a compiled panel. The built
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
-| `Slides/` | The slide deck's sources: two prose series and a stepped proof |
+| `Slides/` | The slide deck's sources: prose series and stepped proofs |
 | `Main.lean` | Entry point of the `scidonia` executable |
