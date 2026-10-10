@@ -106,10 +106,10 @@ The encoding never produces a location, so the detector accepts it; the
 detector's own negative control shows it is not vacuous. -/
 
 /-- The encoding of a payload is detached from root 0. -/
-example : NoRef 0 (encodeElSlotDesc (Sum.inr 5)) := trivial
+example : NoRef 0 (encodeEl slotDesc (Sum.inr 5)) := trivial
 
 /-- The encoding of the unit summand is detached from root 0. -/
-example : NoRef 0 (encodeElSlotDesc (Sum.inl ())) := trivial
+example : NoRef 0 (encodeEl slotDesc (Sum.inl ())) := trivial
 
 /-- The detector's own negative control: the location at root 0 is *not*
 detached from root 0, so the passing `NoRef` above is not vacuous. -/
@@ -207,8 +207,8 @@ new assumption. -/
 #print axioms Scidonia.FracPerm.StateVar.decode_encode
 #print axioms Scidonia.FracPerm.StateVar.encode_decode
 #print axioms Scidonia.FracPerm.StateVar.lifted_iff
-#print axioms Scidonia.FracPerm.StateVar.encodeElSlotDesc_injective
-#print axioms Scidonia.FracPerm.StateVar.encodeElSlotDesc_detached
+#print axioms Scidonia.FracPerm.StateVar.encodeEl_injective
+#print axioms Scidonia.FracPerm.StateVar.encodeEl_noRef
 #print axioms Scidonia.FracPerm.StateVar.slot_observe_eq
 #print axioms Scidonia.FracPerm.StateVar.slot_read_after_replace
 #print axioms Scidonia.FracPerm.StateVar.slot_snapshot_full7_full9

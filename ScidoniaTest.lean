@@ -2,4 +2,5 @@
 import ScidoniaTest.FracPerm
 import ScidoniaTest.Structured
 import ScidoniaTest.StateVar
+import ScidoniaTest.Universe
 import ScidoniaTest.Slot

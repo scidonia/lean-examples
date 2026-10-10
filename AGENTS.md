@@ -71,6 +71,15 @@ The compile-time checks live in the check library:
   the `empty → full n → empty` shape change on one root cell, and the
   no-reference detector's positive and negative pair. Its `#print axioms` shows
   the new theorems rest on the standard kernel principles only.
+- `ScidoniaTest/Universe.lean` checks the description universe and the transport
+  from outside, in the same style: `encodeEl` at a unit, a natural, each summand
+  of a sum and all four summands of a nested sum; the single instance's
+  operations at those shapes and the injectivity and no-reference laws
+  quantified over *every* description; the generic snapshot, frame and validity
+  theorems applied at an arbitrary description; and a second, independent
+  transport for `Bool` at `sum unit unit`, a description the slot does not use,
+  so the transport is not exercised only by its one client. Its `#print axioms`
+  shows the new theorems rest on the standard kernel principles only.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -218,25 +227,36 @@ theorems hold of every instance that proves them.
   `El d` a description denotes, and `slotDesc`, the description of a slot (a
   unit summed with a natural). `El` is an `abbrev`, so `El slotDesc` is
   definitionally `Sum Unit Nat` for a client.
+* `StateVar/Universe.lean` is the universe as one lawful state variable, and the
+  transport that carries it to any isomorphic type. `encodeEl` encodes an
+  element of *any* description as a `Value`, and `encodeEl_injective` and
+  `encodeEl_noRef` are each proved *once*, by a structural induction on `Desc`
+  with one case per constructor, rather than once per description. The wrapper
+  `Described d` indexes typeclass inference by the description (two descriptions
+  can denote definitionally equal Lean types), so the single instance
+  `describedStateVar d : LawfulStateVar (Described d) (El d) Unit (El d)` serves
+  every description; the generic model's theorems are then applied at it for an
+  arbitrary `d` (`universe_read_after_replace`, `universe_read_detached`,
+  `universe_read_at_detached`, `universe_write_at_valid`,
+  `universe_write_at_frame`, `universe_snapshot_after_write`). `transport d τ
+  toEl ofEl …` is the other half: any type with an isomorphism to `El d` gets a
+  lawful instance whose operations are the universe instance's conjugated by the
+  isomorphism, with each law the universe's after an inverse law cancels the
+  conjugation.
 * `StateVar/Slot.lean` is the worked description-indexed state variable: the
   genuine `inductive Slot` (empty, or a natural payload), `encode`/`decode` and
-  both inverse laws `decode_encode`/`encode_decode`, `lifted_iff`, the lawful
-  witness for `El slotDesc` (`encodeElSlotDesc` with its injectivity and
-  no-reference lemmas, and the instance built from them), and the `Slot`
-  instance *transported* from that witness across the two inverse laws — every
-  operation of the slot is the description operation conjugated by
-  `encode`/`decode` (`slotValid`, `slotInitial`, `slotObserve`, `slotReplace`,
-  `slotEncodeRead`), and every law field is its description counterpart after an
-  inverse law cancels the conjugation, never a fresh proof. Its theorems are
-  `slot_observe_eq`/`slot_replace_eq`, `slot_read_after_replace`, the
-  read–write–read snapshot `slot_snapshot_full7_full9` (the old `full 7` still
-  the value of the pre-write heap, the post-write cell holding `full 9`), the
-  shape change `slot_shape_change` (`empty → full n → empty` on one root cell),
-  and the arbitrary-payload facts `slot_full_round_trip` and
-  `slot_read_after_replace_full`. Its description-specific half (`encode` of the
-  two summands, the two lemmas) is stated so that a general witness for every
-  description subsumes it, leaving the public inverse laws and the observable
-  slot statements unchanged.
+  both inverse laws `decode_encode`/`encode_decode`, and `lifted_iff`. Its
+  instance `slotStateVar` is `transport slotDesc Slot encode decode …`: every
+  operation is the universe instance's conjugated by `encode`/`decode`, and
+  every law field is the universe instance's law after an inverse law cancels
+  the conjugation — no fresh proof, and nothing specific to `slotDesc`. Its
+  theorems are `slot_observe_eq`/`slot_replace_eq`/`slotEncodeRead_eq`,
+  `slot_read_after_replace`, the read–write–read snapshot
+  `slot_snapshot_full7_full9` (the old `full 7` still the value of the pre-write
+  heap, the post-write cell holding `full 9`), the shape change
+  `slot_shape_change` (`empty → full n → empty` on one root cell), and the
+  arbitrary-payload facts `slot_full_round_trip` and
+  `slot_read_after_replace_full`.
 
 What the class proves, and what it does not. `observe_detached` refuses a
 modeled `.loc ℓ` in a primitive observation of a valid state, and
@@ -257,11 +277,14 @@ laws, because a different state variable replaces unconditionally.
 The slot is the second witness, and it is a *logical* one in the same sense: its
 `replace` takes effect unconditionally (`(new, true)`), since a single root cell
 has no bounds to fail, and `slot_snapshot_full7_full9`/`slot_shape_change`
-replace a root cell in the model's `Heap Slot` (`Loc → Option Slot`). A write
-there yields a new heap value and destroys nothing — the old value is still what
-the pre-write heap holds — so this is neither physical fixed-node mutation nor an
+replace a root cell in the model's `Heap Slot` (`Loc → Option Slot`). It is not
+proved from nothing: the universe gives one lawful instance for every
+description, and the slot's is a transport of it at `slotDesc`. A write there
+yields a new heap value and destroys nothing — the old value is still what the
+pre-write heap holds — so this is neither physical fixed-node mutation nor an
 address-preservation claim, and no `IO.Ref`, C or foreign backend is involved.
-`ScidoniaTest/Slot.lean` is where a client's view of it is checked.
+`ScidoniaTest/Slot.lean` and `ScidoniaTest/Universe.lean` are where a client's
+view of it is checked.
 
 The generic model is recipes and proofs, not a second backend. It adds no
 runner: the structured interface's sealed `Reader`/`Program`/`runFresh` and its
@@ -449,12 +472,14 @@ repository, not this one, so quote code here as a compiled panel. The built
 | `Scidonia/FracPerm/StateVar/Heap.lean` | The single-root heap: `At`, `ReadAt`, `WriteAt`, frames, snapshots, shares |
 | `Scidonia/FracPerm/StateVar/Array.lean` | The array witness, `liftR`/`liftP`, the bridges, and the `runFresh` equation |
 | `Scidonia/FracPerm/StateVar/Description.lean` | The description universe: `Desc`, `El d`, and `slotDesc` |
-| `Scidonia/FracPerm/StateVar/Slot.lean` | The slot: `encode`/`decode`, both inverse laws, the description witness, and the transported instance |
+| `Scidonia/FracPerm/StateVar/Universe.lean` | One instance for every description: `encodeEl`, its two laws, `Described d`, `describedStateVar d`, and `transport` |
+| `Scidonia/FracPerm/StateVar/Slot.lean` | The slot: `encode`/`decode`, both inverse laws, and the instance transported at `slotDesc` |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
 | `ScidoniaTest/Structured.lean` | The structured interface's protocol and sealing checks |
 | `ScidoniaTest/StateVar.lean` | The generic state variable's witness, model, bridge, and negative-law checks |
+| `ScidoniaTest/Universe.lean` | The description universe's encoding, instance, model, and transport checks |
 | `ScidoniaTest/Slot.lean` | The slot's correspondence, instance, snapshot, shape-change, and detector checks |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
