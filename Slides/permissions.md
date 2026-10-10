@@ -2,6 +2,8 @@
 
 ## The question
 - Lean values are immutable, yet `Array.set!` updates in place when the array's reference count is 1.
+- So if we are careful to keep only one reference, we get update in place. But ==how do we know we only have one reference?==
+- If we could enforce that, we would have mutable programming in a pure language.
 - We want a discipline over one shared object: ==writes need exclusive access, reads may share==.
 - And we want the type checker to enforce it, at no cost at run time.
 
