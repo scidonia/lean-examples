@@ -37,6 +37,31 @@ example : ¬ NoRef 0 (.pair (.nat 7) (.some (.loc 0))) := by
   simp [NoRef]
 ```
 
+## LawfulStateVar: the definition
+- Restated here and checked against the library: the panel compiles only if the library's class has these fields at these types.
+- Six operations and four laws. The laws are what `FracObject` only documented.
+
+```class LawfulStateVar
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar (Value Loc NoRef LawfulStateVar)
+class Shown (σ : Type) (Init : outParam Type)
+    (ReadOp : outParam Type) (WriteOp : outParam Type) where
+  Result : ReadOp → Type
+  initial : Init → σ
+  Valid : σ → Prop
+  observe : (o : ReadOp) → σ → Result o
+  replace : WriteOp → σ → σ × Bool
+  encodeRead : (o : ReadOp) → Result o → Value
+  initial_valid : ∀ i : Init, Valid (initial i)
+  replace_valid : ∀ w s, Valid s → Valid (replace w s).1
+  encodeRead_injective : ∀ o (x y : Result o),
+    encodeRead o x = encodeRead o y → x = y
+  observe_detached : ∀ (ℓ : Loc) o s,
+    Valid s → NoRef ℓ (encodeRead o (observe o s))
+-- the library's class has exactly these fields
+example [i : LawfulStateVar σ I R W] : Shown σ I R W := { i with }
+```
+
 ## The lawful state variable
 - The obligations are ==fields of the class==: an instance that cannot prove them does not exist.
 - Valid initial states; validity kept by every write.

@@ -65,6 +65,31 @@ example : FracObject.update (σ := Counter)
     (Counter.WriteOp.record 3) ⟨0, #[]⟩ = ⟨0, #[3]⟩ := rfl
 ```
 
+## FracObject: the definition
+- Restated here and checked against the library: the panel compiles only if the library's class has these fields at these types.
+- `check` defaults to `assertExclusive` on the whole object.
+- The rules for `observe` and `update` — no aliases into mutable state — are *not* fields: they are documented, and nothing enforces them.
+
+```class FracObject
+import Scidonia.FracPerm
+open Scidonia.FracPerm (assertExclusive)
+
+namespace Shown
+class FracObject (σ : Type) (ReadOp : outParam Type)
+    (WriteOp : outParam Type) where
+  Result : ReadOp → Type
+  observe : (o : ReadOp) → σ → Result o
+  update : WriteOp → σ → σ
+  check : String → WriteOp → σ → σ :=
+    fun site _ s => assertExclusive site s
+  check_eq : ∀ site o s, check site o s = s
+end Shown
+
+-- The library's class has exactly these fields.
+example [i : Scidonia.FracPerm.FracObject σ R W] :
+    Shown.FracObject σ R W := { i with }
+```
+
 ## Permissions do not control references
 - The ledger lives in proofs; copying depends on run-time reference counts.
 - An `observe` that returned the `log` array would leave an alias, and the next write would copy.
