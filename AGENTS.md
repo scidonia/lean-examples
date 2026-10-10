@@ -51,6 +51,18 @@ The compile-time checks live in the check library:
 - `ScidoniaTest.lean` is the root module of the check library. Lake needs it
   because a library's root is the module named after the library, and the file
   must import the modules that carry the checks.
+- `ScidoniaTest/StateVar.lean` checks `Scidonia.FracPerm.StateVar` from outside,
+  in the same style. Its behavioural controls are runs of the array witness and
+  of the shipped runner; its semantic controls are theorems at the array
+  instance (a fork run right branch first computing the sequential denotation's
+  value, a read–write–read heap snapshot at concrete operands, the bridge
+  equations); and its negative controls are theorems stating that a *specific
+  countermodel's* obligation is false — `bad_read_rejected` for
+  `observe_detached`, `bad_write_rejected` for `replace_valid`,
+  `bad_encode_rejected` for `encodeRead_injective` — paired with the affirmative
+  array witness. A `#guard_msgs` pins the countermodel's instance failing to
+  elaborate, and `#print axioms` on representative theorems of the theory shows
+  which kernel principles they rest on.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -160,6 +172,74 @@ reach the private interpreter, and Lean privacy is per module, so such a hook
 would be importable by every client of the library — which is exactly what the
 interface's promise, that `runFresh` is the only runner of the sealed executor
 and no public route reaches the array a session creates, rules out.
+
+## The generic state variable
+
+`Scidonia/FracPerm/StateVar/` is a second, generic interface beside the
+structured one. Where `FracObject` states its two run-time rules in prose
+because no specification can check them, `LawfulStateVar` makes the *logical*
+part of those rules proof fields, so that the structured model's ownership
+theorems hold of every instance that proves them.
+
+* `StateVar/Value.lean` is the logical value language the class's observations
+  are encoded in, and `NoRef ℓ v` says an encoded value names no root at `ℓ`.
+  `.loc k` is the one constructor that names a root, and `NoRef` descends
+  through `some`, `inl`, `inr` and `pair`, so a location hidden beneath a
+  compound observation is caught.
+* `StateVar/Class.lean` is `LawfulStateVar`: a state type, what it is
+  initialized from, its read and write operation types, an encoding of read
+  results as `Value`, and `initial_valid`, `replace_valid`,
+  `encodeRead_injective` and `observe_detached`. Membership is by proof: no
+  `FracObject` instance is automatically lawful, and none of the historical
+  instances is claimed as one.
+* `StateVar/Surface.lean`, `StateVar/Model.lean` are the generic recipes and
+  their small-step model: `RTree`/`PTree`, `run`/`val`, `replay`, `Step`,
+  `Eval`, `WF`/`leafSum`, `PStep`/`WFConf`, and `SafeTree`/`safe_result` — M1's
+  share conservation, exclusion, join discipline, write preservation, trace
+  replay and schedule independence, stated once for every lawful instance.
+* `StateVar/Heap.lean` is the single-root logical heap: `At`, `ReadAt`,
+  `WriteAt`, the frame and read–write–read snapshot theorems, and M1's fraction
+  arithmetic (`ValidShare`, halving, `cannot_add_reader`).
+* `StateVar/Array.lean` is the array's witness (`arrayObserve`,
+  `arrayReplace`, `encodeArrayRead`, and the instance built from them), the
+  translation `liftR`/`liftP` of the structured trees, the denotation bridges
+  `bridge_val`/`bridge_pval`, and `runFresh_eq_pval`, which composes M1's own
+  `runFresh_eq_pval` with the program bridge.
+
+What the class proves, and what it does not. `observe_detached` refuses a
+modeled `.loc ℓ` in a primitive observation of a valid state, and
+`encodeRead_injective` rules out a constant encoding; both are statements about
+the chosen `Value` encoding, not about Lean's object graph, reference counting
+or foreign pointers. An instance that declined to represent a real run-time
+pointer as `.loc` would not be caught, and no theorem here certifies that a
+compiled write updates in place. The array's in-place evidence therefore stays
+where it was: the `inplace` harness (`nix develop -c lake exe inplace`) and the
+`structured-unique`/`structured-closure` children that arm the check for the
+structured executor. `initial_valid` says a state built from an initializer is
+admissible, not that a machine allocation is fresh; `replace_valid` says logical
+replacement closes admissible states, not that the old object was destroyed.
+Array bounds, size preservation and "`false` exactly when out of bounds" are
+array-specific lemmas (`arrayReplace_size`, `arrayReplace_bounds`), not class
+laws, because a different state variable replaces unconditionally.
+
+The generic model is recipes and proofs, not a second backend. It adds no
+runner: the structured interface's sealed `Reader`/`Program`/`runFresh` and its
+private interpreters are unchanged, the new trees are pure data with no array,
+share or ledger in them, and `liftR`/`liftP` reveal nothing beyond the trees
+`Reader.treeOf`/`Program.treeOf` already expose. Its limits are M1's: a
+continuation is an arbitrary pure Lean function of observations, so nothing
+implies that all continuations terminate; failure is not modelled; a `fork`'s
+branches are run in either order by the semantics while the shipped executor
+runs left and then right, and no theorem claims real concurrent task execution.
+The heap is a simulation of the model's single state, with correspondence
+theorems (`readAt_step_observe`, `pstep_write_corresponds`) rather than claims
+about machine memory: writing produces a new heap value, and no address is
+preserved.
+
+`replay` is the one noncomputable definition in the theory: comparing two
+operations is a logical side condition, so it uses `Classical.propDecidable` and
+is model-only. `ScidoniaTest/StateVar.lean` prints the axioms of representative
+theorems of the theory; they are the standard kernel principles only.
 
 ## Writing an instance
 
@@ -321,10 +401,17 @@ repository, not this one, so quote code here as a compiled panel. The built
 | `Scidonia/FracPerm/Structured/Surface.lean` | The structured interface: `Reader`, `Program`, their command trees, `Init` |
 | `Scidonia/FracPerm/Structured/Executor.lean` | The sequential executor: the private interpreters and the sealed runner, `runFresh` |
 | `Scidonia/FracPerm/Structured/Model.lean` | The small-step model, the shares, and the ownership theorems |
+| `Scidonia/FracPerm/StateVar/Value.lean` | The logical value language and `NoRef` |
+| `Scidonia/FracPerm/StateVar/Class.lean` | The `LawfulStateVar` class and its law scopes |
+| `Scidonia/FracPerm/StateVar/Surface.lean` | The generic recipes: `RTree`, `PTree` and their binds |
+| `Scidonia/FracPerm/StateVar/Model.lean` | The generic small-step model: `run`/`replay`, `Step`, `Eval`, shares, `PStep`, `SafeTree` |
+| `Scidonia/FracPerm/StateVar/Heap.lean` | The single-root heap: `At`, `ReadAt`, `WriteAt`, frames, snapshots, shares |
+| `Scidonia/FracPerm/StateVar/Array.lean` | The array witness, `liftR`/`liftP`, the bridges, and the `runFresh` equation |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
 | `ScidoniaTest/Structured.lean` | The structured interface's protocol and sealing checks |
+| `ScidoniaTest/StateVar.lean` | The generic state variable's witness, model, bridge, and negative-law checks |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
