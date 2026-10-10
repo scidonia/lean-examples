@@ -285,6 +285,32 @@ children exercise: they exit zero with the check armed, having printed
 `check-enabled=true`, so the check was in the write path and had nothing to
 report.
 
+## Slides
+
+`Slides/` holds a reveal.js deck on the fractional-permission work, built
+with the generator of the sibling checkout `../vericoding-tutorial`
+(`scripts/build_deck.py`, Python standard library only). It runs under this
+repository's dev shell through `lake env`, so every Lean panel is compiled
+against this repository's library on its pinned toolchain, and a panel Lean
+rejects fails the build. Build the libraries first; the deck imports
+`ScidoniaTest`:
+
+```sh
+nix develop -c lake build ScidoniaTest
+nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
+  --prose Slides/permissions.md \
+  --example Slides/RoundTrip.lean \
+  --prose Slides/runtime.md \
+  --title "Fractional permissions in Lean 4" \
+  --subtitle "Erased ghost state, Hoare monads and in-place update" \
+  --output Slides/fracperm.html
+```
+
+The prose format and the panel rules are those of the generator, documented in
+`../vericoding-tutorial/AGENTS.md`; a `@path` quotation resolves in that
+repository, not this one, so quote code here as a compiled panel. The built
+`Slides/*.html` is not committed.
+
 ## Layout
 
 | Path | Contents |
@@ -302,4 +328,5 @@ report.
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
+| `Slides/` | The slide deck's sources: two prose series and a stepped proof |
 | `Main.lean` | Entry point of the `scidonia` executable |

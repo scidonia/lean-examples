@@ -85,6 +85,9 @@
               pkgs.git
               pkgs.coreutils
               pkgs.zstd
+              # The slide deck build (`Slides/`) runs the reveal.js generator,
+              # a Python standard-library script.
+              pkgs.python3
               config.treefmt.build.wrapper
             ];
 
