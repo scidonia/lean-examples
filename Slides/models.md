@@ -58,7 +58,7 @@ class Shown (σ : Type) (Init : outParam Type)
     encodeRead o x = encodeRead o y → x = y
   observe_detached : ∀ (ℓ : Loc) o s,
     Valid s → NoRef ℓ (encodeRead o (observe o s))
--- the library's class has exactly these fields
+-- the library's class has all these fields, at these types
 example [i : LawfulStateVar σ I R W] : Shown σ I R W := { i with }
 ```
 

@@ -85,7 +85,7 @@ class FracObject (σ : Type) (ReadOp : outParam Type)
   check_eq : ∀ site o s, check site o s = s
 end Shown
 
--- The library's class has exactly these fields.
+-- The library's class has all these fields, at these types.
 example [i : Scidonia.FracPerm.FracObject σ R W] :
     Shown.FracObject σ R W := { i with }
 ```
