@@ -1,7 +1,7 @@
 # Ensuring linearity: findings, options and a proposal
 
 Status: proposal for discussion. Repository `Scidonia/lean` (`master`), Lean `4.35.0-rc3`, core + `std`, this toolchain's x86-64 Linux compiler.
-Scope: what our fractional-permission work establishes, where linearity fails, and what could close the gap.
+Scope: what our fractional-permission work establishes, where linearity fails, and what could close the gap. **The model is single-threaded:** `parallel` in the structured interface is notional (a fork/join *semantics*), the shipped executor runs branches one after another, and no task, thread or scheduler primitive is used. Nothing here depends on concurrency, and the one concurrency observation in §3.4 is a boundary note about a direction not taken.
 Claim discipline used throughout: every statement is labelled **proved** (kernel-checked), **structural** (a property of the exported surface, shown by refused probes), **measured** (a named harness case on this toolchain) or **trusted** (compiler, runtime, library primitives). Measured claims are measured *on the paths named*, and generated-code inspection is compiler evidence, not proof.
 
 ## 1. The question
@@ -60,7 +60,7 @@ So L1 and L2 are theorems about a model; L3 is a property of an interface; L3′
 
 | Observation | Evidence (and its kind) |
 | --- | --- |
-| An array captured by `Task.spawn` is marked thread-shared, `lean_is_exclusive` is false for it thereafter, and the first write after the join copies | measured (`AGENTS.md:244`) |
+| An array captured by `Task.spawn` is marked thread-shared, `lean_is_exclusive` is false for it thereafter, and the first write after the join copies — **outside this model**: it is a fact about Lean's runtime, recorded because it bounds any future multi-threaded backend, not because this model uses threads | measured (`AGENTS.md:244`) |
 | A compiled array *literal* is persistent, never exclusive, so it always copies | measured: `literal-copies` |
 | Identical expressions (`Array.replicate n 0` twice) are merged into one shared array | measured in the first in-place probe |
 | A projection kept alive across a run makes the write copy | measured; the harness fix is recorded in `ScidoniaInPlace/Main.lean` |
