@@ -683,6 +683,7 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
   --prose Slides/runtime.md \
   --prose Slides/models.md \
   --example Slides/NoRefEverywhere.lean \
+  --prose Slides/sealed.md \
   --prose Slides/outlook.md \
   --title "Fractional permissions in Lean 4" \
   --subtitle "Erased ghost state, Hoare monads and in-place update" \
