@@ -22,28 +22,158 @@ example (a : Array UInt64) :
 - McBride: the one-hole contexts of a datatype are its ==derivative==, computed from the description.
 - The fix for the leak: the *library* owns reading, writing and encoding; authors only describe.
 
-## Layouts and observations
-- A **layout** is the state's shape: a leaf, a binary struct, or an array.
-- An **observation** is what a read may return: unit, nat, words, booleans, and sums, options and pairs of them.
-- Observations contain ==no array, no struct of the state, no reference== — by construction of the type.
+## The kit
+- To make the library own reads, the description must be data the library can compute with: a *code* for each type, and a function interpreting the code. This is the levitation pattern.
+- The kit has two universes, one for what the state is and one for what a read may return. Typed paths connect them, with a predicate saying when a path ends at an observation.
+- Then a canonical encoding, the predicates the laws are stated in, and a derivative for writes.
+- Each of the next slides gives one piece, checked against the library.
 
-```two universes
+```the kit's signatures
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar Layout5
+
+example : ObsDesc → Type := ObsEl          -- observation codes
+example : Layout → Type := State           -- layout codes
+example : Layout → Type := Path            -- addresses
+example {d : Layout} : Path d → Layout := At
+example : (o : ObsDesc) → ObsEl o → Value := encodeObs
+example : Loc → Value → Prop := NoRef
+example {d : Layout} : Path d → Path d → Prop := Disjoint
+```
+
+## Kit 1 — the observation universe
+- `ObsDesc` is the code for what a read may return: atoms (unit, naturals, words, booleans), closed under sum, option and pair.
+- `ObsEl` interprets a code as a Lean type, one clause per constructor.
+- No code denotes an array, a struct of the state, or a location. That is the whole point: ==a type outside this universe cannot be a read result==.
+- The panel's `code` function matches every constructor, so it compiles only if the library has exactly these.
+
+```ObsDesc and ObsEl
 import Scidonia.FracPerm
 open Scidonia.FracPerm.StateVar.Layout5
 
--- an array of structs of two words
-example : State (.arr (.struct (.leaf .uint) (.leaf .uint)))
-    = Array (UInt64 × UInt64) := rfl
+def code : ObsDesc → String
+  | .unit => "unit" | .nat => "nat" | .uint => "word" | .bool => "bool"
+  | .sum _ _ => "sum" | .option _ => "option" | .pair _ _ => "pair"
 
--- what a read may return
-example : ObsEl (.option (.pair .uint .bool))
-    = Option (UInt64 × Bool) := rfl
+example : ObsEl .uint = UInt64 := rfl
+example : ObsEl .bool = Bool := rfl
+example (a b : ObsDesc) : ObsEl (.sum a b) = (ObsEl a ⊕ ObsEl b) := rfl
+example (a : ObsDesc) : ObsEl (.option a) = Option (ObsEl a) := rfl
+example (a b : ObsDesc) : ObsEl (.pair a b) = (ObsEl a × ObsEl b) := rfl
 ```
 
-## Paths, and the read that cannot be written
-- `ObsPath d`: a path whose end is *proved* to be an observation leaf.
-- At an array root there is no such proof — a whole-array read is a ==type error==.
-- Every read result is detached: `encodeObs` has no `.loc` case, for every observation.
+## Kit 2 — the layout universe
+- `Layout` is the code for what the state *is*: a stored observation (`leaf`), a binary `struct`, or an `arr` of a layout. Nesting gives arrays of structs, arrays of arrays, and so on.
+- `State` interprets a layout as the Lean type the program actually holds: pairs and `Array`s, which Lean updates in place when they are uniquely owned.
+- Layouts may contain arrays; observations may not. The asymmetry between the two universes is what makes reads safe.
+
+```Layout and State
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar.Layout5
+
+def shape : Layout → String
+  | .leaf _ => "leaf" | .struct _ _ => "struct" | .arr _ => "array"
+
+example (o : ObsDesc) : State (.leaf o) = ObsEl o := rfl
+example (a b : Layout) : State (.struct a b) = (State a × State b) := rfl
+example (a : Layout) : State (.arr a) = Array (State a) := rfl
+
+example : State (.arr (.struct (.leaf .uint) (.leaf .uint)))
+    = Array (UInt64 × UInt64) := rfl
+```
+
+## Kit 3 — typed paths
+- `Path d` is an address inside layout `d`, a datatype indexed by the code it walks. `left` and `right` only exist under a `struct`, and `index i` only under an `arr`.
+- `At p` computes the layout at the end of the path.
+- The struct steps are checked statically by the index. Only an array index can fail, at run time, when it is out of bounds.
+
+```Path and At
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar.Layout5
+
+def step : {d : Layout} → Path d → String
+  | _, .here => "here" | _, .left _ => "left"
+  | _, .right _ => "right" | _, .index _ _ => "index"
+
+example {a b : Layout} (p : Path a) : Path (.struct a b) := .left p
+example {a : Layout} (i : Nat) (p : Path a) : Path (.arr a) := .index i p
+
+example (d : Layout) : At (Path.here : Path d) = d := rfl
+example {a b : Layout} (p : Path a) :
+    At (Path.left (b := b) p) = At p := rfl
+example {a : Layout} (i : Nat) (p : Path a) :
+    At (Path.index i p) = At p := rfl
+```
+
+## Kit 4 — observable paths and the canonical encoding
+- `ObsPath d` is a path *together with a proof* that it ends at an observation leaf: `At path = .leaf obs`. A path to an array or a struct has no such proof.
+- `encodeObs` is the library's one encoding from observations to `Value`. It has a clause per code and none produces `.loc`.
+- An instance author supplies neither the predicate nor the encoding.
+
+```ObsPath and encodeObs
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar Layout5
+
+structure Shown (d : Layout) where
+  path : Path d
+  obs : ObsDesc
+  leaf : At path = .leaf obs
+example (p : ObsPath d) : Shown d := { p with }
+
+example (n : UInt64) : encodeObs .uint n = .uint n := rfl
+example (a b : ObsDesc) (x : ObsEl a) :
+    encodeObs (.sum a b) (.inl x) = .inl (encodeObs a x) := rfl
+example (a b : ObsDesc) (x : ObsEl a) (y : ObsEl b) :
+    encodeObs (.pair a b) (x, y) = .pair (encodeObs a x) (encodeObs b y) := rfl
+```
+
+## Kit 5 — the predicates
+- `NoRef ℓ v`: `v` contains no `.loc ℓ`, however deeply nested. This is the detachment the laws demand.
+- `Disjoint p q`: neither path extends the other, so the paths are not equal, not ancestor and descendant, and not through the same index. This is what frames are stated over.
+- From the clauses alone, every encoded observation is detached, for every code. That is proved once, by induction on `ObsDesc`.
+
+```NoRef and Disjoint
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar Layout5
+
+example (ℓ k : Loc) : NoRef ℓ (.loc k) = (k ≠ ℓ) := rfl
+example (ℓ : Loc) (x y : Value) :
+    NoRef ℓ (.pair x y) = (NoRef ℓ x ∧ NoRef ℓ y) := rfl
+
+example {d : Layout} (p q : Path d) :
+    Disjoint p q = ((∀ r : Path (At p), q ≠ p.append r) ∧
+                    (∀ r : Path (At q), p ≠ q.append r)) := rfl
+
+example (ℓ : Loc) (o : ObsDesc) (x : ObsEl o) : NoRef ℓ (encodeObs o x) :=
+  encodeObs_noRef ℓ o x
+```
+
+## Kit 6 — the derivative, and the operations
+- A write needs a one-hole context: the state with the addressed part removed. It is the derivative of the layout:
+  - at a leaf, the hole is the whole value;
+  - `∂(struct a b) = ∂a × State b + State a × ∂b`, so one side keeps a hole and the other is kept whole;
+  - `∂(arr a) = index × siblings × ∂a`, the element taken out and the array kept with a placeholder.
+- `open` splits a state into a context and its focus, and `plug` fills the hole. Both are private: they are the specification, and the executed `setLeaf` is proved equal to them.
+- Clients get two operations, and theorems about them.
+
+```operations
+import Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar Layout5
+
+example {d : Layout} (p : ObsPath d) : State d → Option Value := read? p
+example {d : Layout} (p : ObsPath d) (x : ObsEl p.obs) :
+    State d → State d × Bool := setLeaf p x
+
+-- a write leaves every disjoint path's read unchanged
+example {d : Layout} (p q : ObsPath d) (s s' : State d) (new : ObsEl p.obs)
+    (hd : Disjoint p.path q.path) (hw : setLeaf p new s = (s', true)) :
+    read? q s' = read? q s :=
+  read_frame p q s s' new hd hw
+```
+
+## Using the kit
+- A concrete layout, an observable path, and a read.
+- At an array root there is no observable path, so a whole-array read is a ==type error==.
 
 ```reads
 import Scidonia.FracPerm
