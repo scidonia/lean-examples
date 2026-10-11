@@ -693,7 +693,9 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
 The prose format and the panel rules are those of the generator, documented in
 `../vericoding-tutorial/AGENTS.md`; a `@path` quotation resolves in that
 repository, not this one, so quote code here as a compiled panel. The built
-`Slides/*.html` is not committed.
+`Slides/fracperm.html` is committed, so the deck can be viewed on GitHub Pages
+at https://scidonia.github.io/lean-examples/Slides/fracperm.html; rebuild it
+and commit it with any change to the deck's sources.
 
 ## Layout
 
