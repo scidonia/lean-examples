@@ -26,7 +26,7 @@ example (a : Array UInt64) :
 - To make the library own reads, the description must be data the library can compute with: a *code* for each type, and a function interpreting the code. This is the levitation pattern.
 - The kit has two universes, one for what the state is and one for what a read may return. Typed paths connect them, with a predicate saying when a path ends at an observation.
 - Then a canonical encoding, the predicates the laws are stated in, and a derivative for writes.
-- Each of the next slides gives one piece, checked against the library.
+- Each of the next slides gives one piece. The definitions are quoted ==verbatim from this repository's source==, so the deck build fails if the library changes.
 
 ```the kit's signatures
 import Scidonia.FracPerm
@@ -41,134 +41,213 @@ example : Loc → Value → Prop := NoRef
 example {d : Layout} : Path d → Path d → Prop := Disjoint
 ```
 
-## Kit 1 — the observation universe
-- `ObsDesc` is the code for what a read may return: atoms (unit, naturals, words, booleans), closed under sum, option and pair.
-- `ObsEl` interprets a code as a Lean type, one clause per constructor.
-- No code denotes an array, a struct of the state, or a location. That is the whole point: ==a type outside this universe cannot be a read result==.
-- The panel's `code` function matches every constructor, so it compiles only if the library has exactly these.
+## Kit 1 — the observation codes
+- `ObsDesc` is the code for what a read may return: four atoms, and three ways to combine them.
+- Quoted from `Scidonia/FracPerm/StateVar/Layout5.lean`. A quotation must be verbatim, so the deck build ==fails== if the library's definition changes.
+- No code is an array, a struct of the state, or a reference, so a type outside this universe cannot be a read result.
 
-```ObsDesc and ObsEl
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar.Layout5
-
-def code : ObsDesc → String
-  | .unit => "unit" | .nat => "nat" | .uint => "word" | .bool => "bool"
-  | .sum _ _ => "sum" | .option _ => "option" | .pair _ _ => "pair"
-
-example : ObsEl .uint = UInt64 := rfl
-example : ObsEl .bool = Bool := rfl
-example (a b : ObsDesc) : ObsEl (.sum a b) = (ObsEl a ⊕ ObsEl b) := rfl
-example (a : ObsDesc) : ObsEl (.option a) = Option (ObsEl a) := rfl
-example (a b : ObsDesc) : ObsEl (.pair a b) = (ObsEl a × ObsEl b) := rfl
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+inductive ObsDesc where
+  /-- The unit type. -/
+  | unit
+  /-- The type of naturals. -/
+  | nat
+  /-- The type of unsigned machine words. -/
+  | uint
+  /-- The type of booleans. -/
+  | bool
+  /-- A sum of two described types. -/
+  | sum (left right : ObsDesc)
+  /-- An optional described type. -/
+  | option (elem : ObsDesc)
+  /-- A pair of two described types. -/
+  | pair (left right : ObsDesc)
+deriving DecidableEq, Repr
 ```
 
-## Kit 2 — the layout universe
-- `Layout` is the code for what the state *is*: a stored observation (`leaf`), a binary `struct`, or an `arr` of a layout. Nesting gives arrays of structs, arrays of arrays, and so on.
-- `State` interprets a layout as the Lean type the program actually holds: pairs and `Array`s, which Lean updates in place when they are uniquely owned.
-- Layouts may contain arrays; observations may not. The asymmetry between the two universes is what makes reads safe.
+## Kit 2 — the observation interpretation
+- `ObsEl` gives each code its meaning, by recursion on the code: one clause per constructor.
+- The atoms are immutable data, and sum, option and pair are built from them. ==No clause denotes an array or a struct of the state==, which is what makes every `ObsEl o` a type of values.
+- A read returns an element of one of these types and nothing else.
 
-```Layout and State
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar.Layout5
-
-def shape : Layout → String
-  | .leaf _ => "leaf" | .struct _ _ => "struct" | .arr _ => "array"
-
-example (o : ObsDesc) : State (.leaf o) = ObsEl o := rfl
-example (a b : Layout) : State (.struct a b) = (State a × State b) := rfl
-example (a : Layout) : State (.arr a) = Array (State a) := rfl
-
-example : State (.arr (.struct (.leaf .uint) (.leaf .uint)))
-    = Array (UInt64 × UInt64) := rfl
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- The type a leaf description denotes. Units, naturals, words and booleans
+are immutable data; a sum, option or pair is built from them. No case is an
+array, a struct or a reference. -/
+abbrev ObsEl : ObsDesc → Type
+  | .unit => Unit
+  | .nat => Nat
+  | .uint => UInt64
+  | .bool => Bool
+  | .sum a b => Sum (ObsEl a) (ObsEl b)
+  | .option a => Option (ObsEl a)
+  | .pair a b => ObsEl a × ObsEl b
 ```
 
-## Kit 3 — typed paths
-- `Path d` is an address inside layout `d`, a datatype indexed by the code it walks. `left` and `right` only exist under a `struct`, and `index i` only under an `arr`.
-- `At p` computes the layout at the end of the path.
+## Kit 3 — the layout codes
+- `Layout` is the code for what the state *is*: a stored observation (`leaf`), a binary `struct` — so arbitrarily many fields by nesting — or an `arr` of a layout.
+- Codes may contain arrays; observations may not. That asymmetry is what makes reads safe.
+
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+inductive Layout where
+  /-- A leaf of the observation universe. -/
+  | leaf (o : ObsDesc)
+  /-- A binary product of two layouts. -/
+  | struct (left right : Layout)
+  /-- An array of a layout. -/
+  | arr (elem : Layout)
+deriving DecidableEq, Repr
+```
+
+## Kit 4 — the state type
+- `State` is the ==definition of the state type==: it interprets a layout as the Lean type the program holds — pairs, and `Array`s.
+- This is the `State layout` the sealed class asks a type to *be*, in `rep : σ = State layout`.
+- These are the types Lean updates in place when they are uniquely owned, which is what the `inplace` harness measures.
+- Nesting is unbounded, so an array of structs of two words denotes `Array (UInt64 × UInt64)`.
+
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- The state type a layout denotes: an element of the observation universe, a
+pair of states, or an array of states. -/
+abbrev State : Layout → Type
+  | .leaf o => ObsEl o
+  | .struct a b => State a × State b
+  | .arr a => Array (State a)
+```
+
+## Kit 5 — typed paths
+- `Path d` is an address inside layout `d`, indexed by the code it walks: `left` and `right` only exist under a `struct`, and `index i` only under an `arr`.
+- `At` computes the layout at the end of a path.
 - The struct steps are checked statically by the index. Only an array index can fail, at run time, when it is out of bounds.
 
-```Path and At
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar.Layout5
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+inductive Path : Layout → Type where
+  /-- The path to the whole layout. -/
+  | here {d : Layout} : Path d
+  /-- Descend into the left component of a struct. -/
+  | left {a b : Layout} (p : Path a) : Path (.struct a b)
+  /-- Descend into the right component of a struct. -/
+  | right {a b : Layout} (p : Path b) : Path (.struct a b)
+  /-- Descend into element `i` of an array. -/
+  | index {a : Layout} (i : Nat) (p : Path a) : Path (.arr a)
+deriving DecidableEq
 
-def step : {d : Layout} → Path d → String
-  | _, .here => "here" | _, .left _ => "left"
-  | _, .right _ => "right" | _, .index _ _ => "index"
-
-example {a b : Layout} (p : Path a) : Path (.struct a b) := .left p
-example {a : Layout} (i : Nat) (p : Path a) : Path (.arr a) := .index i p
-
-example (d : Layout) : At (Path.here : Path d) = d := rfl
-example {a b : Layout} (p : Path a) :
-    At (Path.left (b := b) p) = At p := rfl
-example {a : Layout} (i : Nat) (p : Path a) :
-    At (Path.index i p) = At p := rfl
+/-- The layout at the end of a path. -/
+abbrev At {d : Layout} : Path d → Layout
+  | .here => d
+  | .left p => At p
+  | .right p => At p
+  | .index _ p => At p
 ```
 
-## Kit 4 — observable paths and the canonical encoding
-- `ObsPath d` is a path *together with a proof* that it ends at an observation leaf: `At path = .leaf obs`. A path to an array or a struct has no such proof.
-- `encodeObs` is the library's one encoding from observations to `Value`. It has a clause per code and none produces `.loc`.
+## Kit 6 — observable paths and the canonical encoding
+- `ObsPath d` is a path *together with a proof* that it ends at an observation leaf: `At path = .leaf obs`. A path to an array or a struct has no such proof, so a whole-array read cannot even be written down.
+- `encodeObs` is the library's one encoding from observations to `Value`. It has a clause per code ==and none produces `.loc`==.
 - An instance author supplies neither the predicate nor the encoding.
 
-```ObsPath and encodeObs
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar Layout5
-
-structure Shown (d : Layout) where
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- A read path: a path together with the leaf description its end must have.
+The proof field is why no `ObsPath` exists for a `.struct` or `.arr` root —
+`At p = .leaf o` has no solution there — so a whole-array read cannot be
+written down, let alone performed. -/
+structure ObsPath (d : Layout) where
+  /-- The path. -/
   path : Path d
+  /-- The leaf description at the path's end. -/
   obs : ObsDesc
+  /-- The end of the path is that leaf. -/
   leaf : At path = .leaf obs
-example (p : ObsPath d) : Shown d := { p with }
-
-example (n : UInt64) : encodeObs .uint n = .uint n := rfl
-example (a b : ObsDesc) (x : ObsEl a) :
-    encodeObs (.sum a b) (.inl x) = .inl (encodeObs a x) := rfl
-example (a b : ObsDesc) (x : ObsEl a) (y : ObsEl b) :
-    encodeObs (.pair a b) (x, y) = .pair (encodeObs a x) (encodeObs b y) := rfl
 ```
 
-## Kit 5 — the predicates
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+def encodeObs : (o : ObsDesc) → ObsEl o → Value
+  | .unit, _ => .unit
+  | .nat, n => .nat n
+  | .uint, n => .uint n
+  | .bool, b => .bool b
+  | .sum a _, Sum.inl x => .inl (encodeObs a x)
+  | .sum _ b, Sum.inr y => .inr (encodeObs b y)
+  | .option _, none => .none
+  | .option a, some x => .some (encodeObs a x)
+  | .pair a b, (x, y) => .pair (encodeObs a x) (encodeObs b y)
+```
+
+## Kit 7 — the predicates
 - `NoRef ℓ v`: `v` contains no `.loc ℓ`, however deeply nested. This is the detachment the laws demand.
 - `Disjoint p q`: neither path extends the other, so the paths are not equal, not ancestor and descendant, and not through the same index. This is what frames are stated over.
-- From the clauses alone, every encoded observation is detached, for every code. That is proved once, by induction on `ObsDesc`.
+- From the clauses alone, every encoded observation is detached, for every code: `encodeObs_noRef`, proved once by induction on `ObsDesc`.
 
-```NoRef and Disjoint
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar Layout5
-
-example (ℓ k : Loc) : NoRef ℓ (.loc k) = (k ≠ ℓ) := rfl
-example (ℓ : Loc) (x y : Value) :
-    NoRef ℓ (.pair x y) = (NoRef ℓ x ∧ NoRef ℓ y) := rfl
-
-example {d : Layout} (p q : Path d) :
-    Disjoint p q = ((∀ r : Path (At p), q ≠ p.append r) ∧
-                    (∀ r : Path (At q), p ≠ q.append r)) := rfl
-
-example (ℓ : Loc) (o : ObsDesc) (x : ObsEl o) : NoRef ℓ (encodeObs o x) :=
-  encodeObs_noRef ℓ o x
+```@../lean/Scidonia/FracPerm/StateVar/Value.lean
+def NoRef (ℓ : Loc) : Value → Prop
+  | .loc k    => k ≠ ℓ
+  | .some v   => NoRef ℓ v
+  | .inl v    => NoRef ℓ v
+  | .inr v    => NoRef ℓ v
+  | .pair x y => NoRef ℓ x ∧ NoRef ℓ y
+  | _         => True
 ```
 
-## Kit 6 — the derivative, and the operations
-- A write needs a one-hole context: the state with the addressed part removed. It is the derivative of the layout:
-  - at a leaf, the hole is the whole value;
-  - `∂(struct a b) = ∂a × State b + State a × ∂b`, so one side keeps a hole and the other is kept whole;
-  - `∂(arr a) = index × siblings × ∂a`, the element taken out and the array kept with a placeholder.
-- `open` splits a state into a context and its focus, and `plug` fills the hole. Both are private: they are the specification, and the executed `setLeaf` is proved equal to them.
-- Clients get two operations, and theorems about them.
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- Two paths into the same layout are disjoint when neither goes through the
+other: `q` is not `p` extended by anything, and `p` is not `q` extended by
+anything. This excludes the equal paths and every ancestor/descendant pair,
+including two paths through the same array index. -/
+def Disjoint {d : Layout} (p q : Path d) : Prop :=
+  (∀ r : Path (At p), q ≠ Path.append p r) ∧ (∀ r : Path (At q), p ≠ Path.append q r)
+```
 
-```operations
-import Scidonia.FracPerm
-open Scidonia.FracPerm.StateVar Layout5
+## Kit 8 — the one-hole context
+- A write needs the state with the addressed part removed: the *one-hole context*, which is the ==derivative== of the layout.
+- At a leaf the hole is the whole value; at a struct one component keeps the hole and the other is held whole, `∂(struct a b) = ∂a × State b + State a × ∂b`; at an array the element is taken out and the array is held with a placeholder, together with the index that puts it back, `∂(arr a) = index × siblings × ∂a`.
+- It is private: it is the *specification* of a write, not part of a client's surface.
 
-example {d : Layout} (p : ObsPath d) : State d → Option Value := read? p
-example {d : Layout} (p : ObsPath d) (x : ObsEl p.obs) :
-    State d → State d × Bool := setLeaf p x
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- The one-hole context of a path: the parts of a state other than the focus.
+The array case keeps the array the take-out left and the focus's index. -/
+private inductive Context : (d : Layout) → Path d → Type where
+  /-- The whole state is the focus. -/
+  | here (d : Layout) : Context d .here
+  /-- The left component is inside; the right is held. -/
+  | left {a b : Layout} {p : Path a} (inner : Context a p) (right : State b) :
+      Context (.struct a b) (.left p)
+  /-- The right component is inside; the left is held. -/
+  | right {a b : Layout} {p : Path b} (left : State a) (inner : Context b p) :
+      Context (.struct a b) (.right p)
+  /-- Element `i` is inside; the array the take-out left is held, and
+  `i < siblings.size` is what lets `plug` land the focus back at the index. -/
+  | index {a : Layout} {p : Path a} (i : Nat) (siblings : Array (State a))
+      (bound : i < siblings.size) (inner : Context a p) : Context (.arr a) (.index i p)
+```
 
--- a write leaves every disjoint path's read unchanged
-example {d : Layout} (p q : ObsPath d) (s s' : State d) (new : ObsEl p.obs)
-    (hd : Disjoint p.path q.path) (hw : setLeaf p new s = (s', true)) :
-    read? q s' = read? q s :=
-  read_frame p q s s' new hd hw
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- Fill a one-hole context with a focus: the state the context describes, with
+the focus in its place. -/
+private def plug : {d : Layout} → {p : Path d} → Context d p → State (At p) → State d
+  | _, _, .here _, x => x
+  | _, _, .left inner right, x => (plug inner x, right)
+  | _, _, .right left inner, x => (left, plug inner x)
+  | _, _, .index i siblings bound inner, x =>
+      plugAt siblings i bound (plug inner x)
+```
+
+## Kit 9 — the operations
+- `read?` returns the library's encoding of the observation at the path, or `none` when the path addresses nothing.
+- `setLeaf` returns the new state and whether the write took effect. It asks `inBounds` first, then runs the fused update, and casts the observation to the focus type exactly once.
+- The theorems about them: `read_detached`, `snapshot_after_setLeaf` (the old value is bound to the old state), `read_frame` (disjoint paths), `setLeaf_failed` (a failed write leaves the state alone).
+
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+/-- Read a leaf path: the library's encoding of the observation at the path's
+end, or `none` when the path does not address anything. The result is an
+immutable `Value`; there is no route from here to the state or a subtree. -/
+def read? {d : Layout} (p : ObsPath d) (s : State d) : Option Value :=
+  (leafAt? p.path p.obs p.leaf s).map (encodeObs p.obs)
+```
+
+```@../lean/Scidonia/FracPerm/StateVar/Layout5.lean
+def setLeaf {d : Layout} (p : ObsPath d) (x : ObsEl p.obs) (s : State d) :
+    State d × Bool :=
+  if inBounds p.path s then
+    (setAt p.path (cast (congrArg State p.leaf.symm) x) s, true)
+  else (s, false)
 ```
 
 ## Using the kit

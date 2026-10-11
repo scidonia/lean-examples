@@ -1035,7 +1035,7 @@ open <span class="tok-fun">Scidonia.FracPerm.StateVar</span>
       (self := <span class="tok-fun">ScidoniaTest.Model5.leakyArrayStateVar</span>) () a = a :=
   <span class="tok-fun">ScidoniaTest.Model5.leakyArray_read_returns_state</span> a</code></pre></div></div></div></section>
 <section class="prose"><h3>Reads are addresses, writes are zippers</h3><ul><li>A read follows a typed path — field, index, field — to a leaf, and returns a <em>detached</em> value there.</li><li>A write opens a zipper at the path: take the element out, update it while it is the only reference, put it back.</li><li>McBride: the one-hole contexts of a datatype are its <mark class="pop">derivative</mark>, computed from the description.</li><li>The fix for the leak: the <em>library</em> owns reading, writing and encoding; authors only describe.</li></ul></section>
-<section class="prose"><h3>The kit</h3><div class="prose-cols"><div class="prose-text"><ul><li>To make the library own reads, the description must be data the library can compute with: a <em>code</em> for each type, and a function interpreting the code. This is the levitation pattern.</li><li>The kit has two universes, one for what the state is and one for what a read may return. Typed paths connect them, with a predicate saying when a path ends at an observation.</li><li>Then a canonical encoding, the predicates the laws are stated in, and a derivative for writes.</li><li>Each of the next slides gives one piece, checked against the library.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">the kit&#x27;s signatures</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
+<section class="prose"><h3>The kit</h3><div class="prose-cols"><div class="prose-text"><ul><li>To make the library own reads, the description must be data the library can compute with: a <em>code</em> for each type, and a function interpreting the code. This is the levitation pattern.</li><li>The kit has two universes, one for what the state is and one for what a read may return. Typed paths connect them, with a predicate saying when a path ends at an observation.</li><li>Then a canonical encoding, the predicates the laws are stated in, and a derivative for writes.</li><li>Each of the next slides gives one piece. The definitions are quoted <mark class="pop">verbatim from this repository&#x27;s source</mark>, so the deck build fails if the library changes.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">the kit&#x27;s signatures</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
 open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-type">Layout5</span>
 
 <span class="tok-keyword">example</span> : <span class="tok-type">ObsDesc</span> → <span class="tok-type">Type</span> := <span class="tok-type">ObsEl</span>          <span class="tok-comment">-- observation codes</span>
@@ -1045,84 +1045,127 @@ open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-ty
 <span class="tok-keyword">example</span> : (o : <span class="tok-type">ObsDesc</span>) → <span class="tok-type">ObsEl</span> o → <span class="tok-type">Value</span> := encodeObs
 <span class="tok-keyword">example</span> : <span class="tok-type">Loc</span> → <span class="tok-type">Value</span> → <span class="tok-type">Prop</span> := <span class="tok-type">NoRef</span>
 <span class="tok-keyword">example</span> {d : <span class="tok-type">Layout</span>} : <span class="tok-type">Path</span> d → <span class="tok-type">Path</span> d → <span class="tok-type">Prop</span> := <span class="tok-type">Disjoint</span></code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 1 — the observation universe</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>ObsDesc</code> is the code for what a read may return: atoms (unit, naturals, words, booleans), closed under sum, option and pair.</li><li><code>ObsEl</code> interprets a code as a Lean type, one clause per constructor.</li><li>No code denotes an array, a struct of the state, or a location. That is the whole point: <mark class="pop">a type outside this universe cannot be a read result</mark>.</li><li>The panel&#x27;s <code>code</code> function matches every constructor, so it compiles only if the library has exactly these.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">ObsDesc and ObsEl</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar.Layout5</span>
+<section class="prose"><h3>Kit 1 — the observation codes</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>ObsDesc</code> is the code for what a read may return: four atoms, and three ways to combine them.</li><li>Quoted from <code>Scidonia/FracPerm/StateVar/Layout5.lean</code>. A quotation must be verbatim, so the deck build <mark class="pop">fails</mark> if the library&#x27;s definition changes.</li><li>No code is an array, a struct of the state, or a reference, so a type outside this universe cannot be a read result.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">ObsDesc</span> <span class="tok-keyword">where</span>
+  /<span class="tok-comment">-- The unit type. -/</span>
+  | <span class="tok-ctor">unit</span>
+  /<span class="tok-comment">-- The type of naturals. -/</span>
+  | <span class="tok-ctor">nat</span>
+  /<span class="tok-comment">-- The type of unsigned machine words. -/</span>
+  | <span class="tok-ctor">uint</span>
+  /<span class="tok-comment">-- The type of booleans. -/</span>
+  | <span class="tok-ctor">bool</span>
+  /<span class="tok-comment">-- A sum of two described types. -/</span>
+  | <span class="tok-ctor">sum</span> (<span class="tok-tactic">left</span> <span class="tok-tactic">right</span> : <span class="tok-type">ObsDesc</span>)
+  /<span class="tok-comment">-- An optional described type. -/</span>
+  | <span class="tok-ctor">option</span> (elem : <span class="tok-type">ObsDesc</span>)
+  /<span class="tok-comment">-- A pair of two described types. -/</span>
+  | <span class="tok-ctor">pair</span> (<span class="tok-tactic">left</span> <span class="tok-tactic">right</span> : <span class="tok-type">ObsDesc</span>)
+deriving <span class="tok-type">DecidableEq</span>, <span class="tok-type">Repr</span></code></pre></div></div></div></section>
+<section class="prose"><h3>Kit 2 — the observation interpretation</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>ObsEl</code> gives each code its meaning, by recursion on the code: one clause per constructor.</li><li>The atoms are immutable data, and sum, option and pair are built from them. <mark class="pop">No clause denotes an array or a struct of the state</mark>, which is what makes every <code>ObsEl o</code> a type of values.</li><li>A read returns an element of one of these types and nothing else.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- The type a leaf description denotes. Units, naturals, words and booleans</span>
+are immutable data; a <span class="tok-ctor">sum</span>, <span class="tok-ctor">option</span> or <span class="tok-ctor">pair</span> is built from them. <span class="tok-type">No</span> <span class="tok-keyword">case</span> is an
+array, a <span class="tok-ctor">struct</span> or a reference. -/
+abbrev <span class="tok-type">ObsEl</span> : <span class="tok-type">ObsDesc</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.unit</span> =&gt; <span class="tok-type">Unit</span>
+  | <span class="tok-ctor">.nat</span> =&gt; <span class="tok-type">Nat</span>
+  | <span class="tok-ctor">.uint</span> =&gt; <span class="tok-type">UInt64</span>
+  | <span class="tok-ctor">.bool</span> =&gt; <span class="tok-type">Bool</span>
+  | <span class="tok-ctor">.sum</span> a b =&gt; <span class="tok-type">Sum</span> (<span class="tok-type">ObsEl</span> a) (<span class="tok-type">ObsEl</span> b)
+  | <span class="tok-ctor">.option</span> a =&gt; <span class="tok-type">Option</span> (<span class="tok-type">ObsEl</span> a)
+  | <span class="tok-ctor">.pair</span> a b =&gt; <span class="tok-type">ObsEl</span> a × <span class="tok-type">ObsEl</span> b</code></pre></div></div></div></section>
+<section class="prose"><h3>Kit 3 — the layout codes</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>Layout</code> is the code for what the state <em>is</em>: a stored observation (<code>leaf</code>), a binary <code>struct</code> — so arbitrarily many fields by nesting — or an <code>arr</code> of a layout.</li><li>Codes may contain arrays; observations may not. That asymmetry is what makes reads safe.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">Layout</span> <span class="tok-keyword">where</span>
+  /<span class="tok-comment">-- A leaf of the observation universe. -/</span>
+  | <span class="tok-ctor">leaf</span> (o : <span class="tok-type">ObsDesc</span>)
+  /<span class="tok-comment">-- A binary product of two layouts. -/</span>
+  | <span class="tok-ctor">struct</span> (<span class="tok-tactic">left</span> <span class="tok-tactic">right</span> : <span class="tok-type">Layout</span>)
+  /<span class="tok-comment">-- An array of a layout. -/</span>
+  | <span class="tok-ctor">arr</span> (elem : <span class="tok-type">Layout</span>)
+deriving <span class="tok-type">DecidableEq</span>, <span class="tok-type">Repr</span></code></pre></div></div></div></section>
+<section class="prose"><h3>Kit 4 — the state type</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>State</code> is the <mark class="pop">definition of the state type</mark>: it interprets a layout as the Lean type the program holds — pairs, and <code>Array</code>s.</li><li>This is the <code>State layout</code> the sealed class asks a type to <em>be</em>, in <code>rep : σ = State layout</code>.</li><li>These are the types Lean updates in place when they are uniquely owned, which is what the <code>inplace</code> harness measures.</li><li>Nesting is unbounded, so an array of structs of two words denotes <code>Array (UInt64 × UInt64)</code>.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- The state type a layout denotes: an element of the observation universe, a</span>
+<span class="tok-ctor">pair</span> of states, or an array of states. -/
+abbrev <span class="tok-type">State</span> : <span class="tok-type">Layout</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.leaf</span> o =&gt; <span class="tok-type">ObsEl</span> o
+  | <span class="tok-ctor">.struct</span> a b =&gt; <span class="tok-type">State</span> a × <span class="tok-type">State</span> b
+  | <span class="tok-ctor">.arr</span> a =&gt; <span class="tok-type">Array</span> (<span class="tok-type">State</span> a)</code></pre></div></div></div></section>
+<section class="prose"><h3>Kit 5 — typed paths</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>Path d</code> is an address inside layout <code>d</code>, indexed by the code it walks: <code>left</code> and <code>right</code> only exist under a <code>struct</code>, and <code>index i</code> only under an <code>arr</code>.</li><li><code>At</code> computes the layout at the end of a path.</li><li>The struct steps are checked statically by the index. Only an array index can fail, at run time, when it is out of bounds.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">Path</span> : <span class="tok-type">Layout</span> → <span class="tok-type">Type</span> <span class="tok-keyword">where</span>
+  /<span class="tok-comment">-- The path to the whole layout. -/</span>
+  | <span class="tok-ctor">here</span> {d : <span class="tok-type">Layout</span>} : <span class="tok-type">Path</span> d
+  /<span class="tok-comment">-- Descend into the left component of a struct. -/</span>
+  | <span class="tok-tactic">left</span> {a b : <span class="tok-type">Layout</span>} (p : <span class="tok-type">Path</span> a) : <span class="tok-type">Path</span> (<span class="tok-ctor">.struct</span> a b)
+  /<span class="tok-comment">-- Descend into the right component of a struct. -/</span>
+  | <span class="tok-tactic">right</span> {a b : <span class="tok-type">Layout</span>} (p : <span class="tok-type">Path</span> b) : <span class="tok-type">Path</span> (<span class="tok-ctor">.struct</span> a b)
+  /<span class="tok-comment">-- Descend into element `i` of an array. -/</span>
+  | <span class="tok-ctor">index</span> {a : <span class="tok-type">Layout</span>} (i : <span class="tok-type">Nat</span>) (p : <span class="tok-type">Path</span> a) : <span class="tok-type">Path</span> (<span class="tok-ctor">.arr</span> a)
+deriving <span class="tok-type">DecidableEq</span>
 
-<span class="tok-keyword">def</span> <span class="tok-fun">code</span> : <span class="tok-type">ObsDesc</span> → <span class="tok-type">String</span>
-  | <span class="tok-ctor">.unit</span> =&gt; &quot;unit&quot; | <span class="tok-ctor">.nat</span> =&gt; &quot;nat&quot; | <span class="tok-ctor">.uint</span> =&gt; &quot;word&quot; | <span class="tok-ctor">.bool</span> =&gt; &quot;bool&quot;
-  | <span class="tok-ctor">.sum</span> _ _ =&gt; &quot;sum&quot; | <span class="tok-ctor">.option</span> _ =&gt; &quot;option&quot; | <span class="tok-ctor">.pair</span> _ _ =&gt; &quot;pair&quot;
-
-<span class="tok-keyword">example</span> : <span class="tok-type">ObsEl</span> <span class="tok-ctor">.uint</span> = <span class="tok-type">UInt64</span> := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> : <span class="tok-type">ObsEl</span> <span class="tok-ctor">.bool</span> = <span class="tok-type">Bool</span> := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a b : <span class="tok-type">ObsDesc</span>) : <span class="tok-type">ObsEl</span> (<span class="tok-ctor">.sum</span> a b) = (<span class="tok-type">ObsEl</span> a ⊕ <span class="tok-type">ObsEl</span> b) := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a : <span class="tok-type">ObsDesc</span>) : <span class="tok-type">ObsEl</span> (<span class="tok-ctor">.option</span> a) = <span class="tok-type">Option</span> (<span class="tok-type">ObsEl</span> a) := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a b : <span class="tok-type">ObsDesc</span>) : <span class="tok-type">ObsEl</span> (<span class="tok-ctor">.pair</span> a b) = (<span class="tok-type">ObsEl</span> a × <span class="tok-type">ObsEl</span> b) := <span class="tok-tactic">rfl</span></code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 2 — the layout universe</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>Layout</code> is the code for what the state <em>is</em>: a stored observation (<code>leaf</code>), a binary <code>struct</code>, or an <code>arr</code> of a layout. Nesting gives arrays of structs, arrays of arrays, and so on.</li><li><code>State</code> interprets a layout as the Lean type the program actually holds: pairs and <code>Array</code>s, which Lean updates in place when they are uniquely owned.</li><li>Layouts may contain arrays; observations may not. The asymmetry between the two universes is what makes reads safe.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">Layout and State</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar.Layout5</span>
-
-<span class="tok-keyword">def</span> <span class="tok-fun">shape</span> : <span class="tok-type">Layout</span> → <span class="tok-type">String</span>
-  | <span class="tok-ctor">.leaf</span> _ =&gt; &quot;leaf&quot; | <span class="tok-ctor">.struct</span> _ _ =&gt; &quot;struct&quot; | <span class="tok-ctor">.arr</span> _ =&gt; &quot;array&quot;
-
-<span class="tok-keyword">example</span> (o : <span class="tok-type">ObsDesc</span>) : <span class="tok-type">State</span> (<span class="tok-ctor">.leaf</span> o) = <span class="tok-type">ObsEl</span> o := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a b : <span class="tok-type">Layout</span>) : <span class="tok-type">State</span> (<span class="tok-ctor">.struct</span> a b) = (<span class="tok-type">State</span> a × <span class="tok-type">State</span> b) := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a : <span class="tok-type">Layout</span>) : <span class="tok-type">State</span> (<span class="tok-ctor">.arr</span> a) = <span class="tok-type">Array</span> (<span class="tok-type">State</span> a) := <span class="tok-tactic">rfl</span>
-
-<span class="tok-keyword">example</span> : <span class="tok-type">State</span> (<span class="tok-ctor">.arr</span> (<span class="tok-ctor">.struct</span> (<span class="tok-ctor">.leaf</span> <span class="tok-ctor">.uint</span>) (<span class="tok-ctor">.leaf</span> <span class="tok-ctor">.uint</span>)))
-    = <span class="tok-type">Array</span> (<span class="tok-type">UInt64</span> × <span class="tok-type">UInt64</span>) := <span class="tok-tactic">rfl</span></code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 3 — typed paths</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>Path d</code> is an address inside layout <code>d</code>, a datatype indexed by the code it walks. <code>left</code> and <code>right</code> only exist under a <code>struct</code>, and <code>index i</code> only under an <code>arr</code>.</li><li><code>At p</code> computes the layout at the end of the path.</li><li>The struct steps are checked statically by the index. Only an array index can fail, at run time, when it is out of bounds.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">Path and At</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar.Layout5</span>
-
-<span class="tok-keyword">def</span> <span class="tok-fun">step</span> : {d : <span class="tok-type">Layout</span>} → <span class="tok-type">Path</span> d → <span class="tok-type">String</span>
-  | _, <span class="tok-ctor">.here</span> =&gt; &quot;here&quot; | _, <span class="tok-ctor">.left</span> _ =&gt; &quot;<span class="tok-tactic">left</span>&quot;
-  | _, <span class="tok-ctor">.right</span> _ =&gt; &quot;<span class="tok-tactic">right</span>&quot; | _, <span class="tok-ctor">.index</span> _ _ =&gt; &quot;index&quot;
-
-<span class="tok-keyword">example</span> {a b : <span class="tok-type">Layout</span>} (p : <span class="tok-type">Path</span> a) : <span class="tok-type">Path</span> (<span class="tok-ctor">.struct</span> a b) := <span class="tok-ctor">.left</span> p
-<span class="tok-keyword">example</span> {a : <span class="tok-type">Layout</span>} (i : <span class="tok-type">Nat</span>) (p : <span class="tok-type">Path</span> a) : <span class="tok-type">Path</span> (<span class="tok-ctor">.arr</span> a) := <span class="tok-ctor">.index</span> i p
-
-<span class="tok-keyword">example</span> (d : <span class="tok-type">Layout</span>) : <span class="tok-type">At</span> (<span class="tok-fun">Path.here</span> : <span class="tok-type">Path</span> d) = d := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> {a b : <span class="tok-type">Layout</span>} (p : <span class="tok-type">Path</span> a) :
-    <span class="tok-type">At</span> (<span class="tok-fun">Path.left</span> (b := b) p) = <span class="tok-type">At</span> p := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> {a : <span class="tok-type">Layout</span>} (i : <span class="tok-type">Nat</span>) (p : <span class="tok-type">Path</span> a) :
-    <span class="tok-type">At</span> (<span class="tok-fun">Path.index</span> i p) = <span class="tok-type">At</span> p := <span class="tok-tactic">rfl</span></code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 4 — observable paths and the canonical encoding</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>ObsPath d</code> is a path <em>together with a proof</em> that it ends at an observation leaf: <code>At path = .leaf obs</code>. A path to an array or a struct has no such proof.</li><li><code>encodeObs</code> is the library&#x27;s one encoding from observations to <code>Value</code>. It has a clause per code and none produces <code>.loc</code>.</li><li>An instance author supplies neither the predicate nor the encoding.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">ObsPath and encodeObs</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-type">Layout5</span>
-
-structure <span class="tok-type">Shown</span> (d : <span class="tok-type">Layout</span>) <span class="tok-keyword">where</span>
+/<span class="tok-comment">-- The layout at the end of a path. -/</span>
+abbrev <span class="tok-type">At</span> {d : <span class="tok-type">Layout</span>} : <span class="tok-type">Path</span> d → <span class="tok-type">Layout</span>
+  | <span class="tok-ctor">.here</span> =&gt; d
+  | <span class="tok-ctor">.left</span> p =&gt; <span class="tok-type">At</span> p
+  | <span class="tok-ctor">.right</span> p =&gt; <span class="tok-type">At</span> p
+  | <span class="tok-ctor">.index</span> _ p =&gt; <span class="tok-type">At</span> p</code></pre></div></div></div></section>
+<section class="prose"><h3>Kit 6 — observable paths and the canonical encoding</h3><ul><li><code>ObsPath d</code> is a path <em>together with a proof</em> that it ends at an observation leaf: <code>At path = .leaf obs</code>. A path to an array or a struct has no such proof, so a whole-array read cannot even be written down.</li><li><code>encodeObs</code> is the library&#x27;s one encoding from observations to <code>Value</code>. It has a clause per code <mark class="pop">and none produces <code>.loc</code></mark>.</li><li>An instance author supplies neither the predicate nor the encoding.</li></ul><div class="prose-panels"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- A read path: a path together with the leaf description its end must have.</span>
+<span class="tok-type">The</span> proof field is why no `<span class="tok-type">ObsPath</span>` exists for a `<span class="tok-ctor">.struct</span>` or `<span class="tok-ctor">.arr</span>` root —
+`<span class="tok-type">At</span> p = <span class="tok-ctor">.leaf</span> o` has no solution there — so a whole-array read cannot be
+written down, <span class="tok-keyword">let</span> alone performed. -/
+structure <span class="tok-type">ObsPath</span> (d : <span class="tok-type">Layout</span>) <span class="tok-keyword">where</span>
+  /<span class="tok-comment">-- The path. -/</span>
   path : <span class="tok-type">Path</span> d
+  /<span class="tok-comment">-- The leaf description at the path&#x27;s end. -/</span>
   obs : <span class="tok-type">ObsDesc</span>
-  leaf : <span class="tok-type">At</span> path = <span class="tok-ctor">.leaf</span> obs
-<span class="tok-keyword">example</span> (p : <span class="tok-type">ObsPath</span> d) : <span class="tok-type">Shown</span> d := { p with }
-
-<span class="tok-keyword">example</span> (n : <span class="tok-type">UInt64</span>) : encodeObs <span class="tok-ctor">.uint</span> n = <span class="tok-ctor">.uint</span> n := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a b : <span class="tok-type">ObsDesc</span>) (x : <span class="tok-type">ObsEl</span> a) :
-    encodeObs (<span class="tok-ctor">.sum</span> a b) (<span class="tok-ctor">.inl</span> x) = <span class="tok-ctor">.inl</span> (encodeObs a x) := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (a b : <span class="tok-type">ObsDesc</span>) (x : <span class="tok-type">ObsEl</span> a) (y : <span class="tok-type">ObsEl</span> b) :
-    encodeObs (<span class="tok-ctor">.pair</span> a b) (x, y) = <span class="tok-ctor">.pair</span> (encodeObs a x) (encodeObs b y) := <span class="tok-tactic">rfl</span></code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 5 — the predicates</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>NoRef ℓ v</code>: <code>v</code> contains no <code>.loc ℓ</code>, however deeply nested. This is the detachment the laws demand.</li><li><code>Disjoint p q</code>: neither path extends the other, so the paths are not equal, not ancestor and descendant, and not through the same index. This is what frames are stated over.</li><li>From the clauses alone, every encoded observation is detached, for every code. That is proved once, by induction on <code>ObsDesc</code>.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">NoRef and Disjoint</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-type">Layout5</span>
-
-<span class="tok-keyword">example</span> (ℓ k : <span class="tok-type">Loc</span>) : <span class="tok-type">NoRef</span> ℓ (<span class="tok-ctor">.loc</span> k) = (k ≠ ℓ) := <span class="tok-tactic">rfl</span>
-<span class="tok-keyword">example</span> (ℓ : <span class="tok-type">Loc</span>) (x y : <span class="tok-type">Value</span>) :
-    <span class="tok-type">NoRef</span> ℓ (<span class="tok-ctor">.pair</span> x y) = (<span class="tok-type">NoRef</span> ℓ x ∧ <span class="tok-type">NoRef</span> ℓ y) := <span class="tok-tactic">rfl</span>
-
-<span class="tok-keyword">example</span> {d : <span class="tok-type">Layout</span>} (p q : <span class="tok-type">Path</span> d) :
-    <span class="tok-type">Disjoint</span> p q = ((∀ r : <span class="tok-type">Path</span> (<span class="tok-type">At</span> p), q ≠ <span class="tok-fun">p.append</span> r) ∧
-                    (∀ r : <span class="tok-type">Path</span> (<span class="tok-type">At</span> q), p ≠ <span class="tok-fun">q.append</span> r)) := <span class="tok-tactic">rfl</span>
-
-<span class="tok-keyword">example</span> (ℓ : <span class="tok-type">Loc</span>) (o : <span class="tok-type">ObsDesc</span>) (x : <span class="tok-type">ObsEl</span> o) : <span class="tok-type">NoRef</span> ℓ (encodeObs o x) :=
-  encodeObs_noRef ℓ o x</code></pre></div></div></div></section>
-<section class="prose"><h3>Kit 6 — the derivative, and the operations</h3><div class="prose-cols"><div class="prose-text"><ul><li>A write needs a one-hole context: the state with the addressed part removed. It is the derivative of the layout:<ul><li>at a leaf, the hole is the whole value;</li><li><code>∂(struct a b) = ∂a × State b + State a × ∂b</code>, so one side keeps a hole and the other is kept whole;</li><li><code>∂(arr a) = index × siblings × ∂a</code>, the element taken out and the array kept with a placeholder.</li></ul></li><li><code>open</code> splits a state into a context and its focus, and <code>plug</code> fills the hole. Both are private: they are the specification, and the executed <code>setLeaf</code> is proved equal to them.</li><li>Clients get two operations, and theorems about them.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">operations</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
-open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-type">Layout5</span>
-
-<span class="tok-keyword">example</span> {d : <span class="tok-type">Layout</span>} (p : <span class="tok-type">ObsPath</span> d) : <span class="tok-type">State</span> d → <span class="tok-type">Option</span> <span class="tok-type">Value</span> := read? p
-<span class="tok-keyword">example</span> {d : <span class="tok-type">Layout</span>} (p : <span class="tok-type">ObsPath</span> d) (x : <span class="tok-type">ObsEl</span> <span class="tok-fun">p.obs</span>) :
-    <span class="tok-type">State</span> d → <span class="tok-type">State</span> d × <span class="tok-type">Bool</span> := setLeaf p x
-
-<span class="tok-comment">-- a write leaves every disjoint path&#x27;s read unchanged</span>
-<span class="tok-keyword">example</span> {d : <span class="tok-type">Layout</span>} (p q : <span class="tok-type">ObsPath</span> d) (s s&#x27; : <span class="tok-type">State</span> d) (new : <span class="tok-type">ObsEl</span> <span class="tok-fun">p.obs</span>)
-    (hd : <span class="tok-type">Disjoint</span> <span class="tok-fun">p.path</span> <span class="tok-fun">q.path</span>) (hw : setLeaf p new s = (s&#x27;, <span class="tok-ctor">true</span>)) :
-    read? q s&#x27; = read? q s :=
-  read_frame p q s s&#x27; new hd hw</code></pre></div></div></div></section>
+  /<span class="tok-comment">-- The end of the path is that leaf. -/</span>
+  <span class="tok-ctor">leaf</span> : <span class="tok-type">At</span> path = <span class="tok-ctor">.leaf</span> obs</code></pre></div><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">encodeObs</span> : (o : <span class="tok-type">ObsDesc</span>) → <span class="tok-type">ObsEl</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.unit</span>, _ =&gt; <span class="tok-ctor">.unit</span>
+  | <span class="tok-ctor">.nat</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+  | <span class="tok-ctor">.uint</span>, n =&gt; <span class="tok-ctor">.uint</span> n
+  | <span class="tok-ctor">.bool</span>, b =&gt; <span class="tok-ctor">.bool</span> b
+  | <span class="tok-ctor">.sum</span> a _, <span class="tok-fun">Sum.inl</span> x =&gt; <span class="tok-ctor">.inl</span> (<span class="tok-fun">encodeObs</span> a x)
+  | <span class="tok-ctor">.sum</span> _ b, <span class="tok-fun">Sum.inr</span> y =&gt; <span class="tok-ctor">.inr</span> (<span class="tok-fun">encodeObs</span> b y)
+  | <span class="tok-ctor">.option</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.option</span> a, <span class="tok-ctor">some</span> x =&gt; <span class="tok-ctor">.some</span> (<span class="tok-fun">encodeObs</span> a x)
+  | <span class="tok-ctor">.pair</span> a b, (x, y) =&gt; <span class="tok-ctor">.pair</span> (<span class="tok-fun">encodeObs</span> a x) (<span class="tok-fun">encodeObs</span> b y)</code></pre></div></div></section>
+<section class="prose"><h3>Kit 7 — the predicates</h3><ul><li><code>NoRef ℓ v</code>: <code>v</code> contains no <code>.loc ℓ</code>, however deeply nested. This is the detachment the laws demand.</li><li><code>Disjoint p q</code>: neither path extends the other, so the paths are not equal, not ancestor and descendant, and not through the same index. This is what frames are stated over.</li><li>From the clauses alone, every encoded observation is detached, for every code: <code>encodeObs_noRef</code>, proved once by induction on <code>ObsDesc</code>.</li></ul><div class="prose-panels"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Value.lean</p><pre class="prose-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">NoRef</span> (ℓ : <span class="tok-type">Loc</span>) : <span class="tok-type">Value</span> → <span class="tok-type">Prop</span>
+  | <span class="tok-ctor">.loc</span> k    =&gt; k ≠ ℓ
+  | <span class="tok-ctor">.some</span> v   =&gt; <span class="tok-fun">NoRef</span> ℓ v
+  | <span class="tok-ctor">.inl</span> v    =&gt; <span class="tok-fun">NoRef</span> ℓ v
+  | <span class="tok-ctor">.inr</span> v    =&gt; <span class="tok-fun">NoRef</span> ℓ v
+  | <span class="tok-ctor">.pair</span> x y =&gt; <span class="tok-fun">NoRef</span> ℓ x ∧ <span class="tok-fun">NoRef</span> ℓ y
+  | _         =&gt; <span class="tok-type">True</span></code></pre></div><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- Two paths into the same layout are disjoint when neither goes through the</span>
+other: `q` is not `p` extended <span class="tok-keyword">by</span> anything, and `p` is not `q` extended <span class="tok-keyword">by</span>
+anything. <span class="tok-type">This</span> excludes the equal paths and every ancestor/descendant <span class="tok-ctor">pair</span>,
+including two paths through the same array <span class="tok-ctor">index</span>. -/
+<span class="tok-keyword">def</span> <span class="tok-fun">Disjoint</span> {d : <span class="tok-type">Layout</span>} (p q : <span class="tok-type">Path</span> d) : <span class="tok-type">Prop</span> :=
+  (∀ r : <span class="tok-type">Path</span> (<span class="tok-type">At</span> p), q ≠ <span class="tok-fun">Path.append</span> p r) ∧ (∀ r : <span class="tok-type">Path</span> (<span class="tok-type">At</span> q), p ≠ <span class="tok-fun">Path.append</span> q r)</code></pre></div></div></section>
+<section class="prose"><h3>Kit 8 — the one-hole context</h3><ul><li>A write needs the state with the addressed part removed: the <em>one-hole context</em>, which is the <mark class="pop">derivative</mark> of the layout.</li><li>At a leaf the hole is the whole value; at a struct one component keeps the hole and the other is held whole, <code>∂(struct a b) = ∂a × State b + State a × ∂b</code>; at an array the element is taken out and the array is held with a placeholder, together with the index that puts it back, <code>∂(arr a) = index × siblings × ∂a</code>.</li><li>It is private: it is the <em>specification</em> of a write, not part of a client&#x27;s surface.</li></ul><div class="prose-panels"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- The one-hole context of a path: the parts of a state other than the focus.</span>
+<span class="tok-type">The</span> array <span class="tok-keyword">case</span> keeps the array the take-out <span class="tok-tactic">left</span> and the focus&#x27;s <span class="tok-ctor">index</span>. -/
+private <span class="tok-keyword">inductive</span> <span class="tok-type">Context</span> : (d : <span class="tok-type">Layout</span>) → <span class="tok-type">Path</span> d → <span class="tok-type">Type</span> <span class="tok-keyword">where</span>
+  /<span class="tok-comment">-- The whole state is the focus. -/</span>
+  | <span class="tok-ctor">here</span> (d : <span class="tok-type">Layout</span>) : <span class="tok-type">Context</span> d <span class="tok-ctor">.here</span>
+  /<span class="tok-comment">-- The left component is inside; the right is held. -/</span>
+  | <span class="tok-tactic">left</span> {a b : <span class="tok-type">Layout</span>} {p : <span class="tok-type">Path</span> a} (inner : <span class="tok-type">Context</span> a p) (<span class="tok-tactic">right</span> : <span class="tok-type">State</span> b) :
+      <span class="tok-type">Context</span> (<span class="tok-ctor">.struct</span> a b) (<span class="tok-ctor">.left</span> p)
+  /<span class="tok-comment">-- The right component is inside; the left is held. -/</span>
+  | <span class="tok-tactic">right</span> {a b : <span class="tok-type">Layout</span>} {p : <span class="tok-type">Path</span> b} (<span class="tok-tactic">left</span> : <span class="tok-type">State</span> a) (inner : <span class="tok-type">Context</span> b p) :
+      <span class="tok-type">Context</span> (<span class="tok-ctor">.struct</span> a b) (<span class="tok-ctor">.right</span> p)
+  /<span class="tok-comment">-- Element `i` is inside; the array the take-out left is held, and</span>
+  `i &lt; <span class="tok-fun">siblings.size</span>` is what lets `plug` land the focus back at the <span class="tok-ctor">index</span>. -/
+  | <span class="tok-ctor">index</span> {a : <span class="tok-type">Layout</span>} {p : <span class="tok-type">Path</span> a} (i : <span class="tok-type">Nat</span>) (siblings : <span class="tok-type">Array</span> (<span class="tok-type">State</span> a))
+      (bound : i &lt; <span class="tok-fun">siblings.size</span>) (inner : <span class="tok-type">Context</span> a p) : <span class="tok-type">Context</span> (<span class="tok-ctor">.arr</span> a) (<span class="tok-ctor">.index</span> i p)</code></pre></div><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- Fill a one-hole context with a focus: the state the context describes, with</span>
+the focus <span class="tok-keyword">in</span> its place. -/
+private <span class="tok-keyword">def</span> plug : {d : <span class="tok-type">Layout</span>} → {p : <span class="tok-type">Path</span> d} → <span class="tok-type">Context</span> d p → <span class="tok-type">State</span> (<span class="tok-type">At</span> p) → <span class="tok-type">State</span> d
+  | _, _, <span class="tok-ctor">.here</span> _, x =&gt; x
+  | _, _, <span class="tok-ctor">.left</span> inner <span class="tok-tactic">right</span>, x =&gt; (plug inner x, <span class="tok-tactic">right</span>)
+  | _, _, <span class="tok-ctor">.right</span> <span class="tok-tactic">left</span> inner, x =&gt; (<span class="tok-tactic">left</span>, plug inner x)
+  | _, _, <span class="tok-ctor">.index</span> i siblings bound inner, x =&gt;
+      plugAt siblings i bound (plug inner x)</code></pre></div></div></section>
+<section class="prose"><h3>Kit 9 — the operations</h3><ul><li><code>read?</code> returns the library&#x27;s encoding of the observation at the path, or <code>none</code> when the path addresses nothing.</li><li><code>setLeaf</code> returns the new state and whether the write took effect. It asks <code>inBounds</code> first, then runs the fused update, and casts the observation to the focus type exactly once.</li><li>The theorems about them: <code>read_detached</code>, <code>snapshot_after_setLeaf</code> (the old value is bound to the old state), <code>read_frame</code> (disjoint paths), <code>setLeaf_failed</code> (a failed write leaves the state alone).</li></ul><div class="prose-panels"><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code>/<span class="tok-comment">-- Read a leaf path: the library&#x27;s encoding of the observation at the path&#x27;s</span>
+<span class="tok-keyword">end</span>, or `<span class="tok-ctor">none</span>` when the path does not address anything. <span class="tok-type">The</span> result is an
+immutable `<span class="tok-type">Value</span>`; there is no route from <span class="tok-ctor">here</span> to the state or a subtree. -/
+<span class="tok-keyword">def</span> <span class="tok-fun">read?</span> {d : <span class="tok-type">Layout</span>} (p : <span class="tok-type">ObsPath</span> d) (s : <span class="tok-type">State</span> d) : <span class="tok-type">Option</span> <span class="tok-type">Value</span> :=
+  (leafAt? <span class="tok-fun">p.path</span> <span class="tok-fun">p.obs</span> <span class="tok-fun">p.leaf</span> s)<span class="tok-ctor">.map</span> (<span class="tok-fun">encodeObs</span> <span class="tok-fun">p.obs</span>)</code></pre></div><div class="prose-panel"><p class="goal-label">../lean/Scidonia/FracPerm/StateVar/Layout5.lean</p><pre class="prose-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">setLeaf</span> {d : <span class="tok-type">Layout</span>} (p : <span class="tok-type">ObsPath</span> d) (x : <span class="tok-type">ObsEl</span> <span class="tok-fun">p.obs</span>) (s : <span class="tok-type">State</span> d) :
+    <span class="tok-type">State</span> d × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> inBounds <span class="tok-fun">p.path</span> s <span class="tok-keyword">then</span>
+    (setAt <span class="tok-fun">p.path</span> (cast (congrArg <span class="tok-type">State</span> <span class="tok-fun">p.leaf.symm</span>) x) s, <span class="tok-ctor">true</span>)
+  <span class="tok-keyword">else</span> (s, <span class="tok-ctor">false</span>)</code></pre></div></div></section>
 <section class="prose"><h3>Using the kit</h3><div class="prose-cols"><div class="prose-text"><ul><li>A concrete layout, an observable path, and a read.</li><li>At an array root there is no observable path, so a whole-array read is a <mark class="pop">type error</mark>.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">reads</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
 open <span class="tok-fun">Scidonia.FracPerm.StateVar</span> <span class="tok-type">Layout5</span>
 

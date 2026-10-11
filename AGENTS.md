@@ -694,8 +694,13 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
 ```
 
 The prose format and the panel rules are those of the generator, documented in
-`../vericoding-tutorial/AGENTS.md`; a `@path` quotation resolves in that
-repository, not this one, so quote code here as a compiled panel. The built
+`../vericoding-tutorial/AGENTS.md`. A panel fenced ```` ```lean ```` is compiled, so
+it is the way to quote *compiled* code: a class is restated and then built from a
+library value, and a definition's clauses are stated by `rfl`. A panel fenced
+```` ```@path ```` must be a verbatim excerpt of a file, and its path resolves
+through the generator's repository root, so this repository's source is quoted as
+```` ```@../lean/Scidonia/… ````; a quotation shows a definition exactly as the
+library has it and fails the build if the library changes. The built
 `Slides/fracperm.html` is committed, so the deck can be viewed on GitHub Pages
 at https://scidonia.github.io/lean-examples/Slides/fracperm.html; rebuild it
 and commit it with any change to the deck's sources.
