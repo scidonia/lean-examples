@@ -1,5 +1,40 @@
 # Writing through a path
 
+## A compiler optimisation that looks like a side effect
+- Lean has no mutable state. `a.set! i v` is a function: it denotes a ==new== array, and no term in the language can change a value that already exists.
+- Yet the compiled code mutates. When the array has one reference, `Array.set!` compiles to a store into the array's buffer and a pointer to that same buffer comes back.
+- Both statements are true because the mutation is ==unobservable==: if the old value has exactly one reference, nothing in the program can distinguish "the same object with one slot changed" from "a new object, copied".
+
+```the meaning is pure
+import Scidonia.FracPerm
+
+-- What the source means: a new array, of the same size, with one slot changed.
+#guard ((#[1, 2, 3] : Array UInt64).set! 0 7)[0]? == some 7
+#guard ((#[1, 2, 3] : Array UInt64).set! 0 7).size == 3
+-- and the value it was applied to still holds what it held
+#guard (#[1, 2, 3] : Array UInt64)[0]? == some 1
+```
+
+## When mutating is legal
+- The compiler asks one question at every mutation site: ==is this object's reference count exactly 1 here?==
+  - count 1 → the old value is dead, so mutating it cannot be observed: store into it.
+  - count 2 or more → something may still read the old value: allocate a copy.
+  - count 0 → a compile-time constant, which can never be unique: always copy.
+- The count comes from ==use counts in the code==, not from what the program means. A value used twice in one expression, an alias kept alive, or a projection held across the call is enough to force the copy.
+
+## So: how do we make the mutation unobservable?
+- "Unobservable" is not a property of our intent. It is exactly: ==no other reference to the object exists at that moment==.
+- And we cannot make the compiler mutate — we can only make its legality condition true where we want the mutation. The same definition mutates through one caller and copies through another; only the ownership differs.
+- Since the compiler reads ownership off the code, this is a *coding discipline*: and a discipline can be built into an interface, so that the shapes that lose the mutation cannot be written.
+
+## What this tutorial does
+- The first half builds the kit of a write, piece by piece, from the definitions: an address, the focus type, a context to rebuild, the new value, and the pair of traversals that decide whether the address is real and perform the update.
+- The kit is arranged for exactly the three things unobservability needs:
+  - the state is unreachable except through the interface, so no client can hold an alias to it;
+  - a read returns an ==observation== — a value built from atoms — so nothing sharing the state's memory can escape and stay live;
+  - the write takes the focused node out, checks it is exclusively owned, updates it and puts it back, returning the state alone: one owner, one candidate cell.
+- The second half shows how it behaves: what the compiler emitted, which shapes stay in place, which copy, and what the harness asserts.
+
 ## What a write needs
 - An **address**: a path into the state, typed by the layout it walks.
 - The **focus type**: what sits at the end of the path.

@@ -719,7 +719,7 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
   --example Slides/UpdateSteps.lean \
   --prose Slides/update-behaviour.md \
   --title "Writing through a path" \
-  --subtitle "The kit of a state update, and when it stays in place" \
+  --subtitle "How a pure update becomes a mutation, and how to make it legal" \
   --output Slides/update.html
 ```
 
