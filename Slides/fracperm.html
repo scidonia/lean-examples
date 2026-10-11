@@ -523,6 +523,387 @@ open <span class="tok-fun">Scidonia.FracPerm.StateVar</span>
 <span class="tok-comment">-- A read returning a reference fails the detachment law.</span>
 <span class="tok-keyword">example</span> : ¬ (∀ (ℓ s : <span class="tok-type">Nat</span>), <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">Value.loc</span> s)) :=
   <span class="tok-fun">ScidoniaTest.StateVar.bad_read_rejected</span></code></pre></div></div></div></section>
+</section>
+<section>
+<section class="prose-title"><h2>What it means to be lawful</h2></section>
+<section class="prose"><h3>Valid: the invariant a state variable promises</h3><ul><li><code>Valid : σ → Prop</code> names the states the variable may ever be in: a buffer of exactly four words, a sorted list, a balanced tree.</li><li>The laws are stated <em>under</em> <code>Valid</code>. Reads must be detached on valid states, not on states that can never arise.</li><li>Being lawful is four proof obligations. Each one closes a specific hole in the generic theory:<ul><li><code>initial_valid</code>: sessions start inside the invariant.</li><li><code>replace_valid</code>: writes never leave it.</li><li><code>encodeRead_injective</code>: the encoding cannot hide what a read returned.</li><li><code>observe_detached</code>: no read result names protected state.</li></ul></li></ul></section>
+<section class="prose"><h3>Law 1 — every session starts valid</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>initial_valid : ∀ i, Valid (initial i)</code>.</li><li>The generic theorems assume a well-formed configuration, and that includes <code>Valid s</code>. A fresh session satisfies it only if <code>initial</code> lands inside the invariant.</li><li>To establish it, compute the shape of the initial state and check it against <code>Valid</code>.</li><li>It fails for an initializer that builds a buffer of the wrong capacity.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">law 1</p><pre class="prose-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-comment">-- the initializer the instance uses</span>
+<span class="tok-keyword">example</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">simp</span> [<span class="tok-fun">BufValid</span>]
+
+<span class="tok-comment">-- an initializer of the wrong capacity breaks the law</span>
+<span class="tok-keyword">example</span> : ¬ <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 5 (0 : <span class="tok-type">UInt64</span>)) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">simp</span> [<span class="tok-fun">BufValid</span>]</code></pre></div></div></div></section>
+<section class="prose"><h3>Law 2 — writes keep the invariant</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>replace_valid : ∀ w s, Valid s → Valid (replace w s).1</code>.</li><li>With Law 1 this is an induction: every reachable state is valid. <code>pstep_wf</code> uses it at each write step, and <code>write_at_valid</code> at each heap write.</li><li>To establish it, take cases on what the write does: an in-bounds <code>set!</code> keeps the size, and an out-of-bounds write returns the state unchanged.</li><li>It fails for a write that appends, which grows the buffer past four.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">law 2</p><pre class="prose-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">def</span> <span class="tok-fun">setIn</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> <span class="tok-fun">a.set!</span> w.1 w.2 <span class="tok-keyword">else</span> a
+
+<span class="tok-keyword">example</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">setIn</span> w a) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span> <span class="tok-fun">setIn</span> at *
+  <span class="tok-tactic">split</span> &lt;;&gt; <span class="tok-tactic">simp</span> [h]
+
+<span class="tok-comment">-- appending is not a lawful write for this invariant</span>
+<span class="tok-keyword">example</span> : ¬ ∀ a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>, <span class="tok-fun">BufValid</span> a → <span class="tok-fun">BufValid</span> (<span class="tok-fun">a.push</span> 0) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">intro</span> h
+  <span class="tok-tactic">have</span> := h (<span class="tok-fun">Array.replicate</span> 4 0) (<span class="tok-keyword">by</span> <span class="tok-tactic">simp</span> [<span class="tok-fun">BufValid</span>])
+  <span class="tok-tactic">simp</span> [<span class="tok-fun">BufValid</span>] at this</code></pre></div></div></div></section>
+<section class="prose"><h3>Law 3 — the encoding must not forget</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>encodeRead_injective : encodeRead o x = encodeRead o y → x = y</code>.</li><li><code>encodeRead</code> translates a read result into <code>Value</code>, the language in which references are visible.</li><li>Without this law, encoding every result as <code>.unit</code> would satisfy Law 4 trivially and say nothing.</li><li>No generic theorem uses it directly. It is there to keep Law 4 meaningful, though not completely: an injective encoding can still misdescribe a result (see Model 5).</li><li>To establish it, take cases on the operation, then on both results; the constructors of <code>Value</code> are injective.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">law 3</p><pre class="prose-code"><code>import <span class="tok-fun">ScidoniaTest.StateVar</span>
+open <span class="tok-fun">Scidonia.FracPerm.StateVar</span>
+
+<span class="tok-comment">-- a constant encoding is trivially reference-free ...</span>
+<span class="tok-keyword">example</span> (ℓ : <span class="tok-type">Loc</span>) : <span class="tok-type">NoRef</span> ℓ <span class="tok-fun">Value.unit</span> := <span class="tok-tactic">trivial</span>
+
+<span class="tok-comment">-- ... and is exactly what injectivity rules out</span>
+<span class="tok-keyword">example</span> : ¬ (∀ x y : <span class="tok-type">Bool</span>,
+    (<span class="tok-fun">Value.unit</span> : <span class="tok-type">Value</span>) = <span class="tok-fun">Value.unit</span> → x = y) :=
+  <span class="tok-fun">ScidoniaTest.StateVar.bad_encode_rejected</span></code></pre></div></div></div></section>
+<section class="prose"><h3>Law 4 — reads name no protected location</h3><div class="prose-cols"><div class="prose-text"><ul><li><code>observe_detached : ∀ ℓ o s, Valid s → NoRef ℓ (encodeRead o (observe o s))</code>.</li><li>On a valid state, the encoded result contains no <code>.loc ℓ</code> for any <code>ℓ</code>, however deeply nested.</li><li><code>primitive_detached</code>, <code>read_at_detached</code> and <code>safe_result</code> all rest on it.</li><li>To establish it, take cases on the operation. Each result encodes only through constructors that are not <code>.loc</code>.</li><li>It fails for a read that returns a location.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">law 4</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
+open <span class="tok-fun">Scidonia.FracPerm.StateVar</span>
+
+variable {<span class="tok-type">σ</span> <span class="tok-type">I</span> <span class="tok-type">R</span> <span class="tok-type">W</span> : <span class="tok-type">Type</span>} [inst : <span class="tok-type">LawfulStateVar</span> <span class="tok-type">σ</span> <span class="tok-type">I</span> <span class="tok-type">R</span> <span class="tok-type">W</span>]
+
+<span class="tok-comment">-- what the law gives every lawful instance</span>
+<span class="tok-keyword">example</span> {s : <span class="tok-type">σ</span>} {ℓ : <span class="tok-type">Loc</span>} {o : <span class="tok-type">R</span>} (hs : <span class="tok-fun">inst.Valid</span> s) :
+    <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">inst.encodeRead</span> o (<span class="tok-fun">inst.observe</span> o s)) :=
+  primitive_detached hs
+
+<span class="tok-comment">-- a read returning a location cannot satisfy it</span>
+<span class="tok-keyword">example</span> : ¬ <span class="tok-type">NoRef</span> 0 (<span class="tok-fun">Value.loc</span> 0) := not_noRef_loc_self 0</code></pre></div></div></div></section>
+<section class="prose"><h3>What lawfulness buys</h3><ul><li>Laws 1 and 2: every configuration reachable from a fresh session holds a valid state (<code>pstep_wf</code>), and so does every heap cell after a write (<code>write_at_valid</code>).</li><li>Law 4: every primitive read and every heap read is detached, and a client&#x27;s result is safe whenever its continuations are (<code>safe_result</code>).</li><li>The protocol needs no law at all: share conservation, exclusion, joins and schedule independence hold for every instance.</li><li>What lawfulness does not buy is physical identity: an encoding can describe an alias as a value. That is the hole Model 5 closes.</li></ul></section>
+<section class="prose"><h3>Establishing it: a worked buffer</h3><div class="prose-cols"><div class="prose-text"><ul><li>A fixed-capacity buffer of four words, with a real invariant, so each law has content.</li><li>Reads are <code>get i</code> and <code>size</code>; a write replaces one in-bounds word.</li><li>The next slides prove each law step by step, then assemble the instance.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">the buffer</p><pre class="prose-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">BufRead</span> <span class="tok-keyword">where</span>
+  | <span class="tok-ctor">get</span> (i : <span class="tok-type">Nat</span>)
+  | <span class="tok-ctor">size</span>
+
+abbrev <span class="tok-type">BufResult</span> : <span class="tok-type">BufRead</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.get</span> _ =&gt; <span class="tok-type">Option</span> <span class="tok-type">UInt64</span>
+  | <span class="tok-ctor">.size</span> =&gt; <span class="tok-type">Nat</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) :
+    <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4</code></pre></div></div></div></section>
+</section>
+<section>
+<section><h2>LawfulBuffer.lean</h2></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_initial_valid</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+  <mark class="current-tactic"><span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span></mark>
+  <span class="tok-tactic">simp</span></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">v : <span class="tok-type">UInt64</span>
+⊢ <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v)</pre><p class="goal-label">After</p><pre class="goal-state">v : <span class="tok-type">UInt64</span>
+⊢ (<span class="tok-fun">Array.replicate</span> 4 v)<span class="tok-ctor">.size</span> = 4</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_initial_valid</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span>
+  <mark class="current-tactic"><span class="tok-tactic">simp</span></mark></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">v : <span class="tok-type">UInt64</span>
+⊢ (<span class="tok-fun">Array.replicate</span> 4 v)<span class="tok-ctor">.size</span> = 4</pre><p class="goal-label">After</p><pre class="goal-state"></pre><p class="proof-status proof-complete">No goals remain — the proof is complete.</p></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+  <mark class="current-tactic"><span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span> <span class="tok-fun">bufReplace</span> at *</mark>
+  <span class="tok-tactic">split</span>
+  <span class="tok-keyword">case</span> isTrue =&gt; <span class="tok-tactic">simp</span> [h]
+  <span class="tok-keyword">case</span> isFalse =&gt; <span class="tok-tactic">exact</span> h</code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">BufValid</span> a
+⊢ <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a)<span class="tok-ctor">.fst</span></pre><p class="goal-label">After</p><pre class="goal-state">w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+⊢ (<span class="tok-keyword">if</span> <span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> <span class="tok-fun">w.fst</span> <span class="tok-fun">w.snd</span>, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>))<span class="tok-ctor">.fst.size</span> = 4</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span> <span class="tok-fun">bufReplace</span> at *
+  <mark class="current-tactic"><span class="tok-tactic">split</span></mark>
+  <span class="tok-keyword">case</span> isTrue =&gt; <span class="tok-tactic">simp</span> [h]
+  <span class="tok-keyword">case</span> isFalse =&gt; <span class="tok-tactic">exact</span> h</code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+⊢ (<span class="tok-keyword">if</span> <span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> <span class="tok-fun">w.fst</span> <span class="tok-fun">w.snd</span>, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>))<span class="tok-ctor">.fst.size</span> = 4</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> isTrue
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : <span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (<span class="tok-fun">a.set!</span> <span class="tok-fun">w.fst</span> <span class="tok-fun">w.snd</span>, <span class="tok-ctor">true</span>)<span class="tok-ctor">.fst.size</span> = 4
+
+<span class="tok-keyword">case</span> isFalse
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : ¬<span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (a, <span class="tok-ctor">false</span>)<span class="tok-ctor">.fst.size</span> = 4</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span> <span class="tok-fun">bufReplace</span> at *
+  <span class="tok-tactic">split</span>
+  <mark class="current-tactic"><span class="tok-keyword">case</span> isTrue =&gt; <span class="tok-tactic">simp</span> [h]</mark>
+  <span class="tok-keyword">case</span> isFalse =&gt; <span class="tok-tactic">exact</span> h</code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> isTrue
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : <span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (<span class="tok-fun">a.set!</span> <span class="tok-fun">w.fst</span> <span class="tok-fun">w.snd</span>, <span class="tok-ctor">true</span>)<span class="tok-ctor">.fst.size</span> = 4
+
+<span class="tok-keyword">case</span> isFalse
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : ¬<span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (a, <span class="tok-ctor">false</span>)<span class="tok-ctor">.fst.size</span> = 4</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> isFalse
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : ¬<span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (a, <span class="tok-ctor">false</span>)<span class="tok-ctor">.fst.size</span> = 4</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">unfold</span> <span class="tok-fun">BufValid</span> <span class="tok-fun">bufReplace</span> at *
+  <span class="tok-tactic">split</span>
+  <span class="tok-keyword">case</span> isTrue =&gt; <span class="tok-tactic">simp</span> [h]
+  <mark class="current-tactic"><span class="tok-keyword">case</span> isFalse =&gt; <span class="tok-tactic">exact</span> h</mark></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> isFalse
+w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+h : <span class="tok-fun">a.size</span> = 4
+h✝ : ¬<span class="tok-fun">w.fst</span> &lt; <span class="tok-fun">a.size</span>
+⊢ (a, <span class="tok-ctor">false</span>)<span class="tok-ctor">.fst.size</span> = 4</pre><p class="goal-label">After</p><pre class="goal-state"></pre><p class="proof-status proof-complete">No goals remain — the proof is complete.</p></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">BufRead</span> <span class="tok-keyword">where</span>
+  | <span class="tok-ctor">get</span> (i : <span class="tok-type">Nat</span>)
+  | <span class="tok-ctor">size</span>
+
+abbrev <span class="tok-type">BufResult</span> : <span class="tok-type">BufRead</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.get</span> _ =&gt; <span class="tok-type">Option</span> <span class="tok-type">UInt64</span>
+  | <span class="tok-ctor">.size</span> =&gt; <span class="tok-type">Nat</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+  <mark class="current-tactic"><span class="tok-tactic">cases</span> o</mark>
+  <span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">cases</span> x &lt;;&gt; <span class="tok-tactic">cases</span> y &lt;;&gt; simp_all [<span class="tok-fun">bufEncode</span>]
+  <span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; simpa [<span class="tok-fun">bufEncode</span>] using h</code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">o : <span class="tok-type">BufRead</span>
+x y : <span class="tok-type">BufResult</span> o
+h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y
+⊢ x = y</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span>
+i✝ : <span class="tok-type">Nat</span>
+x y : <span class="tok-type">BufResult</span> (<span class="tok-ctor">BufRead.get</span> i✝)
+h : <span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) x = <span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) y
+⊢ x = y
+
+<span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+x y : <span class="tok-type">BufResult</span> <span class="tok-ctor">BufRead.size</span>
+h : <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> x = <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> y
+⊢ x = y</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">BufRead</span> <span class="tok-keyword">where</span>
+  | <span class="tok-ctor">get</span> (i : <span class="tok-type">Nat</span>)
+  | <span class="tok-ctor">size</span>
+
+abbrev <span class="tok-type">BufResult</span> : <span class="tok-type">BufRead</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.get</span> _ =&gt; <span class="tok-type">Option</span> <span class="tok-type">UInt64</span>
+  | <span class="tok-ctor">.size</span> =&gt; <span class="tok-type">Nat</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">cases</span> o
+  <mark class="current-tactic"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">cases</span> x &lt;;&gt; <span class="tok-tactic">cases</span> y &lt;;&gt; simp_all [<span class="tok-fun">bufEncode</span>]</mark>
+  <span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; simpa [<span class="tok-fun">bufEncode</span>] using h</code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span>
+i✝ : <span class="tok-type">Nat</span>
+x y : <span class="tok-type">BufResult</span> (<span class="tok-ctor">BufRead.get</span> i✝)
+h : <span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) x = <span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) y
+⊢ x = y
+
+<span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+x y : <span class="tok-type">BufResult</span> <span class="tok-ctor">BufRead.size</span>
+h : <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> x = <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> y
+⊢ x = y</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+x y : <span class="tok-type">BufResult</span> <span class="tok-ctor">BufRead.size</span>
+h : <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> x = <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> y
+⊢ x = y</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-keyword">inductive</span> <span class="tok-type">BufRead</span> <span class="tok-keyword">where</span>
+  | <span class="tok-ctor">get</span> (i : <span class="tok-type">Nat</span>)
+  | <span class="tok-ctor">size</span>
+
+abbrev <span class="tok-type">BufResult</span> : <span class="tok-type">BufRead</span> → <span class="tok-type">Type</span>
+  | <span class="tok-ctor">.get</span> _ =&gt; <span class="tok-type">Option</span> <span class="tok-type">UInt64</span>
+  | <span class="tok-ctor">.size</span> =&gt; <span class="tok-type">Nat</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">cases</span> o
+  <span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">cases</span> x &lt;;&gt; <span class="tok-tactic">cases</span> y &lt;;&gt; simp_all [<span class="tok-fun">bufEncode</span>]
+  <mark class="current-tactic"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; simpa [<span class="tok-fun">bufEncode</span>] using h</mark></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+x y : <span class="tok-type">BufResult</span> <span class="tok-ctor">BufRead.size</span>
+h : <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> x = <span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> y
+⊢ x = y</pre><p class="goal-label">After</p><pre class="goal-state"></pre><p class="proof-status proof-complete">No goals remain — the proof is complete.</p></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-comment">…</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_initial_valid</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_detached</span> (ℓ : <span class="tok-type">Loc</span>) (o : <span class="tok-type">BufRead</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) :
+    <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> o (<span class="tok-fun">bufObserve</span> o a)) := <span class="tok-keyword">by</span>
+  <mark class="current-tactic"><span class="tok-tactic">cases</span> o</mark>
+  <span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">simp</span> only [<span class="tok-fun">bufObserve</span>]; <span class="tok-tactic">cases</span> a[i]? &lt;;&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]
+  <span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufObserve</span>, <span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]
+
+@[instance_reducible] <span class="tok-keyword">def</span> bufStateVar :
+    <span class="tok-type">LawfulStateVar</span> (<span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) <span class="tok-type">UInt64</span> <span class="tok-type">BufRead</span> (<span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) <span class="tok-keyword">where</span>
+  <span class="tok-type">Result</span> := <span class="tok-type">BufResult</span>
+  initial v := <span class="tok-fun">Array.replicate</span> 4 v
+<span class="tok-comment">…</span></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state">ℓ : <span class="tok-type">Loc</span>
+o : <span class="tok-type">BufRead</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> o (<span class="tok-fun">bufObserve</span> o a))</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+i✝ : <span class="tok-type">Nat</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) (<span class="tok-fun">bufObserve</span> (<span class="tok-ctor">BufRead.get</span> i✝) a))
+
+<span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> (<span class="tok-fun">bufObserve</span> <span class="tok-ctor">BufRead.size</span> a))</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-comment">…</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_initial_valid</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_detached</span> (ℓ : <span class="tok-type">Loc</span>) (o : <span class="tok-type">BufRead</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) :
+    <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> o (<span class="tok-fun">bufObserve</span> o a)) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">cases</span> o
+  <mark class="current-tactic"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">simp</span> only [<span class="tok-fun">bufObserve</span>]; <span class="tok-tactic">cases</span> a[i]? &lt;;&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]</mark>
+  <span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufObserve</span>, <span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]
+
+@[instance_reducible] <span class="tok-keyword">def</span> bufStateVar :
+    <span class="tok-type">LawfulStateVar</span> (<span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) <span class="tok-type">UInt64</span> <span class="tok-type">BufRead</span> (<span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) <span class="tok-keyword">where</span>
+  <span class="tok-type">Result</span> := <span class="tok-type">BufResult</span>
+  initial v := <span class="tok-fun">Array.replicate</span> 4 v
+<span class="tok-comment">…</span></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">get</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+i✝ : <span class="tok-type">Nat</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> (<span class="tok-ctor">BufRead.get</span> i✝) (<span class="tok-fun">bufObserve</span> (<span class="tok-ctor">BufRead.get</span> i✝) a))
+
+<span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> (<span class="tok-fun">bufObserve</span> <span class="tok-ctor">BufRead.size</span> a))</pre><p class="goal-label">After</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> (<span class="tok-fun">bufObserve</span> <span class="tok-ctor">BufRead.size</span> a))</pre></div></div></section>
+<section class="proof-step"><div class="columns"><pre class="proof-code"><code><span class="tok-comment">…</span>
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufReplace</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span> × <span class="tok-type">Bool</span> :=
+  <span class="tok-keyword">if</span> w.1 &lt; <span class="tok-fun">a.size</span> <span class="tok-keyword">then</span> (<span class="tok-fun">a.set!</span> w.1 w.2, <span class="tok-ctor">true</span>) <span class="tok-keyword">else</span> (a, <span class="tok-ctor">false</span>)
+
+<span class="tok-keyword">def</span> <span class="tok-fun">bufEncode</span> : (o : <span class="tok-type">BufRead</span>) → <span class="tok-type">BufResult</span> o → <span class="tok-type">Value</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">none</span> =&gt; <span class="tok-ctor">.none</span>
+  | <span class="tok-ctor">.get</span> _, <span class="tok-ctor">some</span> v =&gt; <span class="tok-ctor">.some</span> (<span class="tok-ctor">.uint</span> v)
+  | <span class="tok-ctor">.size</span>, n =&gt; <span class="tok-ctor">.nat</span> n
+
+<span class="tok-keyword">def</span> <span class="tok-fun">BufValid</span> (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) : <span class="tok-type">Prop</span> := <span class="tok-fun">a.size</span> = 4
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_initial_valid</span> (v : <span class="tok-type">UInt64</span>) : <span class="tok-fun">BufValid</span> (<span class="tok-fun">Array.replicate</span> 4 v) := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_replace_valid</span> (w : <span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) (h : <span class="tok-fun">BufValid</span> a) :
+    <span class="tok-fun">BufValid</span> (<span class="tok-fun">bufReplace</span> w a).1 := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_encode_injective</span> (o : <span class="tok-type">BufRead</span>) (x y : <span class="tok-type">BufResult</span> o)
+    (h : <span class="tok-fun">bufEncode</span> o x = <span class="tok-fun">bufEncode</span> o y) : x = y := <span class="tok-keyword">by</span>
+<span class="tok-comment">…</span>
+
+<span class="tok-keyword">theorem</span> <span class="tok-fun">buf_detached</span> (ℓ : <span class="tok-type">Loc</span>) (o : <span class="tok-type">BufRead</span>) (a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) :
+    <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> o (<span class="tok-fun">bufObserve</span> o a)) := <span class="tok-keyword">by</span>
+  <span class="tok-tactic">cases</span> o
+  <span class="tok-keyword">case</span> <span class="tok-ctor">get</span> i =&gt; <span class="tok-tactic">simp</span> only [<span class="tok-fun">bufObserve</span>]; <span class="tok-tactic">cases</span> a[i]? &lt;;&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]
+  <mark class="current-tactic"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span> =&gt; <span class="tok-tactic">simp</span> [<span class="tok-fun">bufObserve</span>, <span class="tok-fun">bufEncode</span>, <span class="tok-type">NoRef</span>]</mark>
+
+@[instance_reducible] <span class="tok-keyword">def</span> bufStateVar :
+    <span class="tok-type">LawfulStateVar</span> (<span class="tok-type">Array</span> <span class="tok-type">UInt64</span>) <span class="tok-type">UInt64</span> <span class="tok-type">BufRead</span> (<span class="tok-type">Nat</span> × <span class="tok-type">UInt64</span>) <span class="tok-keyword">where</span>
+  <span class="tok-type">Result</span> := <span class="tok-type">BufResult</span>
+  initial v := <span class="tok-fun">Array.replicate</span> 4 v
+<span class="tok-comment">…</span></code></pre><div class="goal-column"><p class="goal-label">Before</p><pre class="goal-state"><span class="tok-keyword">case</span> <span class="tok-ctor">size</span>
+ℓ : <span class="tok-type">Loc</span>
+a : <span class="tok-type">Array</span> <span class="tok-type">UInt64</span>
+⊢ <span class="tok-type">NoRef</span> ℓ (<span class="tok-fun">bufEncode</span> <span class="tok-ctor">BufRead.size</span> (<span class="tok-fun">bufObserve</span> <span class="tok-ctor">BufRead.size</span> a))</pre><p class="goal-label">After</p><pre class="goal-state"></pre><p class="proof-status proof-complete">No goals remain — the proof is complete.</p></div></div></section>
+</section>
+<section>
+<section class="prose-title"><h2>Models 3 and 4: lawful by description</h2></section>
+<section class="prose"><h3>Three ways to establish lawfulness</h3><ul><li><strong>Prove it directly</strong>, as for the buffer and the <code>UInt64</code> array: give <code>Valid</code>, then discharge the four laws by cases on the operations.</li><li><strong>Transport it along an isomorphism</strong>, as for <code>Slot</code>: prove the laws once for a description, then carry each one across <code>encode</code>/<code>decode</code> using the two inverse laws. The type itself needs no law proof.</li><li><strong>Get it by construction</strong>, as for the sealed class: name a layout and prove the type <em>is</em> its state type. The library defines the operations and derives all four laws.</li><li>Each step down moves work from the instance author into the library. The models that follow are the second and third.</li></ul></section>
 <section class="prose"><h3>Model 3: a description universe</h3><div class="prose-cols"><div class="prose-text"><ul><li><em>The Gentle Art of Levitation</em> (Chapman, Dagand, McBride, Morris): describe datatypes by a type of descriptions, and interpret each one.</li><li>Ours is small and non-recursive: <code>unit</code>, <code>nat</code>, <code>sum</code>.</li><li><code>Slot</code> is a real Lean inductive; <code>slotDesc</code> describes it, and <code>encode</code>/<code>decode</code> are inverse in <mark class="pop">both</mark> directions.</li></ul></div><div class="prose-code-wrap"><div class="prose-panel"><p class="goal-label">slot, described</p><pre class="prose-code"><code>import <span class="tok-fun">Scidonia.FracPerm</span>
 open <span class="tok-fun">Scidonia.FracPerm.StateVar</span>
 

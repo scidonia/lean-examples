@@ -682,6 +682,9 @@ nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
   --example Slides/RoundTrip.lean \
   --prose Slides/runtime.md \
   --prose Slides/models.md \
+  --prose Slides/lawful.md \
+  --example Slides/LawfulBuffer.lean \
+  --prose Slides/universe.md \
   --example Slides/NoRefEverywhere.lean \
   --prose Slides/sealed.md \
   --prose Slides/outlook.md \
