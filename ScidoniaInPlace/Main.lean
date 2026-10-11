@@ -35,6 +35,27 @@ must copy — and the child processes are what carry
   created inside the executor; the value assertions are all the parent can see
   of the array. Their checked children exit zero, which is what shows that
   every `set` of those programs updated in place.
+* the path writes of `Scidonia.FracPerm.StateVar.Layout5` on an
+  `Array (UInt64 × UInt64)` and on an `Array (Array UInt64)`: an owned
+  `Array.swapAt` take-out that leaves the layout's placeholder in the slot, and
+  its inverse put-back, must leave the array's buffer and the sampled sibling
+  struct (the one each case names) at the same address, and the value at the
+  path must be the one written while a sibling's stays fixed. The update is fused over the
+  path and returns the state alone, so the compiler reuses the struct cell at
+  the written index: that cell keeps its address when it is exclusively owned
+  and changes when a live second reference reaches it, and both are asserted.
+  Where the focused element is itself an array its own address is the same
+  measurement: unchanged when the element is exclusively owned, and changed when
+  a live reference to it is held, because then the write inside it copies it.
+* the sealed write of `Scidonia.FracPerm.StateVar.SealedStateVar` on the shipped
+  `Array (UInt64 × UInt64)` instance. That class supplies the layout and the
+  equality and no code, so the write is `Layout5.setLeaf` through the cast in
+  `rep`; the instance's `rep` is `rfl`, so the cast erases. `sealed-unique`
+  measures what `layout5-unique` measures — the array's buffer and the struct at
+  the written index both keep their addresses, the write landed, and a sibling
+  slot is unchanged — and `sealed-checked-unique` is the same write in a child
+  with `SCIDONIA_CHECK_INPLACE=1`, which must report the check enabled and exit
+  zero.
 * child processes launched as `lake exe inplace unique|shared|counter-…` with
   `SCIDONIA_CHECK_INPLACE=1`. The shared cases must exit nonzero with the
   write site named on standard error, the unique cases must exit zero having
@@ -43,10 +64,17 @@ must copy — and the child processes are what carry
   the child that bumps a counter with a shared log must exit zero too: the
   counter's check is told the operation, and an abort must mean that this
   write is about to copy, not merely that some part of the object is shared.
+  `layout5-unique` and `layout5-nest` are path writes with the check armed —
+  the array and the focused element are exclusively owned, so neither check
+  must report anything — while `layout5-shared` (a live reference to the array)
+  and `layout5-nest-shared` (a live reference to the focused element) must end
+  the process naming the `Layout5` site of the array and of the element
+  respectively.
 -/
 import Scidonia.FracPerm
 
 open Scidonia.FracPerm
+open Scidonia.FracPerm.StateVar
 open Scidonia.FracPerm.HSt
 
 /-! ## The programs
@@ -534,7 +562,375 @@ def checkedStructuredClosureCase : IO (Array String) := do
       ++ markerFailure "structured-checked-closure" "the child's standard output" "ok   structured-closure" out.stdout
   return failures
 
+/-! ## The path write on an array of structs
+
+`Scidonia.FracPerm.StateVar.Layout5` writes a leaf by taking its whole path
+apart: `takeOut` exchanges the selected element with the layout's placeholder in
+an owned `Array.swapAt`, and the inverse exchange puts the focus back after the
+path below it has been written. The cases here observe that take-out on an
+`Array (UInt64 × UInt64)`: the array's buffer must keep its address, the sibling
+structs must be the same objects, and the value at the path must be the one
+written while a sibling's stays fixed. A live second reference to the array must
+make the write copy instead.
+
+The struct at the written index is a `Prod`. The fused update returns the state
+alone, so the compiler's reset/reuse pass rewrites that cell in place — the
+generated C tests `lean_is_exclusive` and then sets the cell's fields — and
+`layout5-unique` asserts that the cell keeps its address. When a live second
+reference reaches it the test fails and the cell is allocated afresh, which is
+what `layout5-shared-copies` asserts: its address changes there. The array's
+buffer and every struct the write does not touch keep their addresses either,
+and those are asserted in every unique case.
+
+Where the focused element is itself an array — the nested cases — that array's
+own address is the same measurement: `layout5-nest` asserts it is unchanged,
+because the take-out hands the inner array over exclusively and the check on it
+is armed and does not fire, while `layout5-nest-aliased` holds a second
+reference to that inner array and asserts its address *changes* (the outer
+array's does not). That copy is what the element check turns into an abort in
+the checked child `layout5-checked-nest-shared`, and `layout5-checked-nest` is
+the unique nested write with both checks armed and neither firing. -/
+
+/-- The layout of the path-write cases: an array of binary structs, each a pair
+of machine words. -/
+abbrev layout5Structs : Layout5.Layout := .arr (.struct (.leaf .uint) (.leaf .uint))
+
+/-- The path `.index 3 (.left .here)`: the first field of the struct at index 3,
+which is neither the array's first nor its last slot. -/
+def layout5LeftPath : Layout5.ObsPath layout5Structs :=
+  ⟨.index 3 (.left .here), .uint, rfl⟩
+
+/-- The path `.index 5 (.right .here)`: the second field of a different struct. -/
+def layout5RightPath : Layout5.ObsPath layout5Structs :=
+  ⟨.index 5 (.right .here), .uint, rfl⟩
+
+/-- The path `.index 7 (.left .here)`: the last slot, where the swap is with
+itself. -/
+def layout5LastPath : Layout5.ObsPath layout5Structs :=
+  ⟨.index 7 (.left .here), .uint, rfl⟩
+
+/-- The path `.index 9 (.left .here)`: past the array, so the write declines and
+leaves the state alone. -/
+def layout5BadPath : Layout5.ObsPath layout5Structs :=
+  ⟨.index 9 (.left .here), .uint, rfl⟩
+
+/-- A fresh array of `n` structs from `seed`, with room for one more element, so
+that the take-out and put-back cycle does not have to grow the buffer. -/
+def freshStructs (seed n : Nat) : IO (Array (UInt64 × UInt64)) := do
+  let mut a : Array (UInt64 × UInt64) := Array.mkEmpty (n + 1)
+  for i in [0:n] do
+    a := a.push ((seed + i).toUInt64, (seed + 100 + i).toUInt64)
+  return a
+
+/-- What one run of a path write leaves to check. -/
+structure PathRun where
+  /-- Whether the array handed to the write was exclusively owned. -/
+  exclusiveBefore : Bool
+  /-- The array's buffer address before the write. -/
+  arrayBefore : USize
+  /-- The array's buffer address after the write. -/
+  arrayAfter : USize
+  /-- The address of the sibling struct at index 0, before the write. -/
+  siblingBefore : USize
+  /-- The address of the sibling struct at index 0, after the write. -/
+  siblingAfter : USize
+  /-- The address of the struct at the written index, before the write. -/
+  focusedBefore : USize
+  /-- The address of the struct at the written index, after the write. -/
+  focusedAfter : USize
+  /-- Whether the write reported that it took effect. -/
+  ok : Bool
+  /-- The array the write left behind. -/
+  array : Array (UInt64 × UInt64)
+
+/-- Run `write` on `a` and observe the array's and the structs' addresses. `a`
+is consumed by the run, so a caller that passes its only reference sees
+`exclusiveBefore` as `true`. -/
+def observePath (write : Array (UInt64 × UInt64) → Array (UInt64 × UInt64) × Bool)
+    (a : Array (UInt64 × UInt64)) : IO PathRun := do
+  let exclusiveBefore := exclusive a
+  let arrayBefore ← addressIO a
+  let siblingBefore ← addressIO (a[0]!)
+  let focusedBefore ← addressIO (a[3]!)
+  let (s', ok) := write a
+  let arrayAfter ← addressIO s'
+  let siblingAfter ← addressIO (s'[0]!)
+  let focusedAfter ← addressIO (s'[3]!)
+  return { exclusiveBefore, arrayBefore, arrayAfter, siblingBefore, siblingAfter,
+           focusedBefore, focusedAfter, ok, array := s' }
+
+/-- The unique case: the array's buffer, the structs the write does not touch
+and the struct at the written index all keep their addresses, the write reports
+that it took effect, and the value at the path changes while a sibling's stays
+fixed. The focused struct's address is asserted: the fused update reuses the
+pair when it is exclusively owned. -/
+def layout5UniqueCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let run ← observePath (fun arr => Layout5.setLeaf layout5LeftPath (seed + 7).toUInt64 arr) a
+  IO.println s!"{name}: the struct at the written index: {run.focusedBefore}, then {run.focusedAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the array address" true run.arrayBefore run.arrayAfter
+      ++ addressFailure name "the sibling struct's address" true run.siblingBefore run.siblingAfter
+      ++ addressFailure name "the struct at the written index" true run.focusedBefore run.focusedAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" ((seed + 7).toUInt64, (seed + 103).toUInt64) (run.array[3]!)
+      ++ disagree name "a sibling element" ((seed).toUInt64, (seed + 100).toUInt64) (run.array[0]!)
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The second field of another struct, so that the case is not specific to the
+left field or to one index. The struct at index 3, which this write does not
+touch, keeps its address. -/
+def layout5RightCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let run ← observePath (fun arr => Layout5.setLeaf layout5RightPath (seed + 9).toUInt64 arr) a
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the array address" true run.arrayBefore run.arrayAfter
+      ++ addressFailure name "a struct the write does not touch" true run.focusedBefore run.focusedAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" ((seed + 5).toUInt64, (seed + 9).toUInt64) (run.array[5]!)
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The last-slot case: the take-out swaps the selected slot with itself, so the
+siblings array is the array's prefix and the round trip still lands the focus at
+the last index. The struct at index 3, which this write does not touch, keeps
+its address. -/
+def layout5LastCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let run ← observePath (fun arr => Layout5.setLeaf layout5LastPath (seed + 8).toUInt64 arr) a
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the array address" true run.arrayBefore run.arrayAfter
+      ++ addressFailure name "a struct the write does not touch" true run.focusedBefore run.focusedAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" ((seed + 8).toUInt64, (seed + 107).toUInt64) (run.array[7]!)
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The out-of-bounds case: the write reports that it did not take effect and
+the state is the one it was handed, address included. -/
+def layout5BadCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let run ← observePath (fun arr => Layout5.setLeaf layout5BadPath (seed + 1).toUInt64 arr) a
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the array address" true run.arrayBefore run.arrayAfter
+      ++ disagree name "the write took effect" false run.ok
+      ++ disagree name "the element the write did not touch" ((seed + 3).toUInt64, (seed + 103).toUInt64) (run.array[3]!)
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The aliased case: a second binding still refers to the array, so it is not
+exclusively owned, the write copies rather than updating in place, the struct at
+the written index is rebuilt at a new address, and the reference the write did
+not go through keeps its values. -/
+def layout5AliasedCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let kept := a
+  let run ← observePath (fun arr => Layout5.setLeaf layout5LeftPath (seed + 7).toUInt64 arr) a
+  let keptAfter := kept
+  let failures : Array String :=
+    exclusiveFailure name "array" false run.exclusiveBefore
+      ++ addressFailure name "the array address" false run.arrayBefore run.arrayAfter
+      ++ addressFailure name "the struct at the written index" false run.focusedBefore run.focusedAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" ((seed + 7).toUInt64, (seed + 103).toUInt64) (run.array[3]!)
+      ++ disagree name "the value the alias still reads" ((seed + 3).toUInt64, (seed + 103).toUInt64) (keptAfter[3]!)
+  return failures
+
+/-- The path-write cases in a child with the check enabled: the array is
+exclusively owned and the extracted struct is too, so the check is armed and
+does not fire. -/
+def checkedLayout5UniqueCase : IO (Array String) := do
+  let out ← launchChecked "layout5-unique"
+  let failures :=
+    markerFailure "layout5-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "layout5-checked-unique" 0 out
+      ++ markerFailure "layout5-checked-unique" "the child's standard output" "ok   layout5-unique" out.stdout
+  return failures
+
+/-- The aliased path write in a child with the check enabled must end the
+process, naming the `Layout5` site: the write is about to copy the array. -/
+def checkedLayout5AliasedCase : IO (Array String) := do
+  let out ← launchChecked "layout5-shared"
+  let status :=
+    if out.exitCode == 0 then
+      #[s!"layout5-checked-shared: the exit status: expected a nonzero status, observed {out.exitCode}"]
+    else #[]
+  let failures :=
+    markerFailure "layout5-checked-shared" "the child's standard output" "check-enabled=true" out.stdout
+      ++ status
+      ++ markerFailure "layout5-checked-shared" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.open" out.stderr
+  return failures
+
+
+/-- The layout of the nested-array case: an array of arrays of machine words. The
+focused element is itself a mutable array, so a write inside it is an update of
+*that* array and its address is what a unique write must keep and an aliased
+write must change. -/
+abbrev layout5Nest : Layout5.Layout := .arr (.arr (.leaf .uint))
+
+/-- The path `.index 2 (.index 1 .here)`: the second slot of the inner array at
+index 2. -/
+def layout5NestPath : Layout5.ObsPath layout5Nest := ⟨.index 2 (.index 1 .here), .uint, rfl⟩
+
+/-- A fresh array of `n` inner arrays of machine words, with room for one more
+element so a take-out does not have to grow the buffer. -/
+def freshNested (seed n : Nat) : IO (Array (Array UInt64)) := do
+  let mut a : Array (Array UInt64) := Array.mkEmpty (n + 1)
+  for i in [0:n] do
+    let mut inner : Array UInt64 := Array.mkEmpty 4
+    for j in [0:3] do
+      inner := inner.push ((seed + 10 * i + j).toUInt64)
+    a := a.push inner
+  return a
+
+/-- What one run of the nested-array write leaves to check: the outer array's
+address, the inner array's address before and after, and the values. -/
+structure NestRun where
+  /-- Whether the outer array was exclusively owned. -/
+  outerExclusive : Bool
+  /-- Whether the focused inner array was exclusively owned. -/
+  innerExclusive : Bool
+  /-- The outer array's address before and after. -/
+  outerBefore : USize
+  outerAfter : USize
+  /-- The focused inner array's address before and after. -/
+  innerBefore : USize
+  innerAfter : USize
+  /-- Whether the write took effect. -/
+  ok : Bool
+  /-- The outer array the write left behind. -/
+  outer : Array (Array UInt64)
+  /-- The inner array the write left at the focused index. -/
+  inner : Array UInt64
+
+/-- Run the nested write and observe both arrays' addresses. -/
+def observeNest (outer : Array (Array UInt64)) : IO NestRun := do
+  let outerExclusive := exclusive outer
+  let innerExclusive := exclusive (outer[2]!)
+  let outerBefore ← addressIO outer
+  let innerBefore ← addressIO (outer[2]!)
+  let r := Layout5.setLeaf layout5NestPath (99 : UInt64) outer
+  let outerAfter ← addressIO r.1
+  let innerAfter ← addressIO (r.1[2]!)
+  return { outerExclusive, innerExclusive, outerBefore, outerAfter, innerBefore, innerAfter,
+           ok := r.2, outer := r.1, inner := r.1[2]! }
+
+/-- The nested unique case: the outer array and the focused inner array are both
+exclusively owned, both keep their addresses, the write landed, and every other
+slot of the inner array is unchanged. -/
+def layout5NestCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshNested seed 4
+  let run ← observeNest a
+  let failures : Array String :=
+    exclusiveFailure name "outer array" true run.outerExclusive
+      ++ exclusiveFailure name "focused inner array" true run.innerExclusive
+      ++ addressFailure name "the outer array address" true run.outerBefore run.outerAfter
+      ++ addressFailure name "the focused inner array address" true run.innerBefore run.innerAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" (99 : UInt64) run.inner[1]!
+      ++ disagree name "a sibling slot of the inner array" (seed + 20).toUInt64 run.inner[0]!
+      ++ disagree name "another inner array" (seed).toUInt64 (run.outer[0]!)[0]!
+  return failures
+
+/-- The element-alias control: a live second reference to the *focused inner
+array* (not to the outer one) makes that array shared, so writing its slot copies
+it: its address changes and the alias keeps its values, while the outer array
+still keeps its own address. -/
+def layout5NestAliasedCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshNested seed 4
+  let kept := a[2]!
+  let run ← observeNest a
+  let keptAfter := kept
+  let failures : Array String :=
+    addressFailure name "the outer array address" true run.outerBefore run.outerAfter
+    ++ addressFailure name "the focused inner array address" false run.innerBefore run.innerAfter
+    ++ disagree name "the write took effect" true run.ok
+    ++ disagree name "the value at the path" (99 : UInt64) run.inner[1]!
+    ++ disagree name "the value the alias still reads" (seed + 21).toUInt64 keptAfter[1]!
+  return failures
+
+/-- The nested unique write in a child with the check enabled: the outer array and
+the focused inner array are both exclusively owned, so both checks are armed and
+neither fires. -/
+def checkedLayout5NestCase : IO (Array String) := do
+  let out ← launchChecked "layout5-nest"
+  let failures :=
+    markerFailure "layout5-checked-nest" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "layout5-checked-nest" 0 out
+      ++ markerFailure "layout5-checked-nest" "the child's standard output" "ok   layout5-nest" out.stdout
+  return failures
+
+/-- The element-alias write in a child with the check enabled must end the
+process naming the *focus* site: the outer array is exclusive, so it is the check
+on the extracted element — the aliased inner array — that catches the copy. -/
+def checkedLayout5NestAliasedCase : IO (Array String) := do
+  let out ← launchChecked "layout5-nest-shared"
+  let status :=
+    if out.exitCode == 0 then
+      #[s!"layout5-checked-nest-shared: the exit status: expected a nonzero status, observed {out.exitCode}"]
+    else #[]
+  let failures :=
+    markerFailure "layout5-checked-nest-shared" "the child's standard output" "check-enabled=true" out.stdout
+      ++ status
+      ++ markerFailure "layout5-checked-nest-shared" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.struct" out.stderr
+  return failures
+
+/-! ## The sealed write on an array of structs
+
+`Scidonia.FracPerm.StateVar.SealedStateVar` is the interface an author joins when
+the type *is* a layout's state type: it supplies the layout and the equality and
+no code, so the write is the layout's `setLeaf` through the cast in `rep`. The
+case here drives that write on the shipped `Array (UInt64 × UInt64)` instance
+(whose `rep` is `rfl`, so the cast erases) and measures exactly what
+`layout5-unique` measures: the array's buffer and the struct cell at the written
+index must both keep their addresses, and the value at the path must be the one
+written. The checked child is the same write with both `assertExclusive` checks
+armed and neither firing. -/
+
+/-- The path `.index 3 (.left .here)` at the sealed array-of-structs layout. -/
+def sealedPairPath : Layout5.ObsPath SealedStateVar.sealedPairs :=
+  ⟨.index 3 (.left .here), .uint, rfl⟩
+
+/-- The sealed unique case: the write is `SealedStateVar.setLeaf` at the shipped
+`Array (UInt64 × UInt64)` instance, and the root array's buffer address and the
+struct cell at the written index must both be unchanged. -/
+def sealedUniqueCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshStructs seed 8
+  let run ← observePath
+    (fun (arr : Array (UInt64 × UInt64)) =>
+      SealedStateVar.setLeaf sealedPairPath (seed + 7).toUInt64 arr) a
+  IO.println s!"{name}: the struct at the written index: {run.focusedBefore}, then {run.focusedAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the array address" true run.arrayBefore run.arrayAfter
+      ++ addressFailure name "the sibling struct's address" true run.siblingBefore run.siblingAfter
+      ++ addressFailure name "the struct at the written index" true run.focusedBefore run.focusedAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" ((seed + 7).toUInt64, (seed + 103).toUInt64) (run.array[3]!)
+      ++ disagree name "a sibling element" ((seed).toUInt64, (seed + 100).toUInt64) (run.array[0]!)
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The sealed write in a child with the check enabled: the array and the
+extracted struct are exclusively owned, so both checks are armed and neither
+fires, and the child exits zero. -/
+def checkedSealedUniqueCase : IO (Array String) := do
+  let out ← launchChecked "sealed-unique"
+  let failures :=
+    markerFailure "sealed-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "sealed-checked-unique" 0 out
+      ++ markerFailure "sealed-checked-unique" "the child's standard output" "ok   sealed-unique" out.stdout
+  return failures
+
 /-! ## The entry point -/
+
 
 /-- Print one case's verdict and count it. -/
 def report (name : String) (failures : Array String) : IO UInt32 := do
@@ -567,13 +963,26 @@ def runAll : IO UInt32 := do
     ("counter-shared-log-bump", ← counterSharedBumpCase "counter-shared-log-bump"),
     ("structured-unique", ← structuredUniqueCase "structured-unique" fill),
     ("structured-closure", ← structuredClosureCase "structured-closure" fill),
+    ("layout5-unique", ← layout5UniqueCase "layout5-unique" seed),
+    ("layout5-right", ← layout5RightCase "layout5-right" seed),
+    ("layout5-last", ← layout5LastCase "layout5-last" seed),
+    ("layout5-out-of-bounds", ← layout5BadCase "layout5-out-of-bounds" seed),
+    ("layout5-shared-copies", ← layout5AliasedCase "layout5-shared-copies" seed),
+    ("layout5-nest", ← layout5NestCase "layout5-nest" seed),
+    ("layout5-nest-aliased", ← layout5NestAliasedCase "layout5-nest-aliased" seed),
+    ("sealed-unique", ← sealedUniqueCase "sealed-unique" seed),
     ("checked-abort", ← checkedAbortCase),
     ("checked-unique", ← checkedUniqueCase),
     ("counter-checked-unique", ← counterCheckedUniqueCase),
     ("counter-checked-shared-log", ← counterCheckedAbortCase),
     ("counter-checked-shared-log-bump", ← counterCheckedBumpCase),
     ("structured-checked-unique", ← checkedStructuredUniqueCase),
-    ("structured-checked-closure", ← checkedStructuredClosureCase)
+    ("structured-checked-closure", ← checkedStructuredClosureCase),
+    ("layout5-checked-unique", ← checkedLayout5UniqueCase),
+    ("layout5-checked-shared", ← checkedLayout5AliasedCase),
+    ("layout5-checked-nest", ← checkedLayout5NestCase),
+    ("layout5-checked-nest-shared", ← checkedLayout5NestAliasedCase),
+    ("sealed-checked-unique", ← checkedSealedUniqueCase)
   ]
   let mut status : UInt32 := 0
   for (name, failures) in cases do
@@ -583,6 +992,7 @@ def runAll : IO UInt32 := do
 /-- The child's run of one case: report the switch, then the case. -/
 def runChild (command : String) : IO UInt32 := do
   IO.println s!"check-enabled={inplaceCheckEnabled}"
+  let seed := (← IO.monoMsNow) % 97 + 1
   let fill : UInt64 := ((← IO.monoMsNow) % 89 + 1).toUInt64
   match command with
   | "unique" => report "unique" (← uniqueCase "unique")
@@ -592,6 +1002,11 @@ def runChild (command : String) : IO UInt32 := do
   | "counter-shared-bump" => report "counter-shared-bump" (← counterSharedBumpCase "counter-shared-bump")
   | "structured-unique" => report "structured-unique" (← structuredUniqueCase "structured-unique" fill)
   | "structured-closure" => report "structured-closure" (← structuredClosureCase "structured-closure" fill)
+  | "layout5-unique" => report "layout5-unique" (← layout5UniqueCase "layout5-unique" seed)
+  | "layout5-shared" => report "layout5-shared" (← layout5AliasedCase "layout5-shared" seed)
+  | "layout5-nest" => report "layout5-nest" (← layout5NestCase "layout5-nest" seed)
+  | "layout5-nest-shared" => report "layout5-nest-shared" (← layout5NestAliasedCase "layout5-nest-shared" seed)
+  | "sealed-unique" => report "sealed-unique" (← sealedUniqueCase "sealed-unique" seed)
   | _ => do
     IO.eprintln s!"inplace: unknown command {command}"
     return 2
@@ -601,5 +1016,5 @@ def main (args : List String) : IO UInt32 := do
   | [] => runAll
   | [command] => runChild command
   | _ => do
-    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure]"
+    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure|layout5-unique|layout5-shared|layout5-nest|layout5-nest-shared|sealed-unique]"
     return 2

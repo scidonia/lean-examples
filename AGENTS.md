@@ -80,6 +80,46 @@ The compile-time checks live in the check library:
   transport for `Bool` at `sum unit unit`, a description the slot does not use,
   so the transport is not exercised only by its one client. Its `#print axioms`
   shows the new theorems rest on the standard kernel principles only.
+- `ScidoniaTest/Model5.lean` checks `Scidonia.FracPerm.StateVar.Layout5` from
+  outside, in the same style. Its behavioural checks are `#guard`s of `read?` at
+  a leaf of an array of structs, at a nested struct, at a root leaf and at an
+  out-of-bounds index, and of the values a path write leaves; its semantic checks
+  are the zipper's round trip, the path replacement, the failure equation, the
+  read–write–read snapshot at `7 → 9` (the two readings are different, so the
+  first conjunct cannot stand in for the criterion) and the frame at a sibling
+  field and at another array index, each stated both universally and at concrete
+  paths. Its privacy pins are `#guard_msgs` rejections of `«open»`, `plug`,
+  `Context`, `takeOut` and `plugAt`, beside an affirmative `#check` of `read?`,
+  which is how the raw-focus boundary is observed from outside the module. Its
+  negative checks are a `#guard_msgs` rejection of a whole-array read
+  path, the class's own detector, and a **countermodel instance**: a
+  `LawfulStateVar (Array UInt64)` whose read returns the array itself, with a
+  constructor-faithful, injective, no-reference array encoder, so all four class
+  laws hold and the class accepts it. That instance is what Model 5's leaf-only
+  read path closes — its read returns an observation of the closed universe and
+  a path cannot address a whole array. Its `#print axioms` shows the new
+  theorems rest on the standard kernel principles only. The kernel cannot reduce
+  `read?` on an `Array` literal, because `Array`'s primitives are opaque to it,
+  so the concrete readings are established by `#guard` (which evaluates the
+  compiled definitions) and the theorems about them take the read as an
+  assumption.
+- `ScidoniaTest/Sealed.lean` checks `Scidonia.FracPerm.StateVar.SealedStateVar`
+  from outside. Its behavioural checks are `#guard`s of `SealedStateVar.read?`
+  and `SealedStateVar.setLeaf` on the two shipped instances — a leaf of an array
+  of structs, a leaf of a nested array, and an out-of-bounds index — and its
+  semantic checks are the four theorems at the concrete instance: detachment, the
+  read after a successful write, the `7 → 9` snapshot, the frame at a sibling
+  field, and the failure equation. Its structural checks pin what the class
+  cannot do: a `#guard_msgs` rejection of an instance that adds an `observe`, one
+  that adds an `encodeRead`, and one whose `rep` names a layout the type is not,
+  plus the observation that `SealedStateVar.observe` and
+  `SealedStateVar.encodeRead` are not names a client can write — beside
+  affirmative `#check`s of the class's fields and of the public read and write.
+  Its comparison with the old class cites the countermodel: `LawfulStateVar`
+  admits an instance whose read is the mutable array, and the same instance shape
+  offered to the sealed class is rejected, which is what makes the sealed
+  guarantee structural. Its `#print axioms` shows the new theorems rest on the
+  standard kernel principles only.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -107,6 +147,32 @@ before `update`; the case that shows the check terminating a process is
 `checked-abort`, and `shared-copies` is the address control beside it, which
 shows the copy itself. See the structured section below for why a structured
 case cannot be the one that fires it.
+
+The path writes of `Scidonia.FracPerm.StateVar.Layout5` are checked the same
+way, and they are the cases that put the take-out on a real
+`Array (UInt64 × UInt64)`: `layout5-unique`, `layout5-right`, `layout5-last` and
+`layout5-out-of-bounds` check the values a path write leaves and that the array's
+buffer and the sampled sibling struct each case names keep their addresses;
+`layout5-shared-copies` is the control that shows a live second reference to the
+array makes the write copy; `layout5-checked-unique` is the same unique write in
+a child with the check armed, which must exit zero because the take-out's array
+and the element it extracted are both exclusively owned; and
+`layout5-checked-shared` is the aliased write with the check armed, which must
+end the process naming the `Layout5` site. The nested cases put the measurement
+on the focused element: `layout5-nest` asserts the focused inner array's own
+address is unchanged (and `layout5-checked-nest` exits zero),
+`layout5-nest-aliased` holds a live reference to that inner array and asserts its
+address changes, and `layout5-checked-nest-shared` is that write with the check
+armed, which must end the process naming the element's site. The struct at the
+written index is a `Prod` and the update returns the state alone, so the
+compiler's reset/reuse pass rewrites that cell in place: `layout5-unique` asserts
+it keeps its address and `layout5-shared-copies` asserts it changes when a live
+second reference reaches it; see the Model 5 section below for what that does
+and does not show. The sealed write is checked the same way:
+`sealed-unique` drives `SealedStateVar.setLeaf` on the shipped
+`Array (UInt64 × UInt64)` instance and asserts the array's buffer and the struct
+at the written index are unchanged, and `sealed-checked-unique` is that write in
+a child with the check armed, which must exit zero.
 
 `ScidoniaTest/Structured.lean` checks `Scidonia.FracPerm.Structured` from
 outside, in the same library and the same style. Its behavioural checks are
@@ -305,6 +371,176 @@ operations is a logical side condition, so it uses `Classical.propDecidable` and
 is model-only. `ScidoniaTest/StateVar.lean` prints the axioms of representative
 theorems of the theory; they are the standard kernel principles only.
 
+## Model 5: paths, detached observations, and take-out writes
+
+`Scidonia/FracPerm/StateVar/Layout5.lean` is the fifth model. Where the class's
+state is one description-indexed element, a layout has *structure*: `ObsDesc` is
+the closed observation universe (unit, natural, word, boolean, sum, option,
+pair) — no array, struct or reference appears in it — `Layout` is a leaf of that
+universe, a binary `struct` (so arbitrarily many fields by nesting) or an `arr`,
+and `State` is the type a layout denotes. A `Path` is an address whose `index`
+step is dynamic: whether it addresses anything is a property of a particular
+state. An `ObsPath` is a path together with the leaf description its end must
+have, and that proof field is what makes a whole-array read *unwritable*:
+`At p = .leaf o` has no solution at an `.arr` or `.struct` end, so
+`array_root_not_observable` and the `#guard_msgs` rejection in the check library
+are the same fact seen from two sides.
+
+A read ends only at a leaf of the closed universe. `read?` returns
+`Option Value` — the library's `encodeObs` of the observation the path ended at,
+or `none` for an index that addresses nothing — and its traversal (`leafAt?`) is
+private, so the raw focus is obtained and encoded in one step and no function
+returns a state. `encodeObs_injective` and `encodeObs_noRef` are proved once, by
+structural induction over the universe, and `read_detached` is their
+consequence: a successful read names no `.loc`, so it cannot hand back a
+mutable part of the state.
+
+The zipper is the write's private *specification*. `Context d p` is the one-hole
+context of a path, `open` takes a state apart into a context and a focus (or
+reports the original state, for an index that addresses nothing at any depth),
+and `plug` puts a focus back; all of them are private, so a client cannot obtain
+a raw focus. `setLeaf` is a structurally recursive update of its own — it asks
+`inBounds` whether the path addresses anything, then rebuilds each struct cell
+from its updated component and takes the array case out, checks it, recurses and
+puts it back — and it is proved equal to the zipper's path replacement by
+`setAt_spec`, so every theorem stated through `setLeaf` holds of the
+specification. The update threads the new focus through the recursion as the
+focus of the path rather than as a function of the old state, so a write
+allocates no closure; the cast from the observation to the path's state type
+happens once, in `setLeaf`, and erases. `open_plug` is the zipper's round
+trip, `plug_update` says a successful write is the path replacement, `open_failed`
+says a failed `open` reports the state it was given, and `setLeaf_failed` says a
+failed write leaves the state alone. `snapshot_after_setLeaf` binds the earlier
+read to the *old* state and the read after the write to the write's own operand,
+and `read_frame` says a write at a path disjoint from a read path — `Disjoint`
+excludes the equal paths and every ancestor/descendant pair, not merely paths
+whose final fields differ — does not change what that read returns.
+
+The array case is a **take-out** write. `takeOut` is an owned `Array.swapAt`
+exchange that leaves the layout's placeholder in the selected slot and hands the
+element back, so the array keeps its size and every other slot; `plugAt` is the
+inverse exchange that puts a focus back. Both are private, like the zipper: they
+hand back the raw element an update below the slot works on, so a client reaches
+them only through `read?` and `setLeaf`. The pair `takeOut` returns is
+destructured before anything is checked or recursed into, and the path below it
+is taken apart on the extracted element itself. The array's exclusivity is not
+the element's — the take-out replaces one slot, and a caller that built an
+aliased array can leave another slot pointing at the same object — which is why
+the extracted element is checked on its own. If the path below cannot be opened,
+the state the inner `open` reported is put straight back — the element it was
+given — so the failure reports the original array.
+
+Two `assertExclusive` checks guard the mutation, and both are the difference
+between an update in place and a copy: the check on the *array*, before the
+take-out, because a shared array is copied whole; and the check on the
+*extracted focus*, before the update below it runs, because a shared element — a
+spare slot, or an alias a caller kept — is what a write inside it would copy.
+Two instruments report different things and are not interchangeable: the
+generated C of `setAt`'s array case — the recursion `setLeaf` executes, not
+`open`, which is the zipper specification — shows the ownership and the order —
+the pair the take-out returned converted to its two locals and released, the
+focus check after it, the recursion on the check's result, and the put-back —
+while `ScidoniaInPlace`'s `addressIO` observations, with the assertions the
+harness puts on them, are what establishes that an address is unchanged or
+changed.
+
+`describedLayoutStateVar d` is the adapter: a layout state is a lawful state
+variable whose reads are `read?`, whose writes are `setLeaf`, and whose encoding
+is `encodeObs`. It is a value of the existing class built from library
+definitions — an author supplies neither the encoder nor the read operation — so
+the generic model's and the heap's theorems apply at it
+(`describedLayout_read_after_replace`, `describedLayout_primitive_detached`,
+`describedLayout_read_at_detached`, `describedLayout_write_at_valid`,
+`describedLayout_write_at_frame`) without a new proof.
+
+What Model 5 does not claim. The raw-focus routes are private: `Context`,
+`open`, `plug`, the laws about them, and the take-out (`takeOut`, `takeOutAt`,
+`plugAt` and their lemmas) are not exported, because each hands back either a
+focus or the raw element an update below a slot works on, so a client that could
+call one could keep a mutable node — an inner array — past a leaf. The read
+guarantee is about the public `read?`/`setLeaf` surface: `read?` never returns a
+state or a subtree, and `ScidoniaTest/Model5.lean` pins the privacy from outside
+with `#guard_msgs` around a use of `«open»`, of `plug`, of `Context`, of
+`takeOut` and of `plugAt`, each beside an affirmative `#check` of `read?`.
+Whether a compiled write updates in place is run-time evidence from
+`ScidoniaInPlace`, not a theorem: the harness's `layout5-unique`,
+`layout5-right`, `layout5-last` and `layout5-out-of-bounds` cases check the
+values and the addresses of the unique array, and `layout5-shared-copies` is the
+control that shows a live second reference to the array makes the write copy.
+`layout5-checked-unique` runs with `SCIDONIA_CHECK_INPLACE=1` and exits zero, and
+`layout5-checked-shared` shows the same write on a shared array terminating the
+process with the array's site on standard error. The extracted element is
+checked too, before the update below it runs, because a write inside it is what a
+shared element would copy: `layout5-nest` writes a leaf of an inner array and
+asserts the inner array's own address is unchanged, with `layout5-checked-nest`
+exiting zero, while `layout5-nest-aliased` holds a live reference to that inner
+array and asserts its address changes (the outer array's does not) and
+`layout5-checked-nest-shared` is that write with the check armed, which
+terminates naming the element's site. The struct at the written slot is a `Prod`
+and the update returns the state alone, so the compiler's reset/reuse pass
+rewrites that cell in place: `layout5-unique` asserts it keeps its address, and
+`layout5-shared-copies` asserts it changes when a live second reference reaches
+it. Array bounds, size preservation and the take-out round trip are
+instance-specific private lemmas (`takeOut_fst`, `takeOut_bound_of_eq`,
+`plugAt_size`, `plugAt_takeOut`), not class laws. The old class is unchanged: it
+still accepts an instance whose encoding is honest by its own lights and whose
+read names the state (`ScidoniaTest/Model5.lean`'s countermodel shows exactly
+that), so the historical `FracObject` and `LawfulStateVar` obligations remain
+prose or per-instance proofs and are not automatically enforced for historical
+instances.
+
+## Sealed state variables
+
+`Scidonia/FracPerm/StateVar/Sealed.lean` is the same guarantee as a class rather
+than a wrapper. `SealedStateVar σ` asks an instance for exactly two things: the
+layout `σ` is, and `rep : σ = State layout`. It has no field for a read, a write
+or an encoding, so an instance cannot supply one, and the library defines the
+operations once from `rep`:
+
+```lean
+SealedStateVar.read? (p : ObsPath layout) : σ → Option Value
+SealedStateVar.setLeaf (p : ObsPath layout) (x : ObsEl p.obs) : σ → σ × Bool
+```
+
+Both are the layout's operation after the cast in `rep`: `read?` is `Layout5.read?`
+at the transported state, and `setLeaf` is `Layout5.setLeaf` with the state cast
+in and the state it returns cast out. `sealedLawful [SealedStateVar σ]` is the
+derived `LawfulStateVar σ σ (ObsPath _) (LayoutWrite _)`: Model 5's adapter
+transported along `rep`, so its four laws are the adapter's rather than per
+instance, and its read result (`Option (ObsEl p.obs)`) and its encoding (the
+library's `encodeObs` of the observation) are fixed by `rfl` — an instance
+supplies neither. The theorems restate Model 5's for every sealed instance:
+`sealedRead_detached` (a read result names no `.loc`), `sealedRead_after_setLeaf`
+and `sealedSnapshot` (the read after a successful write is the written
+observation, while an earlier read keeps the old state's value),
+`sealedRead_frame` (a write at a disjoint path changes no other read), and
+`sealedSetLeaf_failed` (a failing write leaves the state alone).
+
+What is checked is what is observed. `ScidoniaTest/Sealed.lean` pins the absence
+of the fields from outside — an instance that tries to add an `observe` or an
+`encodeRead` is rejected by elaboration, `rep` cannot name a layout the type is
+not, and `SealedStateVar.observe` is not a name a client can even write — beside
+the affirmative `#check`s and the positive reads and writes on both shipped
+instances (`Array (UInt64 × UInt64)` and `Array (Array UInt64)`), and beside the
+countermodel comparison: `LawfulStateVar` still admits the leaky array instance
+of `ScidoniaTest/Model5.lean`, and `SealedStateVar` has no field to put that read
+in. Whether the write is in place is the run-time evidence of `ScidoniaInPlace`:
+`sealed-unique` drives `SealedStateVar.setLeaf` on the array-of-structs instance
+and asserts the array's buffer and the struct cell at the written index both
+keep their addresses, and `sealed-checked-unique` is the same write with
+`SCIDONIA_CHECK_INPLACE=1`, exiting zero. The cast costs nothing: the generated C
+of the sealed write calls `Layout5.setLeaf` with the state unchanged — no
+boxing, no conversion, no closure — and reuses the pair it returns, because the
+instance's `rep` is `rfl` and the two casts erase.
+
+Scope limit: a *user-declared* `structure` cannot be sealed. `rep : σ = State
+layout` must be an equality, and for a structure of one's own the only relation
+to a layout's state type is an isomorphism, not an equality. An isomorphism-based
+variant would have to convert between the two representations on writes; whether
+that costs a copy has not been implemented or measured here. Arrays, nested
+arrays, pairs and the observation universe's leaves are usable, because `State`
+denotes them definitionally.
+
 ## Writing an instance
 
 An object joins the interface by an instance of `FracObject`: the instance
@@ -477,6 +713,8 @@ repository, not this one, so quote code here as a compiled panel. The built
 | `Scidonia/FracPerm/StateVar/Description.lean` | The description universe: `Desc`, `El d`, and `slotDesc` |
 | `Scidonia/FracPerm/StateVar/Universe.lean` | One instance for every description: `encodeEl`, its two laws, `Described d`, `describedStateVar d`, and `transport` |
 | `Scidonia/FracPerm/StateVar/Slot.lean` | The slot: `encode`/`decode`, both inverse laws, and the instance transported at `slotDesc` |
+| `Scidonia/FracPerm/StateVar/Layout5.lean` | Model 5: the observation universe and layouts, paths, the zipper, `read?`/`setLeaf`, and the lawful adapter |
+| `Scidonia/FracPerm/StateVar/Sealed.lean` | `SealedStateVar`: a layout state's type as the whole interface, with the read and the write defined by the library and the derived lawful instance |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -484,6 +722,8 @@ repository, not this one, so quote code here as a compiled panel. The built
 | `ScidoniaTest/StateVar.lean` | The generic state variable's witness, model, bridge, and negative-law checks |
 | `ScidoniaTest/Universe.lean` | The description universe's encoding, instance, model, and transport checks |
 | `ScidoniaTest/Slot.lean` | The slot's correspondence, instance, snapshot, shape-change, and detector checks |
+| `ScidoniaTest/Model5.lean` | Model 5's reads, zipper laws, frames and snapshots, the whole-array rejection, and the old class's countermodel |
+| `ScidoniaTest/Sealed.lean` | `SealedStateVar`'s reads, writes and theorems at its instances, the rejection of an `observe`/`encodeRead`/mismatched-`rep` instance, and the countermodel comparison |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |

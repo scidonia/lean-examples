@@ -15,3 +15,5 @@ import Scidonia.FracPerm.StateVar.Array
 import Scidonia.FracPerm.StateVar.Description
 import Scidonia.FracPerm.StateVar.Universe
 import Scidonia.FracPerm.StateVar.Slot
+import Scidonia.FracPerm.StateVar.Layout5
+import Scidonia.FracPerm.StateVar.Sealed

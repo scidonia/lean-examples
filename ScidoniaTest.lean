@@ -4,3 +4,5 @@ import ScidoniaTest.Structured
 import ScidoniaTest.StateVar
 import ScidoniaTest.Universe
 import ScidoniaTest.Slot
+import ScidoniaTest.Model5
+import ScidoniaTest.Sealed
