@@ -700,10 +700,34 @@ library value, and a definition's clauses are stated by `rfl`. A panel fenced
 ```` ```@path ```` must be a verbatim excerpt of a file, and its path resolves
 through the generator's repository root, so this repository's source is quoted as
 ```` ```@../lean/Scidonia/… ````; a quotation shows a definition exactly as the
-library has it and fails the build if the library changes. The built
+library has it and fails the build if the library changes. The prose format has
+no table syntax — a `|`-table renders as literal text, so use bullets — and every
+fenced block is either quoted or compiled, so an excerpt of generated C or of an
+IR trace belongs in inline code within a bullet, with the command that produced
+it, not in a fence. The built
 `Slides/fracperm.html` is committed, so the deck can be viewed on GitHub Pages
 at https://scidonia.github.io/lean-examples/Slides/fracperm.html; rebuild it
 and commit it with any change to the deck's sources.
+
+A second, self-contained tutorial builds the kit of a *write* from the
+definitions and then shows when the write stays in place. It needs no test
+library beyond the first command above:
+
+```sh
+nix develop -c lake env python3 ../vericoding-tutorial/scripts/build_deck.py \
+  --prose Slides/update-kit.md \
+  --example Slides/UpdateSteps.lean \
+  --prose Slides/update-behaviour.md \
+  --title "Writing through a path" \
+  --subtitle "The kit of a state update, and when it stays in place" \
+  --output Slides/update.html
+```
+
+`Slides/update.html` is committed too, and viewable at
+https://scidonia.github.io/lean-examples/Slides/update.html. Its
+"twelve shapes" slide and its excerpts of the emitted code are measurements,
+not checked panels: the Lean panels around them are compiled, and the address
+assertions that ship live in the `inplace` harness.
 
 ## Layout
 
