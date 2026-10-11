@@ -73,6 +73,38 @@ Two lessons. Reading the generated C is not evidence about the object that matte
 
 For a **safe client, through the exported operations**, the session state and its mutable subtrees are unreachable: the state type is not constructed by the client, the interpreter is private, and reads return only observation values. Under that restriction, "no reader is out" coincides with "no *client* alias" (L3). It does **not** establish L3′: a client can still be in a context where its own earlier values keep an object alive, unsafe or foreign code is outside the guarantee, and the library's own temporaries and the compiler's decisions are untouched by the surface. L3′ remains an invariant to be measured per path, and, at best, proved in a model (§4 S5).
 
+### 3.6 When we get update semantics: the shape rules
+
+A mutation site asks one question: is this object's count exactly 1 here? Count 1 → update in place; otherwise → allocate a copy. Twelve minimal cases, each compiled and run on this toolchain (address measured before and after; a scratch executable, not yet part of the harness):
+
+| Case | Code | Address kept? |
+| --- | --- | --- |
+| A | `a.set! i v` on an owned array | in place |
+| A′ | the same, with a live alias to `a` | copied |
+| B | `(a.set! i v, a.size)` — no alias, one extra use | copied |
+| C | `{ s with hits := s.hits + 1 }` | struct cell reused |
+| D | `({ s with log := s.log.set! 0 v }, s.log.size)` | struct reused, `log` copied |
+| E | `({ s with hits := s.hits + 1 }, true)` | struct cell reused |
+| F | `{ s with log := s.log.set! 0 v }` | `log` in place |
+| G | `a.modify i (fun inner => inner.set! j v)` | inner in place |
+| H | `let inner := a[i]!; a.set! i (inner.set! j v)` | inner copied |
+| I | `fC s` with an alias to `s` live | copied |
+| J | `a.push v` with room to spare | in place |
+| J′ | `a.push v` with no room | reallocated |
+| K | `#[0,0,0,0].set! i v` — a compile-time constant | copied (never exclusive) |
+
+Three signals in the emitted IR decide every case: `inc x` before a mutation (the value is used again in the same expression, as in B, or an alias is live, as in A′ and I); `isShared` before a rebuild (the reset/reuse pass rewrites the *incoming* cell when it is exclusive, as in C, D, E, F, G); and take-out versus a borrowed get (`Array.getInternal` + a placeholder `Array.set` in G, against `Array.get!InternalBorrowed` + `inc` in H).
+
+**The rules.**
+
+1. **The object was allocated at run time.** A compile-time constant has count 0 (persistent) and is never exclusive (K) — the reason `runFresh` builds the state at run time.
+2. **Its count is 1 at the mutation:** no alias live across the call (A′, I), no projection of it taken and used (H, D), and no second use of the same value in the same expression (B).
+3. **A whole-value rebuild recycles the incoming cell when it is exclusive** (C, D, E, F, G), but the pass matches on *shape*: with more than one same-shaped constructor in the expression the cell can go to the wrong one — Trap 2, where the `(state, Bool)` pair was a second `Prod`.
+4. **A write nested inside a structure needs every node on the path to be exclusive at the moment of the write.** Take-out makes the node owned (G); a borrowed get does not (H).
+5. **The write is a fixed-size element write.** `Array.set!` cannot grow; an append needs spare capacity (J against J′).
+
+**This is not the shape a normal update takes.** A normal update is "check, then write", and the check's result is a scalar, so the state's uses are sequential and the last one is a move: `setLeaf` compiles to `inBounds(path, s)` and then `setAt(path, x, s)` with **no increment of the state at all**. Case B copies because the *new array* had to be used as well; a command surface cannot express that, because the client has no value to write and read at once.
+
 ## 4. Proposal: cheapest first
 
 ### S1 — Seal the program surface: a session whose state type clients cannot name
@@ -136,6 +168,25 @@ A verified-translation path (1–3 as proofs) and a trusted-correspondence path 
 - **Buys:** turns L3′ for a class of programs from "measured" into "proved in a model", with assumptions explicit.
 - **Cost:** research-scale, plus whichever links remain trusted.
 
+### S6 — Freeze the update as a schema over the universe (Model 6)
+
+S2's obligations are hand-written in one interpreter, so a later edit can lose them — that is how Trap 2 arose. The remedy is to treat the update as a *schema over the description universe* rather than a per-interpreter habit, and to state its shape obligations explicitly.
+
+The schema is nearly in place already. `setAt` is one structural recursion over `Layout`, a clause per constructor: at a leaf it replaces the focus; at a struct it destructures the cell and rebuilds it from the updated component, returning the state alone; at an array it takes the element out, checks the extracted focus, recurses and puts it back. Two surface restrictions are what make the losing shapes inexpressible, and both hold:
+
+- the update operand's type is an **observation** (`ObsEl p.obs`), so no client value — and therefore no client alias — can be installed;
+- there is **no growth operation**: the surface offers fixed-size element replacement only (§3.6 rules 1 and 5).
+
+What remains to be done, and what each part is worth:
+
+- **State the shape obligations** as obligations of the schema: one write per mutable node, on an owned focus; a state-only return from the recursion; no projection or closure retained across the write; take-out before any check at an array.
+- **Separate what is provable about the source from what is not.** That the recursion writes exactly one leaf per path is the existing `setAt_spec` — the schema *is* the zipper's path replacement — and that it returns the state alone is a type fact. That the cell the pass reuses is the cell that gets stored is **not a source property**: it is the compiler's choice among same-shaped candidates, which is why S4 checks it and S5 models it.
+- **Extension rule:** a new layout constructor, primitive or update form adds its schema clause, its obligation and its harness case, so coverage is a rule of the design rather than an afterthought.
+- **Companion:** S4. Together they say "the shape is right by construction" (S6) and "the shape survived the compiler" (S4).
+
+- **Buys:** the shapes that lose in-place become unwritable where types can say so (no client value in, no growth) and stated obligations elsewhere, and the compiler's freedom narrows to reusing the single candidate per mutable node.
+- **Cost:** the obligations are documentation plus harness cases until S4 turns them into a check, and each new mutable shape is a new obligation.
+
 ### What cannot be done in Lean
 
 Lean's ordinary value and type system does not prevent copying a value, and it has no affine or uniqueness typing of the kind Rust's borrows, Clean's uniqueness types or Linear Haskell provide. Therefore general, source-level uniqueness (L3′ for arbitrary values and code) is not enforceable in Lean by types. That is a property of the host language, and it does **not** mean no ownership discipline is expressible: API-level capability and escape control — private constructors, sealed interpreters, continuation-scoped operations — can enforce a narrower discipline, which is exactly what S1 does, and what Model 1 already does.
@@ -154,7 +205,7 @@ None of these replaces S1 + S2; each narrows the contract in a different place, 
 ## 5. Recommended order
 
 1. **S1 + S2** as one milestone: S1's claim rests on the interpreter keeping one reference, and S2 is what makes that true and checked. This is the step that makes non-escape true for client code.
-2. **S4** next: the cheapest mechanical protection against the two traps, covering code no human will re-read.
+2. **S6 + S4** as the next pair: S6 makes the shape a schema with stated obligations and an extension rule, and S4 checks the part of it that is the compiler's choice rather than the source's. S6 alone would leave the cell-reuse question to measurement; S4 alone would check a shape nobody had frozen.
 3. **S3**, where a layout is available, for nested footprints.
 4. **S5** as the research goal, with its correspondence chain stated up front.
 
@@ -167,6 +218,7 @@ None of these replaces S1 + S2; each narrows the contract in a different place, 
 | S3 | a case with a deliberately aliased nested element: unique passes, aliased aborts naming the nested site | measured: footprint-wide, checked mode only |
 | S4 | the checker rejects a deliberately bad instance (a retained closure, an un-destructured pair) and accepts the shipped ones | checked: the emitted code's shape |
 | S5 | the model theorem with its hypotheses listed, and an explicit list of which correspondence links are verified and which are trusted | proved in the model; not a claim about compiled executions |
+| S6 | the schema and its obligations written down; refused probes for the surface restrictions (an observation-typed update operand, no growth operation); a harness case per mutable shape, each asserting addresses on the root and the focused cell | structural where types say so; measured per shape; the obligations themselves are stated, and become checked under S4 |
 
 ## 7. Open questions
 
@@ -174,6 +226,7 @@ None of these replaces S1 + S2; each narrows the contract in a different place, 
 2. Should the ledger's role be stated plainly as *sharing* accounting (parallel safety), with non-escape owned by sealing? That is a change in the pitch, not in the code.
 3. For S4, is a checker over Lean's IR acceptable to maintain, or is that effort better spent on S5's model?
 4. For S5, is "proved in the model, correspondence trusted and stated" the honest and sufficient result to publish, or is the verified-translation path required?
+5. For S6, does a single generic recursion over the universe plus stated obligations suffice, or does the shape need to be *generated* (a metaprogramming schema) so that the losing shapes are inexpressible rather than documented? The difference is where the obligation lives: in a comment and a harness case, or in a generator that cannot emit the wrong shape.
 
 ## 8. Non-claims
 
@@ -182,7 +235,8 @@ None of these replaces S1 + S2; each narrows the contract in a different place, 
 - Sealing establishes non-escape through the exported operations, under the exclusions of S1. It does not establish L3′.
 - Checked mode is diagnostic: it neither proves nor enforces in runs where it is disabled.
 - Copying in Lean is always safe: a missed in-place update costs time, never correctness or a race.
-- Every measured claim in this document is measured on this toolchain, on the named harness cases.
+- Every measured claim in this document is measured on this toolchain, on the named harness cases — **except the table in §3.6**, which was measured in a scratch executable (cases A–K) and is not yet part of the checked harness; making it so is part of S6's acceptance evidence.
+- The compiler behaviour in §3.6 is a description of this toolchain's emitted code, not a specification: nothing here promises the same shapes behave the same way on another Lean version.
 - The fork/join is notional; the executor is sequential, and a real concurrent backend would still face the thread-shared marking of `Task.spawn`.
 
 ## 9. Pointers
