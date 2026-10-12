@@ -40,10 +40,14 @@ without a reference to the root it read (`observe_detached`), and
 root (`read_at_detached`). `Value.refs` is the references an encoded value names,
 `noRef_iff_refs_count` reads `NoRef` as that list's count being zero, and
 `readAt_result_holds_no_handle` is the interface's law at that vocabulary. What
-the counted layer then says is `refCount_one_of_detached_issues`: a run whose
-every issued read result is detached from the root holds no handle on it but the
-runner's own, so the root's count is one; `not_exclusive_of_issued_loc` is the
-same shape with an issued result that names the root, whose count is two. The
+the counted layer then says is `refCount_one_of_detached_issues`: over the
+modelled outside-handle list — the runner's own handle and the references the
+issued results name, and no other — a run whose every issued read result is
+detached from the root holds no handle on it but the runner's own, so the root's
+count is one. An outside handle the model does not put in that list, a caller's
+binding or a live temporary, is outside the theorem and would raise the count, so
+the count of one is a statement about that list. `not_exclusive_of_issued_loc` is
+the same shape with an issued result that names the root, whose count is two. The
 composition is with a law the interface has already proved — it adds no
 detachment fact of its own, and it is still a statement about an issued *value*,
 not about a compiled object.
@@ -371,12 +375,19 @@ theorem handlesOf_count_eq_zero_of_detached {ℓ : Loc} {vs : List Value}
 The two hypotheses the theorem below takes are the two readings the module note
 names: that the presentation is the live heap, so no cell's slots name the root,
 and that the value list is the read results the run handed out, so none of them
-names the root either. What remains of the root's count is the runner's own
-handle — the composition with the interface's proved detachment, at the counts
-this module defines. -/
+names the root either. What remains of the root's count over the modelled handle
+list is the runner's own handle — the composition with the interface's proved
+detachment, at the counts this module defines. -/
 
-/-- A run whose every issued read result is detached from the root has no handle
-on the root but the runner's own, so the root's count is one.
+/-- Over the modelled outside-handle list — the runner's own handle and the
+references the issued read results name, and no other — a run whose every issued
+read result is detached from the root has no handle on the root but the runner's
+own, so the root's count is one.
+
+The conclusion is about that list alone. `refCount` counts every outside handle,
+and the hypothesis fixes the list to `r :: handlesOf vs`; an outside handle the
+model does not put in it — a caller's binding, a live temporary — would raise the
+count and is outside the theorem.
 
 This is a statement about the model. The two hypotheses are the two readings the
 module note names: `hstore` reads the presentation as the live heap, so no cell's

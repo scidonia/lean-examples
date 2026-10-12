@@ -770,10 +770,13 @@ references an encoded value names and `noRef_iff_refs_count` reads `NoRef` as
 that list's count being zero, so `readAt_result_holds_no_handle` is the
 interface's law at the counted layer and `handlesOf_count_eq_zero_of_detached`
 says a run whose every issued read result is detached holds no handle on the
-root. `refCount_one_of_detached_issues` is the composition: no slot naming the
-root and no issued value naming it leaves the runner's own one handle, so the
-count is one. `not_exclusive_of_issued_loc` is the same shape with a value that
-names the root, whose count is two.
+root. `refCount_one_of_detached_issues` is the composition: over the modelled
+outside-handle list — the runner's own handle and the references the issued
+results name, and no other — no slot naming the root and no issued value naming
+it leaves that one handle, so the count is one. An outside handle the model does
+not list, a caller's binding or a live temporary, is outside the theorem and
+would raise the count. `not_exclusive_of_issued_loc` is the same shape with a
+value that names the root, whose count is two.
 
 Two readings are hypotheses, not theorems, and the module says so. The first is
 that the presentation *is* the live heap — that the cells listed are exactly the
