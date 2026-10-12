@@ -164,6 +164,24 @@ The compile-time checks live in the check library:
   direction is pinned by the message `#check` emits, so a statement under that
   name that changes fails the build. The runtime link itself is never
   constructed: the checks take it as a hypothesis.
+- `ScidoniaTest/RCHeap.lean` checks the counted heap from outside: evaluated
+  counts and both branches' locations on small heaps, each with a pinned failing
+  control beside it; the duplicate-key heap failing the well-formedness invariant
+  and a release leaving no zero-count or orphaned cell, each with an affirmative
+  control at the same heap; the bridge, both location statements and both
+  `Counted` preservation theorems applied at those heaps; and asserted `#print
+  axioms` lists.
+- `ScidoniaTest/IRShape.lean` is the one check made of the compiler's own output
+  rather than of the library's terms. It reaches the environment during
+  elaboration and reads the post-reference-counting IR of the write paths with
+  `IR.findEnvDecl`, then requires the shape the measurement records — the
+  take-out's `Array.getInternal` and placeholder `Array.set`, the array check,
+  the focus check, the recursion and the write, with every operand relation bound
+  to one occurrence selection on one executing path — and requires the borrowed
+  `Array.getInternalBorrowed` absent there, with a same-detector control finding
+  it where it exists (the bounds walk, the structured reader). A failed
+  requirement fails the elaboration, so `lake build ScidoniaTest` is the gate; a
+  detector weakened to match nothing fails the build rather than passing quietly.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -797,6 +815,65 @@ stay outside this module.
 
 `ScidoniaTest/Footprint.lean` is where a client's view of it is checked.
 
+## The counted heap, and the shape the compiler emits
+
+`StateVar/RCHeap.lean` is the step from a count that is a function of the
+referencing structure to a count that is state. A cell of the counted heap
+carries its slots and a count; `Counted` ties each cell's count to the aliasing
+count `Footprint` defines, and `counted_iff_exclusive` makes "count one" and
+`Exclusive` the same statement — with `CHeap.WF` (the listed references are
+duplicate-free) and `CHeap.Live` (no listed cell has a count of zero) as the two
+structural invariants every operation preserves. The operations are the ones the
+runtime performs on a count: an allocation, an increment, a non-final decrement,
+and a final release that removes the cell, lowers the counts of the cells its
+slots named and cascades while any listed cell has reached zero. The update is
+the model of the lowering's own test: at a count of one the write is destructive
+and the cell keeps its location (`update_preserves_location_of_exclusive`), and
+otherwise the updated slots land at a location the heap did not list while the
+old cell keeps its slots and loses a reference (`update_copies_of_shared`). The
+take-out's temporary is the theorem that matters: the pair's second handle makes
+the extracted element's count two, so a write below it copies, and dropping that
+handle first restores one, so the same write keeps the location
+(`takeout_pair_update_branches`). A location here is a `Ref`, a name in a list
+and not a machine address, and the counts are logical occurrences of references:
+no theorem here certifies a compiled write, and the compiler's lowering of
+`setLeaf` and `set` into this shape is stated as a trusted link rather than
+proved.
+
+`ScidoniaTest/IRShape.lean` is how that link is checked rather than trusted
+alone. It reads the post-reference-counting IR the pinned toolchain emitted for
+this build — `IR.findEnvDecl` returns a body for a declaration of this library
+because these sources carry no `module` keyword, so their oleans hold complete IR
+entries rather than `extern` stubs — and asserts the shape the measurement in
+`FracPerm_Linearity_Proposal.md` §3.6 records, on one executing path and with the
+operand relations bound to a single occurrence selection: the array check's
+result is the take-out's array operand, the take-out's extracted focus is the
+object the focus check is applied to, that check's result is the recursion's
+state operand, and the placeholder write takes the pair's first component at the
+index the take-out took the element from.
+
+Two limits are the point of that check rather than gaps in it. For an array
+element write the copy-or-mutate decision is not in the IR at all — it is
+`lean_is_exclusive` inside `lean_array_uset` / `lean_ensure_exclusive_array` in
+the runtime header — so the check establishes that the value reaches the write
+owned and nothing about whether the runtime mutates. And what the IR does carry,
+`isShared` and a cell `set`, has a specification that requires a count of one for
+the store (`Lean.Compiler.IR.Basic`), which is the same count the counted heap
+speaks about; whether that count is one where the write runs is a run-time fact
+neither instrument carries.
+
+Two toolchain facts this work measured, and the rules that follow from them. A
+modelled recursion that a `#guard` or `#guard_msgs` check must evaluate is
+written structurally on a fuel or step argument rather than with
+`termination_by`/`decreasing_by`: the kernel does not reduce `WellFounded.fix`, so
+`decide` gets stuck on a `termination_by` recursion and only a structural one is
+visible to it — `CHeap.cascade` is `CHeap.cascadeSteps` at the budget a lemma
+shows to be sufficient. And a `run_cmd` whose file retains an earlier elaboration
+error may still be elaborated and print a plausible report, so a green report
+from a run that also reported an earlier error is void, and a check whose printed
+report is its evidence shows that it can fail by being perturbed and observed to
+throw.
+
 ## The in-place check in the generated C
 
 `HSt.write` runs the object's `check` on the operation and the state before
@@ -943,6 +1020,7 @@ assertions that ship live in the `inplace` harness.
 | `Scidonia/FracPerm/StateVar/Sealed.lean` | `SealedStateVar`: a layout state's type as the whole interface, with the read and the write defined by the library and the derived lawful instance |
 | `Scidonia/FracPerm/StateVar/RefCount.lean` | The reference count as a write sees it: the model of `lean_inc_ref_n`/`lean_dec_ref` vendored from Lean 4, `IsExclusive`/`IsUnshared`, and the counter-level facts the write discipline rests on |
 | `Scidonia/FracPerm/StateVar/Footprint.lean` | The count of a reference in a presentation of the heap: `Ref`, `Node`, `Presentation`, `occurrences`/`refCount`/`Exclusive`, the take-out pair and aliasing facts, `Presentation.setSlots_occurrences`, the composition with `NoRef`, and `RuntimeAgrees` stated as a hypothesis |
+| `Scidonia/FracPerm/StateVar/RCHeap.lean` | The counted heap the lowering works over: `Cell`, `CHeap`, `Counted`/`WF`/`Live`, the allocation, increment, non-final decrement, final release and its cascade, and the update whose branch is the heap's own count |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -954,6 +1032,8 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaTest/Sealed.lean` | `SealedStateVar`'s reads, writes and theorems at its instances, the rejection of an `observe`/`encodeRead`/mismatched-`rep` instance, and the countermodel comparison |
 | `ScidoniaTest/Count.lean` | The count module's controls — the two tests on counts that tell them apart, the hazard pair `1 → 2 → 1`, and the take-out at the counts a one-reference cell hands out — and `#print axioms` on the representative theorems |
 | `ScidoniaTest/Footprint.lean` | The counted presentation's controls — evaluated counts with a pinned control beside each, the aliased-cell and second-handle countermodels with an affirmative counterpart at the same presentation, the composition with detachment, and the reverse runtime link pinned by the message `#check` emits |
+| `ScidoniaTest/RCHeap.lean` | The counted heap's controls — evaluated counts and both branches' locations, the duplicate-key and zero-count countermodels with affirmative counterparts at the same heap, and asserted axiom lists |
+| `ScidoniaTest/IRShape.lean` | The check over the compiler's own output: the post-reference-counting IR of the write paths read with `IR.findEnvDecl`, the shape and operand relations required of it on one executing path, and the borrowed-get control |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
