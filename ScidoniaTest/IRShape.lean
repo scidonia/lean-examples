@@ -41,8 +41,13 @@ the alternatives of a `case` side by side; a requirement about an *order* or an
 *operand flow* reads one executing path through the alternative it is about and
 binds the variables the calls pass on, so a check whose result is discarded, a
 write through an unchecked array, or a sequence assembled from two branches that
-cannot both run does not satisfy it. The report marks which reading each
-requirement used.
+cannot both run does not satisfy it. The layout write's flow reads its path as
+one selection of occurrences — the array check, the take-out, the focus check,
+the recursion and the placeholder write, with the projections of that take-out's
+pair — and every operand relation it states has to hold of that selection, so a
+path whose only satisfying occurrences are some other set does not satisfy it;
+`takeOutFlow` is that selection. The report marks which reading each requirement
+used.
 
 The route. `IR.findEnvDecl` returns bodies for this library because these sources
 are not `module`-keyword modules: lake marks them `isModule=false`, and their
@@ -163,10 +168,6 @@ partial def pathsFrom (joins : Array (IR.JoinPointId × IR.FnBody)) (b : IR.FnBo
 /-- The executing paths through a body, with no join point in scope. -/
 partial def pathsOf (b : IR.FnBody) : Array (Array Construct) := pathsFrom #[] b
 
-/-- The calls a body's constructs hold, in order, repeats included. -/
-def callsOf (cs : Array Construct) : Array IR.FunId :=
-  cs.filterMap fun c => match c with | .call f _ _ => some f | _ => none
-
 /-- Whether a body names `f`. -/
 def namesCall (cs : Array Construct) (f : IR.FunId) : Bool :=
   cs.any fun c => match c with | .call g _ _ => g == f | _ => false
@@ -178,14 +179,6 @@ def namesShared (cs : Array Construct) : Bool :=
 /-- Whether a body writes a constructor object's cell. -/
 def writesCell (cs : Array Construct) : Bool :=
   cs.any fun c => match c with | .cellSet _ _ => true | _ => false
-
-/-- True when `fs` occur among the body's calls in this order; other calls may
-stand between them. -/
-def callsInOrder (cs : Array Construct) (fs : List IR.FunId) : Bool :=
-  (callsOf cs).foldl (init := fs) (fun remaining f =>
-    match remaining with
-    | expected :: rest => if expected == f then rest else remaining
-    | [] => []) == []
 
 /-- The variables an application is applied to, in order, with erased arguments
 left out, so that an operand position counts the same way whatever the callee
@@ -209,41 +202,6 @@ def resultFlow (cs : Array Construct) (f g : IR.FunId) (n : Nat) : Bool :=
       fi == f && (positionsFrom cs (i + 1)).any (fun j =>
         match cs[j]? with
         | some (.call gj args _) => gj == g && argAt args n == some bound
-        | _ => false)
-    | _ => false
-
-/-- Whether a path holds a call to `f` bound to a variable, then a projection of
-that variable's field `field` into another variable, then a call to `g` that
-takes the projected variable as its variable argument `n`, each step after the
-one before it. -/
-def projectionFlow (cs : Array Construct) (f g : IR.FunId) (field n : Nat) : Bool :=
-  (positionsFrom cs 0).any fun i =>
-    match cs[i]? with
-    | some (.call fi _ (some src)) =>
-      fi == f && (positionsFrom cs (i + 1)).any (fun j =>
-        match cs[j]? with
-        | some (.proj k x bound) =>
-          k == field && x == src && (positionsFrom cs (j + 1)).any (fun l =>
-            match cs[l]? with
-            | some (.call gl args _) => gl == g && argAt args n == some bound
-            | _ => false)
-        | _ => false)
-    | _ => false
-
-/-- Whether a path holds a call to `f` and, later on the same path, a call to `g`
-that takes the variable of `f`'s variable argument `m` as its variable argument
-`n`. -/
-def argFlow (cs : Array Construct) (f g : IR.FunId) (m n : Nat) : Bool :=
-  (positionsFrom cs 0).any fun i =>
-    match cs[i]? with
-    | some (.call fi argsi _) =>
-      fi == f && (positionsFrom cs (i + 1)).any (fun j =>
-        match cs[j]? with
-        | some (.call gj argsj _) =>
-          gj == g &&
-            (match argAt argsi m with
-             | some x => argAt argsj n == some x
-             | none => false)
         | _ => false)
     | _ => false
 
@@ -459,10 +417,61 @@ structure Requirement where
   /-- The test over that entry's reading. -/
   holds : Reading → Bool
 
+/-- Whether a path is the take-out path write's flow, read as one selection of
+occurrences rather than as several searches that may each find a different one:
+the array check, the take-out, the pair's second component, the focus check, the
+recursion and the placeholder write, in that order, with every operand relation
+of the write holding of the occurrences of that one selection. The array check's
+bound result is the take-out's array operand, so a take-out applied to the
+unchecked array does not satisfy it; the pair's second component is projected
+from the take-out occurrence the selection chose; the focus check's bound result
+is the recursion's state operand; the placeholder write's array operand is the
+pair's first component, projected from that same take-out occurrence; and the
+write's index operand is that take-out's index operand. -/
+def takeOutFlow (cs : Array Construct) : Bool :=
+  (positionsFrom cs 0).any fun i =>
+    match cs[i]? with
+    | some (.call fi _ (some checked)) =>
+      fi == checkArray &&
+      (positionsFrom cs (i + 1)).any fun j =>
+        match cs[j]? with
+        | some (.call fj argsj (some pair)) =>
+          fj == takeOut && argAt argsj 0 == some checked &&
+          (positionsFrom cs (j + 1)).any fun k =>
+            match cs[k]? with
+            | some (.proj field x focus) =>
+              field == 1 && x == pair &&
+              (positionsFrom cs (k + 1)).any fun l =>
+                match cs[l]? with
+                | some (.call fl argsl (some refocused)) =>
+                  fl == checkFocus && argAt argsl 1 == some focus &&
+                  (positionsFrom cs (l + 1)).any fun m =>
+                    match cs[m]? with
+                    | some (.call fm argsm _) =>
+                      fm == setAt && argAt argsm 2 == some refocused &&
+                      (positionsFrom cs (m + 1)).any fun n =>
+                        match cs[n]? with
+                        | some (.call fn argsn _) =>
+                          fn == `Array.set && argAt argsn 1 == argAt argsj 1 &&
+                          (positionsFrom cs (j + 1)).any fun o =>
+                            match cs[o]? with
+                            | some (.proj g y sib) =>
+                              g == 0 && y == pair && decide (o < n) &&
+                              argAt argsn 0 == some sib
+                            | _ => false
+                        | _ => false
+                    | _ => false
+                | _ => false
+            | _ => false
+        | _ => false
+    | _ => false
+
 /-- The requirements, in the order they are reported. A requirement whose meaning
 is a sequence or a flow reads one executing path, so the calls it sees can occur
 together; a requirement about what a body names reads the body as a whole, which
-the report says beside it.
+the report says beside it. The layout write's flow reads a path as one selection
+of occurrences and states every relation over that selection, so its witnesses
+cannot be split across two of them.
 
 The operand positions the flow requirements bind are the callees' own: the
 take-out's pair puts the array it leaves at position 0 and the extracted element
@@ -489,17 +498,15 @@ def requirements : Array Requirement := #[
   { label := "Layout5.setAt, Path.index",
     scope := .onePath,
     what := "on one path, the array check, the take-out, the focus check, the recursion \
-      and `Array.set` occur in that order, the take-out's extracted focus — the second \
-      component of the pair it returns — is the object the focus check is applied to, the \
-      checked focus is the recursion's operand at position 2, and the placeholder write \
-      takes the pair's first component as its operand at position 0, at the index the \
-      take-out took the element from, its operand at position 1",
-    holds := fun r => r.paths.any fun cs =>
-      callsInOrder cs [checkArray, takeOut, checkFocus, setAt, `Array.set] &&
-        projectionFlow cs takeOut checkFocus 1 1 &&
-        resultFlow cs checkFocus setAt 2 &&
-        projectionFlow cs takeOut `Array.set 0 0 &&
-        argFlow cs takeOut `Array.set 1 1 },
+      and `Array.set` are selected once, in that order, and every operand relation holds \
+      of that one selection: the array check's bound result is the take-out's array \
+      operand at position 0, so a take-out applied to the unchecked array fails, the \
+      take-out's extracted focus — the second component of the pair it returns — is the \
+      object the focus check is applied to, the focus check's bound result is the \
+      recursion's operand at position 2, and the placeholder write takes the pair's first \
+      component, projected from that same take-out, as its operand at position 0, at the \
+      index the take-out took the element from, its operand at position 1",
+    holds := fun r => r.paths.any takeOutFlow },
   { label := "Layout5.setAt, Path.index",
     scope := .wholeBody,
     what := "the body as a whole does not name `Array.getInternalBorrowed`",
