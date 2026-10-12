@@ -12,10 +12,12 @@ kinds:
   a write whose value is not a value, and a match whose subject is a variable.
   Each guard stands beside a pinned failing control of the same shape, so a guard
   is shown to fire rather than to pass whatever it is given.
-* **The substitution, evaluated**: a lambda whose body uses a free variable,
-  bound, then applied after that name is rebound, so that the value it resolves to
-  is the definition-time one. Its control is the same shape without the
-  rebinding, and each is pinned in both directions.
+* **The substitution, evaluated**: a closed configuration whose lambda is bound
+  and then applied after that name is rebound, so that the value it reaches is the
+  definition-time one, against the open configuration where the substitution
+  captures — `(λ0. λ1. 0) (var 1)` reaches `λ1. 1`, whose body is the free
+  variable of the argument under the binder that captured it. Which of the two is
+  closed is pinned beside them, and each is pinned in both directions.
 * **The lowering, evaluated**, as `#guard`s of the strategy `lowerB`: the two
   instructions the source does not have (`dup` where an owned occurrence is used
   twice, `drop` where an owned occurrence is not used), the two environments
@@ -86,21 +88,30 @@ def nodeAppTerm : Expr := .app (.con0 1) (.con0 2)
 which is the A-normal shape the source calculus reads. -/
 def storeNonValueTerm : Expr := .store (.con0 5) 1 (.app idTerm (.con0 3))
 
-/-- A lambda whose body uses a free variable, bound and then applied after that
-name is rebound: `val y = λw. C 1; val x = λz. (y (C 7)); val y = λw. C 2; x (C 3)`.
-The substitution resolves `y` when the first binding is reduced, so the
-abstraction applied at the end carries the definition-time body and the value
-that comes out is `C 1`, not the `C 2` the last binding of `y` names. -/
+/-- The closed configuration whose lambda is bound and then applied after that
+name is rebound:
+`val y = λw. C 1; val x = λz. (y (C 7)); val y = λw. C 2; x (C 3)`. Every variable
+it mentions is bound inside it, so it is closed. The substitution resolves `y`
+when the first binding is reduced, so the abstraction applied at the end carries
+the definition-time body and the value the configuration reaches is `C 1`; the
+later binding of `y` is never read, because the name was resolved before it. -/
 def captureTerm : Expr :=
   .bind 1 (.lam 2 (.con0 1))
     (.bind 0 (.lam 3 (.app (.var 1) (.con0 7)))
       (.bind 1 (.lam 2 (.con0 2)) (.app (.var 0) (.con0 3))))
 
-/-- The same shape without the rebinding of `y`, so that the value the shape
-yields is read once with the rebinding and once without it. -/
-def captureControlTerm : Expr :=
-  .bind 1 (.lam 2 (.con0 1))
-    (.bind 0 (.lam 3 (.app (.var 1) (.con0 7))) (.app (.var 0) (.con0 3)))
+/-- The open configuration `(λ0. λ1. 0) (var 1)`: the argument is a variable free
+in the configuration, so this configuration is outside the discipline, and the
+substitution that reduces the application places that free variable under the
+inner binder `1`. Its contractum is `λ1. 1`, whose body is the captured variable,
+where the same abstraction under a closed argument keeps the argument's own
+content. -/
+def captureOpenTerm : Expr := .app (.lam 0 (.lam 1 (.var 0))) (.var 1)
+
+/-- The same abstraction under a closed argument, `(λ0. λ1. 0) (C 1)`: the
+discipline's case of the shape above, and the term the failing control beside
+`captureOpenTerm` is anchored on. -/
+def captureClosedTerm : Expr := .app (.lam 0 (.lam 1 (.var 0))) (.con0 1)
 
 /-! ## The reduction, evaluated
 
@@ -249,37 +260,91 @@ did not evaluate to `true`
 
 /-! ## The substitution, evaluated
 
-A lambda whose body uses a free variable is bound, that name is rebound, and the
-lambda is then applied. The substitution resolved the name when the lambda was
-bound, so the value the term reaches is the definition-time one. The same shape
-without the rebinding reads the same value, which is the control beside it. -/
+`subst` is naive substitution: it walks under a binder of another name without
+renaming it. The pair below is the difference the discipline turns on. The closed
+configuration reaches the definition-time value its first binding gave it, the
+later binding of that name never being read; the open configuration — the same
+abstraction with a free variable in the argument, where the discipline does not
+hold — reaches the identity whose body is that free variable, captured by the
+binder the substitution walked under. Which of the two is closed is decided beside
+them, and each pinned failure claims the other member's value, which the guard
+beside it shows the detector answers. -/
 
 /-
-The capture case reaches the definition-time value `C 1`.
+The pair's two values, read with one detector: the closed configuration reaches
+`C 1` — the later binding of `y` is not read — and the open configuration reaches
+`λ1. 1`, whose body is the argument's free variable `1` under the binder the
+substitution walked under.
 -/
 #guard decide (run 24 captureTerm = Expr.con0 1)
+#guard decide (run 24 captureOpenTerm = Expr.lam 1 (Expr.var 1))
 
 /--
 error: Expression
-  decide (run 24 captureTerm = Expr.con0 2)
+  decide (run 24 captureTerm = Expr.lam 1 (Expr.var 1))
 did not evaluate to `true`
 -/
 #guard_msgs (whitespace := lax) in
-#guard decide (run 24 captureTerm = Expr.con0 2)
+#guard decide (run 24 captureTerm = Expr.lam 1 (Expr.var 1))
+
+/--
+error: Expression
+  decide (run 24 captureOpenTerm = Expr.con0 1)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (run 24 captureOpenTerm = Expr.con0 1)
 
 /-
-The same shape without the rebinding reaches the same value, so the rebinding is
-what the case above turns on rather than the shape alone.
+The step behind the open value, beside the same abstraction under a closed
+argument: the open configuration places the argument's free variable under the
+inner binder, and the closed one keeps the argument's own content. The control
+below claims the closed reading for the open configuration, and the guard beside
+it is where the detector answers that value.
 -/
-#guard decide (run 24 captureControlTerm = Expr.con0 1)
+#guard decide (step? captureOpenTerm = some (Expr.lam 1 (Expr.var 1)))
+#guard decide (step? captureClosedTerm = some (Expr.lam 1 (Expr.con0 1)))
 
 /--
 error: Expression
-  decide (run 24 captureControlTerm = Expr.con0 2)
+  decide (step? captureOpenTerm = some (Expr.lam 1 (Expr.con0 1)))
 did not evaluate to `true`
 -/
 #guard_msgs (whitespace := lax) in
-#guard decide (run 24 captureControlTerm = Expr.con0 2)
+#guard decide (step? captureOpenTerm = some (Expr.lam 1 (Expr.con0 1)))
+
+/--
+error: Expression
+  decide (step? captureClosedTerm = none)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (step? captureClosedTerm = none)
+
+/-
+Which of the pair is closed, decided: the closed configuration and the closed
+argument are closed, the open configuration is not. This is the hypothesis
+`uses_subst_of_closed` carries, read back at the two terms.
+-/
+#guard decide (Closed captureTerm)
+#guard decide (Closed captureClosedTerm)
+#guard decide (Closed captureOpenTerm) == false
+
+/--
+error: Expression
+  decide (Closed captureOpenTerm) == true
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (Closed captureOpenTerm) == true
+
+/--
+error: Expression
+  decide (Closed captureClosedTerm) == false
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (Closed captureClosedTerm) == false
 
 /-! ## The lowering, evaluated -/
 
@@ -428,7 +493,19 @@ did not evaluate to `true`
 /-! ## Negative controls
 
 `dup` and `drop` are not source syntax: `Pure` has no rule for either, and the
-decidable test of purity agrees, which is what the guards read. -/
+decidable test of purity agrees, which is what the guards read. The pair the
+substitution is read at has its two closure facts here as well: the closed
+configuration is closed and the open one, where the substitution captures, is
+not, which is the hypothesis the capture freedom carries. -/
+
+/-- The closed configuration of the substitution's pair is closed: the discipline
+holds of it, which is why the substitution reaches a definition-time value there
+and captures nothing. -/
+theorem capture_closed : Closed captureTerm := by decide
+
+/-- The open configuration of that pair is not closed, which is the hypothesis
+`uses_subst_of_closed` carries and what the capture beside it turns on. -/
+theorem capture_open_not_closed : ¬ Closed captureOpenTerm := by decide
 
 /-- `dup x; x` is not a term of the source fragment. -/
 theorem dup_not_pure : ¬ Pure (.dup 0 (.var 0)) := not_pure_dup 0 (.var 0)
@@ -493,19 +570,18 @@ theorem store_step_value : Value (Expr.con2 5 (Expr.con0 1) (Expr.con0 9)) :=
   slotUpdate_value (n := .con2 5 (.con0 1) (.con0 2)) (i := 1) (v := .con0 9)
     (Value.con2 (Value.con0 1) (Value.con0 2)) (Value.con0 9) (by decide)
 
-/-- The capture case the guards read reaches the definition-time value: a fact
-about the relation, not only about the evaluator. -/
+/-- The closed configuration the guards read reaches the definition-time value: a
+fact about the relation, not only about the evaluator. -/
 theorem capture_resolves_at_definition_time : StepStar captureTerm (Expr.con0 1) := by
   have h : run 24 captureTerm = Expr.con0 1 := by decide
   rw [← h]
   exact run_stepStar 24 captureTerm
 
-/-- Its control reaches the same value without the rebinding. -/
-theorem capture_control_resolves_at_definition_time :
-    StepStar captureControlTerm (Expr.con0 1) := by
-  have h : run 24 captureControlTerm = Expr.con0 1 := by decide
-  rw [← h]
-  exact run_stepStar 24 captureControlTerm
+/-- The open configuration's step is a step of the relation: the substitution
+places the argument's free variable under the inner binder of the abstraction. -/
+theorem capture_open_step : Step captureOpenTerm (Expr.lam 1 (Expr.var 1)) := by
+  apply step?_sound
+  decide
 
 /-- The strategy's answer at the binding whose body uses its name twice is a
 lowering of the relation. -/

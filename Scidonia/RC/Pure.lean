@@ -24,10 +24,15 @@ relation rather than two semantics.
 are the paper's substitution rules: a binder replaces its variable — the
 abstraction's body, the bound term, the arm's binders — by the value it carries
 (`subst`, `substAll`), so a variable is resolved at the moment a binder
-introduces it and nothing is looked up again later. That is what makes the
-reduction capture-avoiding: the free variables of an abstraction are substituted
-before any later binder of the same name exists, so a later `val x = ...` cannot
-change what an earlier `(λy. ...)` computes. There is no environment and no rule
+introduces it and nothing is looked up again later. `subst` is *naive*
+substitution: it walks under a binder of another name without renaming it, so a
+free variable of the term it inserts that agrees with one of those binders is
+captured there. It is capture-free only because the term a rule inserts is a
+subterm of a *closed* configuration and so has no free variable at all — the
+discipline `Closed` names, which `uses_subst_of_closed` states: with a closed
+`v`, the free variables of `subst x v e` are the free variables of `e` with `x`
+removed. Without that hypothesis the law is false, and the check library reads
+the difference back at an open configuration. There is no environment and no rule
 that resolves a variable in function position: a variable there is a variable,
 not a function.
 
@@ -81,6 +86,15 @@ not build. What the source fixes is the shape of the result.
 * `subst_pure` and `substAll_pure`: the substitution the rules are written with
   preserves the source fragment, which is what the environment's purity
   condition was for.
+* `uses_subst_of_closed` and `uses_substAll_of_closed`: capture freedom under the
+  discipline — with a closed `v`, the free variables of `subst x v e` are the
+  free variables of `e` with `x` removed, and the same law holds for the binders
+  of a matched arm. `Closed` and the free-variable account `uses` they are stated
+  with are in `Scidonia.RC.Syntax`, because the substitution is read against the
+  first and the lowering against the second.
+* `nodeFields_closed` and `slotUpdate_closed`: a node's fields and a write's
+  contractum are closed when the node and the written value are, which the two
+  rules above need.
 * `rootStep?_sound` and `step?_sound`: the evaluator the checks guard on computes
   only steps of `Step`. It is written structurally on the term, so a `#guard` can
   evaluate it. `run` is that evaluator under a fuel, and `run_stepStar` says
@@ -90,18 +104,26 @@ not build. What the source fixes is the shape of the result.
   source fragment stays in the fragment — no `dup` and no `drop` ever appears.
   That is the erasure sanity fact the fragment is for and what the lowering is
   read against.
+* `step_preserves_closed`: a step of a closed configuration of the source
+  fragment leaves a closed configuration, which is the discipline the capture
+  freedom above rests on carried through the reduction.
 
 ## What is modelled, and what is trusted
 
-λ¹ is a calculus of *closed* terms and this module reduces closed configurations.
-No rule of the reduction resolves a free variable: the rules substitute only for
-the variable a binder introduces, so a variable that is free in a configuration
-is never bound by a step, and a subject position that holds a variable rather
-than a node has no redex and is stuck. Capture-avoidance rests on that
-discipline, since a value substituted for a variable is a subterm of a closed
-configuration and so has no free variable for a binder to capture; the module
-does not carry a closedness predicate, and an open term is outside the
-discipline this reduction is stated for.
+λ¹ is a calculus of *closed* terms, and the discipline this module is stated for
+is closedness: `Closed` is that predicate and `uses` is the free-variable account
+it is read against, so the claim the substitution serves — a term inserted for a
+variable is inserted under no binder that names one of its free variables — holds
+under the discipline and not without it. The reduction itself is stated over
+every term: `Root`, `Step`, `step?` and `run` accept any `Expr`, an open
+configuration is evaluated by the same rules, and a free variable of an open
+argument is where the substitution captures. No rule of the reduction resolves a
+free variable: the rules substitute only for the variable a binder introduces, so
+a variable that is free in a configuration is never bound by a step, and a
+subject position that holds a variable rather than a node has no redex and is
+stuck. `step_preserves_closed` carries the discipline through the reduction, and
+its purity hypothesis is the fragment's: `uses` counts a `dup` or a `drop` node's
+name as an occurrence, and no rule of the source writes either.
 
 A node's fields are read with `nodeFields`: none for a nullary node, one for a
 unary node and two for a binary one, and an arm binds the variables it names to
@@ -380,17 +402,73 @@ theorem slotUpdate_value {n n' : Expr} {i : Nat} {v : Expr} (hn : Value n) (hv :
   | drop x e => simp [slotUpdate] at h
   | store s i' v' => simp [slotUpdate] at h
 
+/-- A member of a node's fields is closed when the node is: closedness is the
+absence of free occurrences, and a node's free occurrences are its fields'. -/
+theorem nodeFields_closed {n : Expr} (hn : Closed n) : ∀ a ∈ nodeFields n, Closed a := by
+  cases n with
+  | con0 c => intro a ha; simp [nodeFields] at ha
+  | con1 c a => intro b hb; simp [nodeFields] at hb; rw [hb]; exact hn
+  | con2 c a b =>
+      have hfields : uses a = [] ∧ uses b = [] := List.append_eq_nil_iff.mp hn
+      intro k hk
+      simp only [nodeFields, List.mem_cons, List.not_mem_nil, or_false] at hk
+      rcases hk with rfl | rfl
+      · exact hfields.1
+      · exact hfields.2
+  | var x => intro a ha; simp [nodeFields] at ha
+  | lam x body => intro a ha; simp [nodeFields] at ha
+  | app f a => intro k hk; simp [nodeFields] at hk
+  | bind x e₁ e₂ => intro k hk; simp [nodeFields] at hk
+  | matchC s c ys body => intro k hk; simp [nodeFields] at hk
+  | dup x e => intro k hk; simp [nodeFields] at hk
+  | drop x e => intro k hk; simp [nodeFields] at hk
+  | store s i v => intro k hk; simp [nodeFields] at hk
+
+/-- A write of a closed value into a closed node is closed: the contractum keeps
+the node's other fields and takes the written value, and neither carries a free
+occurrence. -/
+theorem slotUpdate_closed {n n' : Expr} {i : Nat} {v : Expr} (hn : Closed n) (hv : Closed v) :
+    slotUpdate n i v = some n' → Closed n' := by
+  intro h
+  cases n with
+  | con1 c a =>
+      simp only [slotUpdate] at h
+      split at h
+      · rw [← Option.some.inj h]; exact hv
+      · simp at h
+  | con2 c a b =>
+      have hfields : uses a = [] ∧ uses b = [] := List.append_eq_nil_iff.mp hn
+      simp only [slotUpdate] at h
+      split at h
+      · rw [← Option.some.inj h]
+        exact List.append_eq_nil_iff.mpr ⟨hv, hfields.2⟩
+      · split at h
+        · rw [← Option.some.inj h]
+          exact List.append_eq_nil_iff.mpr ⟨hfields.1, hv⟩
+        · simp at h
+  | var x => simp [slotUpdate] at h
+  | lam x body => simp [slotUpdate] at h
+  | app f a => simp [slotUpdate] at h
+  | bind x e₁ e₂ => simp [slotUpdate] at h
+  | matchC s c ys body => simp [slotUpdate] at h
+  | dup x e => simp [slotUpdate] at h
+  | drop x e => simp [slotUpdate] at h
+  | con0 c => simp [slotUpdate] at h
+  | store s i' v' => simp [slotUpdate] at h
+
 /-! ## Substitution
 
 The paper's `[x := v]`: where an environment form of this module threaded the
 value each variable names and looked it up at a use, the rules here rewrite the
 binder's body in place. -/
 
-/-- The term `e` with every free occurrence of `x` replaced by the term `v`. A
-binder of `x` stops the walk, and a binder of another name is walked under: the
-step that inserts `v` is the only place a variable of `v` could be captured, and
-the rules below insert a value of a closed configuration, which has no free
-variable for a binder to capture. -/
+/-- The term `e` with every free occurrence of `x` replaced by the term `v`, a
+binder of `x` stopping the walk. The substitution is *naive*: a binder of another
+name is walked under without being renamed, so `v` is placed under every such
+binder the walk passes and a free variable of `v` that agrees with one of them is
+captured by it. `uses_subst_of_closed` states the case the rules use — with `v`
+closed nothing is captured, because `v` has no free variable — and the
+substitution is capture-free only there. -/
 def subst (x : Var) (v : Expr) : Expr → Expr
   | .var y => if y = x then v else .var y
   | .lam y body => if y = x then .lam y body else .lam y (subst x v body)
@@ -413,6 +491,117 @@ def subst (x : Var) (v : Expr) : Expr → Expr
 @[simp] theorem subst_var_of_ne {x y : Var} (h : y ≠ x) (v : Expr) :
     subst x v (.var y) = .var y := by
   simp [subst, h]
+
+/-- Filtering a list by one test and then by another keeps the same occurrences as
+filtering by the two in the other order. -/
+theorem filter_filter_swap (l : List Var) (p q : Var → Bool) :
+    (l.filter p).filter q = (l.filter q).filter p := by
+  rw [List.filter_filter, List.filter_filter]
+  exact List.filter_congr (fun a _ => Bool.and_comm (q a) (p a))
+
+/-- Filtering a list by one test twice keeps what filtering by it once keeps. -/
+theorem filter_filter_idem (l : List Var) (p : Var → Bool) :
+    (l.filter p).filter p = l.filter p := by
+  rw [List.filter_filter]
+  exact List.filter_congr (fun a _ => Bool.and_self (p a))
+
+/-- A test another test implies removes nothing from a list the other one has
+already filtered: the occurrences the second test would drop are gone. -/
+theorem filter_filter_of_imp (l : List Var) (p q : Var → Bool)
+    (h : ∀ a, p a = true → q a = true) : (l.filter p).filter q = l.filter p := by
+  induction l with
+  | nil => rfl
+  | cons a l ih =>
+      cases hp : p a
+      · simp [hp, ih]
+      · have hq : q a = true := h a hp
+        simp [hp, hq, ih]
+
+/-- The occurrences a list keeps outside `ys`, filtered again by a test that drops
+`y`, are the occurrences it keeps outside `y :: ys`. -/
+theorem filter_notMem_cons (l : List Var) (y : Var) (ys : List Var) :
+    (l.filter (fun z => z ∉ ys)).filter (fun z => z ≠ y) =
+      l.filter (fun z => z ∉ y :: ys) := by
+  rw [List.filter_filter]
+  refine List.filter_congr (fun z _ => ?_)
+  by_cases h₁ : z = y <;> by_cases h₂ : z ∈ ys <;> simp [h₁, h₂, List.mem_cons]
+
+/-- The capture freedom the reduction's rules rest on: substituting a *closed*
+term for a variable removes that variable's free occurrences and adds none, so
+the free variables of `subst x v e` are the free variables of `e` with `x`
+removed. The hypothesis is `Closed v` and not a property of `subst`: `subst`
+walks under a binder of another name without renaming it, so a free variable of
+an open `v` that agrees with such a binder is captured, and this law is false
+without `Closed v`. Purity of `e` is the second hypothesis: `uses` counts a `dup`
+or a `drop` node's name as an occurrence and `subst` inserts nothing for it, and
+neither form is source syntax. -/
+theorem uses_subst_of_closed : ∀ (e : Expr) (x : Var) (v : Expr), Pure e → Closed v →
+    uses (subst x v e) = (uses e).filter (fun y => y ≠ x)
+  | .var y, x, v, _, hv => by
+      by_cases h : y = x
+      · rw [h, subst, ite_eq_left rfl]
+        simpa [uses, Closed] using hv
+      · rw [subst, ite_eq_right h]
+        simp [uses, h]
+  | .lam y body, x, v, he, hv => by
+      have hbody : Pure body := (pure_lam_iff y body).mp he
+      by_cases h : y = x
+      · rw [h, subst, ite_eq_left rfl]
+        simp only [uses]
+        rw [filter_filter_idem (uses body) (fun z => z ≠ x)]
+      · rw [subst, ite_eq_right h]
+        simp only [uses]
+        rw [uses_subst_of_closed body x v hbody hv]
+        rw [filter_filter_swap (uses body) (fun z => z ≠ x) (fun z => z ≠ y)]
+  | .app f a, x, v, he, hv => by
+      obtain ⟨hf, ha⟩ := (pure_app_iff f a).mp he
+      rw [subst]
+      simp only [uses, List.filter_append]
+      rw [uses_subst_of_closed f x v hf hv, uses_subst_of_closed a x v ha hv]
+  | .bind y e₁ e₂, x, v, he, hv => by
+      obtain ⟨h₁, h₂⟩ := (pure_bind_iff y e₁ e₂).mp he
+      by_cases h : y = x
+      · rw [h, subst, ite_eq_left rfl]
+        simp only [uses, List.filter_append]
+        rw [uses_subst_of_closed e₁ x v h₁ hv]
+        rw [filter_filter_idem (uses e₂) (fun z => z ≠ x)]
+      · rw [subst, ite_eq_right h]
+        simp only [uses, List.filter_append]
+        rw [uses_subst_of_closed e₁ x v h₁ hv, uses_subst_of_closed e₂ x v h₂ hv]
+        rw [filter_filter_swap (uses e₂) (fun z => z ≠ x) (fun z => z ≠ y)]
+  | .matchC s c ys body, x, v, he, hv => by
+      obtain ⟨hs, hbody⟩ := (pure_matchC_iff s c ys body).mp he
+      by_cases h : x ∈ ys
+      · have himp : ∀ a, decide (a ∉ ys) = true → decide (a ≠ x) = true := by
+          intro a ha
+          rw [decide_eq_true_eq] at ha ⊢
+          exact fun hax => ha (hax.symm ▸ h)
+        rw [subst, ite_eq_left h]
+        simp only [uses, List.filter_append]
+        rw [uses_subst_of_closed s x v hs hv]
+        rw [filter_filter_of_imp (uses body) (fun z => z ∉ ys) (fun z => z ≠ x) himp]
+      · rw [subst, ite_eq_right h]
+        simp only [uses, List.filter_append]
+        rw [uses_subst_of_closed s x v hs hv, uses_subst_of_closed body x v hbody hv]
+        rw [filter_filter_swap (uses body) (fun z => z ≠ x) (fun z => z ∉ ys)]
+  | .dup y ex, _, _, he, _ => absurd he (not_pure_dup y ex)
+  | .drop y ex, _, _, he, _ => absurd he (not_pure_drop y ex)
+  | .con0 c, _, _, _, _ => by rw [subst]; simp only [uses]; rfl
+  | .con1 c a, x, v, he, hv => by
+      have ha : Pure a := (pure_con1_iff c a).mp he
+      rw [subst]
+      simp only [uses]
+      rw [uses_subst_of_closed a x v ha hv]
+  | .con2 c a b, x, v, he, hv => by
+      obtain ⟨ha, hb⟩ := (pure_con2_iff c a b).mp he
+      rw [subst]
+      simp only [uses, List.filter_append]
+      rw [uses_subst_of_closed a x v ha hv, uses_subst_of_closed b x v hb hv]
+  | .store s i w, x, v, he, hv => by
+      obtain ⟨hs, hw⟩ := (pure_store_iff s i w).mp he
+      rw [subst]
+      simp only [uses, List.filter_append]
+      rw [uses_subst_of_closed s x v hs hv, uses_subst_of_closed w x v hw hv]
 
 /-- Substitution preserves the source fragment: a variable of a pure term
 replaced by a pure term leaves a pure term. This is what the environment's purity
@@ -474,6 +663,31 @@ theorem substAll_pure : ∀ (ys : List Var) (vs : List Expr) {e : Expr}, Pure e 
       subst_pure (substAll ys vs e) y v
         (substAll_pure ys vs he (fun w hw => hv w (by simp [hw])))
         (hv v (by simp))
+
+/-- The law of `uses_subst_of_closed` for an arm's binders: substituting one
+closed and pure term per binder removes the free occurrences of the bound names,
+so the free variables of `substAll ys vs e` are the free variables of `e` outside
+`ys`. The lengths are required to agree, so that every binder of `ys` is handed
+the term paired with it. -/
+theorem uses_substAll_of_closed : ∀ (ys : List Var) (vs : List Expr) (e : Expr),
+    ys.length = vs.length → Pure e → (∀ w ∈ vs, Pure w ∧ Closed w) →
+    uses (substAll ys vs e) = (uses e).filter (fun y => y ∉ ys)
+  | [], [], e, _, _, _ => by
+      exact (List.filter_eq_self (p := fun y => y ∉ ([] : List Var)) (l := uses e)).mpr
+        (fun a _ => by simp) |>.symm
+  | [], _ :: _, e, hlen, _, _ => by simp at hlen
+  | _ :: _, [], e, hlen, _, _ => by simp at hlen
+  | y :: ys, v :: vs, e, hlen, he, hvs => by
+      obtain ⟨_, hvc⟩ := hvs v List.mem_cons_self
+      have hlen' : ys.length = vs.length := by simpa using hlen
+      have hvs' : ∀ w ∈ vs, Pure w ∧ Closed w := fun w hw =>
+        hvs w (List.mem_cons_of_mem v hw)
+      have hsub : Pure (substAll ys vs e) :=
+        substAll_pure ys vs he (fun w hw => (hvs' w hw).1)
+      rw [substAll]
+      rw [uses_subst_of_closed (substAll ys vs e) y v hsub hvc]
+      rw [uses_substAll_of_closed ys vs e hlen' he hvs']
+      rw [filter_notMem_cons (uses e) y ys]
 
 /-! ## The reduction
 
@@ -998,5 +1212,86 @@ theorem pure_steps_pure {e e' : Expr} (hs : StepStar e e') : Pure e → Pure e' 
   | step hstep _ ih =>
       intro he
       exact ih (step_preserves_pure hstep he)
+
+/-! ## Closedness along an evaluation path
+
+The discipline the module note states: a step of a closed configuration of the
+source fragment leaves a closed configuration. The term a rule substitutes —
+the argument of an application, the bound term of a binding, a matched node's
+fields — is a subterm of the configuration it steps, so it is closed when that
+configuration is and carries no free variable for a binder the substitution
+walks under to capture. -/
+
+/-- A step of a closed configuration of the source fragment is closed. Purity is
+a hypothesis because the source is the fragment the substitution is stated for:
+`uses` counts a `dup` or a `drop` node's name as an occurrence, and no rule of
+the source writes either. -/
+theorem step_preserves_closed {e e' : Expr} (hs : Step e e') :
+    Pure e → Closed e → Closed e' := by
+  induction hs with
+  | @root e e' hr =>
+      intro hp hc
+      cases hr with
+      | @beta x body v hv =>
+          obtain ⟨hpf, _⟩ := (pure_app_iff _ _).mp hp
+          have hpbody : Pure body := (pure_lam_iff _ _).mp hpf
+          have hco : uses (.app (.lam x body) v) = [] := hc
+          have hb0 : (uses body).filter (fun y => y ≠ x) = [] :=
+            (List.append_eq_nil_iff.mp hco).1
+          have hv0 : uses v = [] := (List.append_eq_nil_iff.mp hco).2
+          show uses (subst x v body) = []
+          rw [uses_subst_of_closed body x v hpbody hv0]
+          exact hb0
+      | @bindVal x v body hv =>
+          obtain ⟨_, hpbody⟩ := (pure_bind_iff x v body).mp hp
+          have hco : uses (.bind x v body) = [] := hc
+          have hv0 : uses v = [] := (List.append_eq_nil_iff.mp hco).1
+          have hb0 : (uses body).filter (fun y => y ≠ x) = [] :=
+            (List.append_eq_nil_iff.mp hco).2
+          show uses (subst x v body) = []
+          rw [uses_subst_of_closed body x v hpbody hv0]
+          exact hb0
+      | @matchVal s c ys body hvs ht hlen =>
+          obtain ⟨hps, hpbody⟩ := (pure_matchC_iff s c ys body).mp hp
+          have hco : uses (.matchC s c ys body) = [] := hc
+          have hs0 : uses s = [] := (List.append_eq_nil_iff.mp hco).1
+          have hb0 : (uses body).filter (fun y => y ∉ ys) = [] :=
+            (List.append_eq_nil_iff.mp hco).2
+          have hfields : ∀ w ∈ nodeFields s, Pure w ∧ Closed w := fun w hw =>
+            ⟨nodeFields_pure hps w hw, nodeFields_closed hs0 w hw⟩
+          show uses (substAll ys (nodeFields s) body) = []
+          rw [uses_substAll_of_closed ys (nodeFields s) body hlen hpbody hfields]
+          exact hb0
+      | @storeVal s i v n' hvs hv hsu =>
+          obtain ⟨hps, hpv⟩ := (pure_store_iff s i v).mp hp
+          have hco : uses (.store s i v) = [] := hc
+          have hs0 : uses s = [] := (List.append_eq_nil_iff.mp hco).1
+          have hv0 : uses v = [] := (List.append_eq_nil_iff.mp hco).2
+          exact slotUpdate_closed hs0 hv0 hsu
+  | @appFun f f' a hs ih =>
+      intro hp hc
+      obtain ⟨hpf, _⟩ := (pure_app_iff f a).mp hp
+      have hco : uses (.app f a) = [] := hc
+      have hcf : uses f = [] := (List.append_eq_nil_iff.mp hco).1
+      have hca : uses a = [] := (List.append_eq_nil_iff.mp hco).2
+      show uses (.app f' a) = []
+      exact List.append_eq_nil_iff.mpr ⟨ih hpf hcf, hca⟩
+  | @appArg f a a' hf hs ih =>
+      intro hp hc
+      obtain ⟨_, hpa⟩ := (pure_app_iff f a).mp hp
+      have hco : uses (.app f a) = [] := hc
+      have hcf : uses f = [] := (List.append_eq_nil_iff.mp hco).1
+      have hca : uses a = [] := (List.append_eq_nil_iff.mp hco).2
+      show uses (.app f a') = []
+      exact List.append_eq_nil_iff.mpr ⟨hcf, ih hpa hca⟩
+  | @bindFun e₁ e₁' x e₂ hs ih =>
+      intro hp hc
+      obtain ⟨hp₁, _⟩ := (pure_bind_iff x e₁ e₂).mp hp
+      have hco : uses (.bind x e₁ e₂) = [] := hc
+      have hc₁ : uses e₁ = [] := (List.append_eq_nil_iff.mp hco).1
+      have hc₂ : (uses e₂).filter (fun y => y ≠ x) = [] :=
+        (List.append_eq_nil_iff.mp hco).2
+      show uses (.bind x e₁' e₂) = []
+      exact List.append_eq_nil_iff.mpr ⟨ih hp₁ hc₁, hc₂⟩
 
 end Scidonia.RC

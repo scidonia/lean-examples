@@ -57,6 +57,9 @@ cost is that a node has at most two slots outside the nullary form.
   `pure_bind_iff`, `pure_matchC_iff`, `pure_con0`, `pure_con1_iff`,
   `pure_con2_iff`, `pure_store_iff`), which is how the later modules decompose a
   term, and the two forms that are never pure (`not_pure_dup`, `not_pure_drop`).
+* `uses`, the free occurrences of a variable as a list read for its
+  multiplicities, and `Closed`, the terms in which no variable occurs free, which
+  `decide` settles at a concrete term because `uses` is a boolean recursion.
 
 ## What is modelled, and what is not
 
@@ -64,13 +67,13 @@ Constructors are tags (`Ctor`), and a node's slots are their fields; nothing her
 says what a tag is, and no arity is enforced, so a tag may be written at more
 than one of the three forms in one term. A variable is a natural number, and
 binders are not required to be distinct: a later binder of a name shadows an
-earlier one, as the substitution of `Scidonia.RC.Pure` reads it, and the usage
-counts of `Scidonia.RC.Lower` read it the same way. An arm's binders are a
-list of names rather than a list of subterms, which is what keeps the match flat.
+earlier one, as the substitution of `Scidonia.RC.Pure` reads it, and as the free
+occurrences `uses` counts read it here. An arm's binders are a list of names
+rather than a list of subterms, which is what keeps the match flat.
 
 Nothing here is a theorem about a program: the module fixes a language, its
-source fragment, and the decidable test the later modules and the checks read it
-back with.
+source fragment, its free variables and its closed terms, and the decidable test
+the later modules and the checks read it back with.
 -/
 
 namespace Scidonia.RC
@@ -279,5 +282,43 @@ theorem not_pure_dup (x : Var) (e : Expr) : ¬ Pure (.dup x e) := by
 theorem not_pure_drop (x : Var) (e : Expr) : ¬ Pure (.drop x e) := by
   intro h
   cases h
+
+/-! ## Free variables
+
+The free occurrences of a variable, as a multiset in list form, and the closed
+terms: the account the substitution of `Scidonia.RC.Pure` is read against, and
+the occurrences the environments of `Scidonia.RC.Lower` are computed from. -/
+
+/-- The free occurrences of a variable, as a multiset in list form. A binder's
+name is removed from the whole of its scope, so an inner binder of the same name
+shadows an outer one for the free occurrences as well. A match's subject and its
+arm's binders are occurrences of the term like any other — the subject outside
+the binders' scope and the body under them; a `dup` or a `drop` node holds an
+occurrence of its name besides the occurrences of its body, and neither is source
+syntax, so the recursion is total on the syntax only because it has to be. -/
+def uses : Expr → List Var
+  | .var x => [x]
+  | .lam x body => (uses body).filter (fun y => y ≠ x)
+  | .app f a => uses f ++ uses a
+  | .bind x e₁ e₂ => uses e₁ ++ (uses e₂).filter (fun y => y ≠ x)
+  | .matchC s _ ys body => uses s ++ (uses body).filter (fun y => y ∉ ys)
+  | .dup x e => x :: uses e
+  | .drop x e => x :: uses e
+  | .con0 _ => []
+  | .con1 _ a => uses a
+  | .con2 _ a b => uses a ++ uses b
+  | .store s _ v => uses s ++ uses v
+
+/-- A term is closed when no variable occurs free in it: `uses` is empty. This is
+the discipline the reduction of `Scidonia.RC.Pure` is stated for, and the
+hypothesis under which its substitution inserts no free variable under a binder —
+a closed term has no free variable for a binder to capture. -/
+def Closed (e : Expr) : Prop := uses e = []
+
+/-- Closedness is decidable at a concrete term: `uses` is a boolean recursion and
+its value is compared with the empty list, so `decide` settles `Closed e` there
+and a `#guard` can evaluate it. -/
+instance (e : Expr) : Decidable (Closed e) :=
+  inferInstanceAs (Decidable (uses e = []))
 
 end Scidonia.RC

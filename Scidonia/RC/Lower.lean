@@ -39,7 +39,10 @@ canonical, and canonical splits are what determinism needs: with an arbitrary
 split of the environment between two subterms, two lowerings of one term from one
 environment could place the same `dup` in different subterms and the targets
 would differ, so `Lower`'s splits are written with the functions below rather
-than by an existential.
+than by an existential. The occurrences a term has are `uses` in
+`Scidonia.RC.Syntax`, which this module takes as given: a binder's name is
+removed from the whole of its scope there, the same shadowing the substitution of
+`Scidonia.RC.Pure` reads.
 
 **Where the instructions land.** Each rule's conclusion wraps the translated
 subterm in the *prologue* of the differential between the environment it was
@@ -93,33 +96,6 @@ a list: what matters is how many occurrences of a name it holds. -/
 /-- An environment for the lowering: the occurrences it holds, as a list read for
 its multiplicities. -/
 abbrev Occs := List Var
-
-/-! ## Usage
-
-The free occurrences of a variable in a term, as a list read for its
-multiplicities. A binder removes its name's occurrences from its scope, which is
-the shadowing `Scidonia.RC.Syntax` leaves in the syntax and the substitution of
-`Scidonia.RC.Pure` reads the same way. -/
-
-/-- The free occurrences of a variable, as a multiset in list form. A binder's
-name is removed from the whole of its scope, so a later binder of the same name
-shadows an earlier one for the usage as well. A match's subject and its arm's
-binders are occurrences of the term like any other, the subject outside the
-binders' scope and the body under them; a `dup` or a `drop` node uses its name
-once besides the occurrences of its body, and neither is source syntax, so the
-usage is total on the syntax only because the recursion has to be. -/
-def uses : Expr → List Var
-  | .var x => [x]
-  | .lam x body => (uses body).filter (fun y => y ≠ x)
-  | .app f a => uses f ++ uses a
-  | .bind x e₁ e₂ => uses e₁ ++ (uses e₂).filter (fun y => y ≠ x)
-  | .matchC s _ ys body => uses s ++ (uses body).filter (fun y => y ∉ ys)
-  | .dup x e => x :: uses e
-  | .drop x e => x :: uses e
-  | .con0 _ => []
-  | .con1 _ a => uses a
-  | .con2 _ a b => uses a ++ uses b
-  | .store s _ v => uses s ++ uses v
 
 /-! ## The environments a subterm is handed
 
