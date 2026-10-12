@@ -1030,6 +1030,42 @@ https://scidonia.github.io/lean-examples/Slides/update.html. Its
 not checked panels: the Lean panels around them are compiled, and the address
 assertions that ship live in the `inplace` harness.
 
+## Paper
+
+`Paper/` holds the paper on this work:
+
+| Path | Contents |
+| --- | --- |
+| `unobservable-effects.tex` | The paper's source |
+| `unobservable-effects.pdf` | The built paper, committed so it reads without a TeX installation |
+| `laws.tex` | The law frames, generated from the library by `gen-laws.py`; do not edit by hand |
+| `gen-laws.py` | Locates each law's statement by line range and writes `laws.tex` |
+| `check-listings.py` | Verifies every frame in the paper against the library |
+
+The paper builds with `pdflatex`. The toolchain's `lualatex` cannot load its
+font loader, so the Unicode in the quoted Lean is mapped to font commands in
+the preamble, both in the body (`newunicodechar`) and inside `lstlisting`
+(`literate`). A character that appears in newly quoted code and has no mapping
+fails the build with `Invalid UTF-8 byte sequence`, which is the signal to add
+one.
+
+```sh
+cd Paper
+latexmk -pdf unobservable-effects.tex     # the paper
+python3 check-listings.py                 # every frame, against the library
+python3 gen-laws.py                       # regenerate laws.tex after a library change
+```
+
+Every frame in appendix A is a line range into the library, so the paper quotes
+the source rather than a transcription of it, and a range that has drifted is a
+build failure rather than a silent misquotation. `check-listings.py` checks a
+panel against a fragment the marginal `%!check:` directive names, and a law
+frame against the declaration it names. The appendix's types-and-operations
+half and its law half are separate lists for that reason: the first names the
+definition each panel must contain, the second names the theorem each frame
+must start at. Neither compiles anything: the library is built separately, and
+the paper's measurements are the `inplace` harness's.
+
 ## Layout
 
 | Path | Contents |
@@ -1073,4 +1109,5 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
 | `Slides/` | The slide deck's sources: prose series and stepped proofs |
+| `Paper/` | The paper: source, built PDF, and the tools that keep its quotations to the library |
 | `Main.lean` | Entry point of the `scidonia` executable |

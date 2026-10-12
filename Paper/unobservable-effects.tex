@@ -1,12 +1,16 @@
 % Unobservable effects: fractional permissions as a discipline for in-place
 % update in Lean 4.
 %
-% Build (from the repository root):
-%   cd Paper && latexmk -lualatex -interaction=nonstopmode unobservable-effects.tex
+% Build, from this directory:
+%   latexmk -pdf unobservable-effects.tex
+% Check that every quoted frame still quotes the library:
+%   python3 check-listings.py
+% Regenerate the law frames (Paper/laws.tex) after a change to the library:
+%   python3 gen-laws.py
 %
-% The listings in the appendix are read from the library source by line range,
-% so the paper quotes the source rather than a transcription of it. Their
-% content is checked by check-listings.py.
+% pdflatex rather than lualatex: the toolchain's lualatex cannot load its font
+% loader. The Unicode in the quoted Lean is mapped to font commands below, both
+% in the body (newunicodechar) and inside lstlisting (literate).
 \documentclass[11pt,a4paper]{article}
 
 % pdflatex: the toolchain's lualatex cannot load its font loader, so the
@@ -92,6 +96,14 @@
    {⟨}{{\ensuremath{\langle}}}1
    {⟩}{{\ensuremath{\rangle}}}1
    {…}{{\ensuremath{\ldots}}}1
+   {¬}{{\ensuremath{\neg}}}1
+   {γ}{{\ensuremath{\gamma}}}1
+   {∨}{{\ensuremath{\lor}}}1
+   {↔}{{\ensuremath{\leftrightarrow}}}1
+   {≃}{{\ensuremath{\simeq}}}1
+   {₀}{{\textsubscript{0}}}1
+   {₁}{{\textsubscript{1}}}1
+   {₂}{{\textsubscript{2}}}1
    {—}{{---}}1
    {◾}{{\ensuremath{\blacksquare}}}1,
 }
@@ -284,10 +296,11 @@ structural, measured or trusted (\cref{sec:evidence}).
 
 All of the code discussed here is Lean 4, on a pinned toolchain, in a library
 that builds and whose checks are theorems rather than test assertions. The
-paper quotes the library's declarations verbatim in \cref{app:listings}; the
-quotations are read from the source files by line range at build time, and
-\code{check-listings.py} verifies that each quoted range still contains the
-declaration it is claimed to contain.
+paper quotes the library's declarations verbatim in \cref{app:listings}: 37
+panels for the types and the operations, and the statements of 110 of the
+library's 184 public theorems. Every frame is a line range into the library,
+re-checked by \code{check-listings.py}, so the appendix cannot drift from the
+source it quotes.
 
 \subsection{How much is claimed}
 
@@ -1736,28 +1749,49 @@ a runtime problem as much as a permission problem.
 \appendix
 \section{Quoted declarations}\label{app:listings}
 
-The listings below are read from the library by \code{\textbackslash
-lstinputlisting} with an explicit line range, so the paper quotes the source and
-not a transcription of it. Each is preceded by a \code{\%!check:} directive
-naming a fragment that the quoted range must contain; \code{check-listings.py}
-fails if a range has drifted. This checks that the paper is quoting what it
-claims to quote, and not that the Lean compiles: the library is built separately.
+The appendix reproduces the definitions and the law statements the paper's
+claims rest on, read from the library by \code{\textbackslash lstinputlisting}
+with an explicit line range, so it quotes the source and not a transcription of
+it. The first half is 37 panels for the types and the operations; the second
+half is 110 law statements, grouped as the prose groups them.
+
+Two conventions are worth stating. A frame is a whole source line range, so a
+declaration short enough to fit on one line shows its proof on that line: the
+frame is the line, not a truncation of it. And a law frame quotes the
+\emph{statement} of a theorem, ending where the statement ends, so the proof
+that follows it is usually not shown.
+
+The library publishes 184 theorems under \code{Scidonia/}, of which the second
+half of this appendix reproduces 110, being the ones this paper states or uses;
+seventeen of the 184 are vendored from Lean's own model of the count, and the
+seven frames of the reference-count section are this repository's own facts.
+Two checks run against the frames. Every panel carries a \code{\%!check:}
+directive naming a fragment the quoted range must contain, and every law frame
+names its declaration instead; \code{check-listings.py} fails when a range has
+drifted either way. The ranges are produced by \code{gen-laws.py}. This checks
+that the paper quotes what it claims to quote, and not that the Lean compiles:
+the library is built separately.
 
 \newcommand{\listingcaption}[3]{\par\medskip\noindent\textbf{#1} \emph{(#2, lines #3)}}
+\newcommand{\lawframe}[3]{%
+  \par\smallskip\noindent\texttt{#3}\hfill{\footnotesize\itshape #1:\,#2}\par
+  \lstinputlisting[linerange={#2},numbers=none]{../#1}}
 
 \lstset{numbers=none}
+
+\subsection{The types and the operations}
 
 %!check: def held (l : Ledger) : Rat := 1 - (l.map Prod.snd).sum
 \listingcaption{The ledger and the held fraction}{Scidonia/FracPerm/Ledger.lean}{16--22}
 \lstinputlisting[linerange=16-22]{../Scidonia/FracPerm/Ledger.lean}
 
-%!check: held (l.erase (n, q)) = held l + q
-\listingcaption{Returning a read gives back exactly its fraction}{Scidonia/FracPerm/Ledger.lean}{32--37}
-\lstinputlisting[linerange=32-37]{../Scidonia/FracPerm/Ledger.lean}
-
 %!check: check_eq : ∀ site o s, check site o s = s
 \listingcaption{The object interface}{Scidonia/FracPerm/Hoare.lean}{107--132}
 \lstinputlisting[linerange=107-132]{../Scidonia/FracPerm/Hoare.lean}
+
+%!check: structure ReadTok (n : Nat) (q : Rat) : Type where
+\listingcaption{The read token}{Scidonia/FracPerm/Hoare.lean}{145--152}
+\lstinputlisting[linerange=145-152]{../Scidonia/FracPerm/Hoare.lean}
 
 %!check: private run : Cap → (s : σ) → (∃ l, P l s) →
 \listingcaption{The program type}{Scidonia/FracPerm/Hoare.lean}{178--184}
@@ -1767,13 +1801,62 @@ claims to quote, and not that the Lean compiles: the library is built separately
 \listingcaption{The primitives and their specifications}{Scidonia/FracPerm/Hoare.lean}{229--266}
 \lstinputlisting[linerange=229-266]{../Scidonia/FracPerm/Hoare.lean}
 
+%!check: inductive WriteOp where
+\listingcaption{The second object: a count and a log}{Scidonia/FracPerm/Counter.lean}{22--49}
+\lstinputlisting[linerange=22-49]{../Scidonia/FracPerm/Counter.lean}
+
+%!check: inductive Value where
+\listingcaption{The value language, in which a reference can be written down}{Scidonia/FracPerm/StateVar/Value.lean}{46--67}
+\lstinputlisting[linerange=46-67]{../Scidonia/FracPerm/StateVar/Value.lean}
+
+%!check: def NoRef (ℓ : Loc) : Value → Prop
+\listingcaption{Detachment}{Scidonia/FracPerm/StateVar/Value.lean}{68--82}
+\lstinputlisting[linerange=68-82]{../Scidonia/FracPerm/StateVar/Value.lean}
+
 %!check: observe_detached : ∀ (ℓ : Loc) (o : ReadOp) (s : σ),
 \listingcaption{The lawful state variable}{Scidonia/FracPerm/StateVar/Class.lean}{59--91}
 \lstinputlisting[linerange=59-91]{../Scidonia/FracPerm/StateVar/Class.lean}
 
+%!check: abbrev Heap (σ : Type) := Loc → Option σ
+\listingcaption{The single-root heap}{Scidonia/FracPerm/StateVar/Heap.lean}{44--47}
+\lstinputlisting[linerange=44-47]{../Scidonia/FracPerm/StateVar/Heap.lean}
+
+%!check: def Heap.update (h : Heap σ) (ℓ : Loc) (v : Option σ) : Heap σ :=
+\listingcaption{The heap's own point update and its two laws}{Scidonia/FracPerm/StateVar/Heap.lean}{49--68}
+\lstinputlisting[linerange=49-68]{../Scidonia/FracPerm/StateVar/Heap.lean}
+
+%!check: def ReadAt {σ Init ReadOp WriteOp : Type} (inst : LawfulStateVar σ Init ReadOp WriteOp)
+\listingcaption{A read step against the heap}{Scidonia/FracPerm/StateVar/Heap.lean}{70--77}
+\lstinputlisting[linerange=70-77]{../Scidonia/FracPerm/StateVar/Heap.lean}
+
+%!check: def WriteAt {σ Init ReadOp WriteOp : Type} (inst : LawfulStateVar σ Init ReadOp WriteOp)
+\listingcaption{A write step against the heap}{Scidonia/FracPerm/StateVar/Heap.lean}{79--89}
+\lstinputlisting[linerange=79-89]{../Scidonia/FracPerm/StateVar/Heap.lean}
+
+%!check: inductive RTree (ReadOp : Type) (Result : ReadOp → Type) : Type → Type 1 where
+\listingcaption{The generic recipes}{Scidonia/FracPerm/StateVar/Surface.lean}{38--59}
+\lstinputlisting[linerange=38-59]{../Scidonia/FracPerm/StateVar/Surface.lean}
+
+%!check: def arrayObserve (o : ArrayReadOp) (a : Array UInt64) : ArrayResult o :=
+\listingcaption{The array witness}{Scidonia/FracPerm/StateVar/Array.lean}{57--76}
+\lstinputlisting[linerange=57-76]{../Scidonia/FracPerm/StateVar/Array.lean}
+
 %!check: def slotDesc : Desc := .sum .unit .nat
 \listingcaption{The description universe}{Scidonia/FracPerm/StateVar/Description.lean}{24--46}
 \lstinputlisting[linerange=24-46]{../Scidonia/FracPerm/StateVar/Description.lean}
+
+%!check: structure Described (d : Desc) where
+\listingcaption{The description-indexed wrapper}{Scidonia/FracPerm/StateVar/Universe.lean}{111--117}
+\lstinputlisting[linerange=111-117]{../Scidonia/FracPerm/StateVar/Universe.lean}
+
+%!check: LawfulStateVar τ τ Unit τ where
+\listingcaption{Transport along an isomorphism}{Scidonia/FracPerm/StateVar/Universe.lean}{210--240}
+\lstinputlisting[linerange=210-240]{../Scidonia/FracPerm/StateVar/Universe.lean}
+
+%!check: def encode : Slot → El slotDesc
+\listingcaption{The slot, and its isomorphism to its description}{Scidonia/FracPerm/StateVar/Slot.lean}{46--63}
+\lstinputlisting[linerange=46-63]{../Scidonia/FracPerm/StateVar/Slot.lean}
+
 
 %!check: rep : σ = State layout
 \listingcaption{The sealed class}{Scidonia/FracPerm/StateVar/Sealed.lean}{52--60}
@@ -1834,6 +1917,20 @@ claims to quote, and not that the Lean compiles: the library is built separately
 %!check: def IsExclusive (rc : Int32) : Prop := isSt rc ∧ rc = 1
 \listingcaption{What a write tests}{Scidonia/FracPerm/StateVar/RefCount.lean}{713--728}
 \lstinputlisting[linerange=713-728]{../Scidonia/FracPerm/StateVar/RefCount.lean}
+
+%!check: inductive RTree : Type → Type 1 where
+\listingcaption{The structured interface's command trees}{Scidonia/FracPerm/Structured/Surface.lean}{127--149}
+\lstinputlisting[linerange=127-149]{../Scidonia/FracPerm/Structured/Surface.lean}
+
+%!check: structure Reader (α : Type) where
+\listingcaption{The reader and the program, each behind a private field}{Scidonia/FracPerm/Structured/Surface.lean}{166--179}
+\lstinputlisting[linerange=166-179]{../Scidonia/FracPerm/Structured/Surface.lean}
+
+%!check: structure Init where
+\listingcaption{What a fresh session starts from}{Scidonia/FracPerm/Structured/Surface.lean}{263--270}
+\lstinputlisting[linerange=263-270]{../Scidonia/FracPerm/Structured/Surface.lean}
+
+\input{laws.tex}
 
 \begin{thebibliography}{99}\small
 

@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Check that each quoted listing still contains what the paper says it does.
+"""Check that every quoted frame in the paper still quotes what it claims.
 
-The paper reads its code panels out of the library with
-``\\lstinputlisting[linerange=...]{file}``.  A line range drifts silently when the
-file above it changes, so every panel is preceded by a
+Two kinds of frame, both read from the library by line range:
 
-    %!check: <fragment>
+  %!check: <fragment>
+  \\lstinputlisting[linerange=<lo>-<hi>]{<file>}
+      the range must contain <fragment>;
 
-directive naming a fragment of the declaration the panel is claimed to quote.
-This script pairs each directive with the ``\\lstinputlisting`` that follows it,
-reads that file's named lines, and fails if the fragment is not among them.
+  \\lawframe{<file>}{<lo>-<hi>}{<name>}
+      the range must contain the declaration of <name> -- a line at which
+      `theorem`/`def`/... followed by that name begins.
 
-Usage:  python3 check-listings.py [paper.tex]
+A line range drifts silently when the file above it changes, so every frame is
+checked against the named source.  This checks the paper's quotations, not that
+the Lean compiles: the library is built separately.
 
-Exit status is 0 when every panel checks out, 1 otherwise.
+Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
+Exit status 0 when every frame checks out, 1 otherwise.
 """
 
 import re
@@ -21,10 +24,12 @@ import sys
 from pathlib import Path
 
 CHECK = re.compile(r"^\s*%\s*!check:\s*(?P<frag>.*\S)\s*$")
-LISTING = re.compile(
-    r"\\lstinputlisting\[(?P<opts>[^\]]*)\]\{(?P<path>[^}]*)\}"
+LISTING = re.compile(r"\\lstinputlisting\[(?P<opts>[^\]]*)\]\{(?P<path>[^}]*)\}")
+LAWFRAME = re.compile(
+    r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
 )
 RANGE = re.compile(r"linerange\s*=\s*(?P<lo>\d+)\s*-\s*(?P<hi>\d+)")
+KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
 
 def normalise(text: str) -> str:
@@ -32,68 +37,98 @@ def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def main(argv: list[str]) -> int:
-    tex = Path(argv[1] if len(argv) > 1 else "unobservable-effects.tex")
-    if not tex.is_file():
-        print(f"no such file: {tex}", file=sys.stderr)
-        return 1
+def read_source(path: Path, limit: int, context: str):
+    """The lines of `path`, or None after reporting that it cannot be read."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        print(f"{context}: cannot read {path}: {error}")
+        return None
+    if limit > len(lines):
+        print(f"{context}: {path} has only {len(lines)} lines, range is ..{limit}")
+        return None
+    return lines
 
+
+def check_fragments(tex: Path, problems: list[str]) -> int:
+    """Verify each %!check: directive against the listing that follows it."""
     lines = tex.read_text(encoding="utf-8").splitlines()
-    pending: tuple[int, str] | None = None
-    panels = 0
-    failures = 0
-
+    pending, checked = None, 0
     for number, line in enumerate(lines, start=1):
         match = CHECK.match(line)
         if match:
             pending = (number, match.group("frag"))
             continue
-
         match = LISTING.search(line)
         if not match:
             continue
+        if "#" in match.group("opts") or "#" in match.group("path"):
+            continue                      # the \lawframe macro's own body
         if pending is None:
-            print(f"{tex}:{number}: listing without a %!check: directive")
-            failures += 1
+            problems.append(f"{tex.name}:{number}: listing without a %!check:")
             continue
-
-        directive_line, fragment = pending
-        pending = None
-        panels += 1
-
-        source = tex.parent / match.group("path")
+        directive, fragment = pending
+        pending, checked = None, checked + 1
+        where = f"{tex.name}:{directive}"
         span = RANGE.search(match.group("opts"))
         if span is None:
-            print(f"{tex}:{number}: listing without a linerange")
-            failures += 1
+            problems.append(f"{where}: listing without a linerange")
             continue
         lo, hi = int(span.group("lo")), int(span.group("hi"))
-
-        try:
-            body = source.read_text(encoding="utf-8").splitlines()
-        except OSError as error:
-            print(f"{tex}:{directive_line}: cannot read {source}: {error}")
-            failures += 1
+        body = read_source(tex.parent / match.group("path"), hi, where)
+        if body is None:
             continue
-
-        if hi > len(body):
-            print(f"{tex}:{directive_line}: {source} has only {len(body)} lines, "
-                  f"range is {lo}-{hi}")
-            failures += 1
-            continue
-
-        quoted = normalise("\n".join(body[lo - 1:hi]))
-        if normalise(fragment) not in quoted:
-            print(f"{tex}:{directive_line}: {source}:{lo}-{hi} does not contain")
-            print(f"    {fragment}")
-            failures += 1
-
+        if normalise(fragment) not in normalise("\n".join(body[lo - 1:hi])):
+            problems.append(
+                f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
+                f"    {fragment}")
     if pending is not None:
-        print(f"{tex}:{pending[0]}: trailing %!check: directive with no listing")
-        failures += 1
+        problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no listing")
+    return checked
 
-    print(f"{panels} panels checked, {failures} failed")
-    return 1 if failures else 0
+
+def check_lawframes(tex: Path, problems: list[str]) -> int:
+    """Verify each law frame against the declaration it names."""
+    text = tex.read_text(encoding="utf-8")
+    checked = 0
+    for match in LAWFRAME.finditer(text):
+        number = text.count("\n", 0, match.start()) + 1
+        where = f"{tex.name}:{number}"
+        name = match.group("name").replace("\\_", "_").replace("\\%", "%")
+        lo, hi = int(match.group("lo")), int(match.group("hi"))
+        module = match.group("path")
+        body = read_source(tex.parent / ".." / module, hi, where)
+        if body is None:
+            continue
+        decl = re.compile(rf"^(?:@\[[^\]]*\]\s*)?(?:{KINDS})\s+{re.escape(name)}(?![\w'])")
+        if not any(decl.match(line) for line in body[lo - 1:hi]):
+            problems.append(
+                f"{where}: no declaration of {name} in {module}:{lo}-{hi}\n"
+                f"    first line: {body[lo - 1]!r}")
+            continue
+        checked += 1
+    return checked
+
+
+def main(argv: list[str]) -> int:
+    here = Path(__file__).resolve().parent
+    files = [Path(a) for a in argv[1:]] or sorted(here.glob("*.tex"))
+    if not files:
+        print("no .tex files to check", file=sys.stderr)
+        return 1
+    problems: list[str] = []
+    fragments = laws = 0
+    for tex in files:
+        if not tex.is_file():
+            print(f"no such file: {tex}", file=sys.stderr)
+            return 1
+        fragments += check_fragments(tex, problems)
+        laws += check_lawframes(tex, problems)
+    for problem in problems:
+        print(problem)
+    print(f"{fragments} quoted panels and {laws} law frames checked, "
+          f"{len(problems)} failed")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

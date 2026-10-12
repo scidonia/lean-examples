@@ -1,0 +1,140 @@
+% Generated from the library by gen-laws.py; do not edit by hand.
+% Each \lawframe{module}{lines}{name} quotes the statement of `name` from
+% that module.  check-listings.py verifies that every range still holds the
+% declaration it names, so the appendix cannot drift from the library.
+
+\subsection{The ledger and the arithmetic of shares}
+\lawframe{Scidonia/FracPerm/Ledger.lean}{25-25}{held\_nil}
+\lawframe{Scidonia/FracPerm/Ledger.lean}{28-28}{held\_cons}
+\lawframe{Scidonia/FracPerm/Ledger.lean}{34-35}{held\_erase\_of\_mem}
+
+\subsection{Detachment in the value language}
+\lawframe{Scidonia/FracPerm/StateVar/Value.lean}{84-84}{noRef\_loc}
+\lawframe{Scidonia/FracPerm/StateVar/Value.lean}{96-97}{noRef\_pair}
+\lawframe{Scidonia/FracPerm/StateVar/Value.lean}{109-109}{noRef\_loc\_of\_ne}
+\lawframe{Scidonia/FracPerm/StateVar/Value.lean}{113-113}{not\_noRef\_loc\_self}
+
+\subsection{The generic model}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{369-370}{primitive\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{423-424}{replay\_trace}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{522-523}{eval\_of\_run}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{529-530}{complete\_run\_value}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{535-535}{wf\_leafSum}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{550-551}{wf\_sharesPositive}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{597-600}{reading\_step\_is\_read\_or\_leave}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{607-608}{reading\_step\_store}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{582-587}{wait\_step}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{642-643}{writer\_authority\_add}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{656-657}{pstep\_wf}
+\lawframe{Scidonia/FracPerm/StateVar/Model.lean}{667-668}{safe\_result}
+
+\subsection{The single-root heap}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{102-103}{read\_at\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{118-119}{write\_at\_valid}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{126-127}{write\_at\_frame}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{135-140}{snapshot\_after\_write}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{157-162}{pstep\_write\_corresponds}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{168-171}{readAt\_step\_observe}
+\lawframe{Scidonia/FracPerm/StateVar/Heap.lean}{214-214}{cannot\_add\_reader}
+
+\subsection{The array witness and the bridge}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{80-81}{arrayObserve\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{91-92}{encodeArrayRead\_injective}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{113-114}{arrayReplace\_size}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{120-121}{arrayReplace\_bounds}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{165-166}{bridge\_val}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{194-195}{bridge\_pval}
+\lawframe{Scidonia/FracPerm/StateVar/Array.lean}{216-220}{runFresh\_eq\_pval}
+
+\subsection{The description universe and transport}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{86-87}{encodeEl\_injective}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{103-103}{encodeEl\_noRef}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{153-154}{universe\_read\_after\_replace}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{159-160}{universe\_read\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{178-181}{universe\_write\_at\_valid}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{185-187}{universe\_write\_at\_frame}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{193-199}{universe\_snapshot\_after\_write}
+\lawframe{Scidonia/FracPerm/StateVar/Universe.lean}{273-277}{transport\_read\_after\_replace}
+
+\subsection{The slot}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{67-67}{decode\_encode}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{73-73}{encode\_decode}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{82-82}{lifted\_iff}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{131-132}{slot\_read\_after\_replace}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{152-156}{slot\_snapshot\_full7\_full9}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{169-174}{slot\_shape\_change}
+\lawframe{Scidonia/FracPerm/StateVar/Slot.lean}{192-192}{slot\_full\_round\_trip}
+
+\subsection{Layouts, paths and the take-out}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{190-191}{append\_left}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{194-195}{append\_right}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{198-199}{append\_index}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{210-211}{not\_disjoint\_here\_left}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{221-222}{disjoint\_left\_iff}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{270-271}{disjoint\_index\_ne}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{474-475}{encodeObs\_injective}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{511-512}{encodeObs\_noRef}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1027-1028}{setLeaf\_failed}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1055-1056}{read\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1243-1246}{snapshot\_after\_setLeaf}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1265-1267}{read\_frame}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1283-1284}{array\_root\_not\_observable}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1361-1364}{describedLayout\_read\_after\_replace}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1379-1382}{describedLayout\_primitive\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Layout5.lean}{1402-1405}{describedLayout\_write\_at\_frame}
+
+\subsection{The sealed class}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{125-127}{sealedLawful\_Result}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{132-135}{sealedLawful\_encodeRead}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{152-153}{toState\_ofState}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{157-158}{ofState\_toState}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{191-193}{sealedRead\_detached}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{199-202}{sealedRead\_after\_setLeaf}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{213-217}{sealedSnapshot}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{234-237}{sealedRead\_frame}
+\lawframe{Scidonia/FracPerm/StateVar/Sealed.lean}{251-253}{sealedSetLeaf\_failed}
+
+\subsection{The reference count}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{740-741}{not\_exclusive\_incRefN\_one}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{765-765}{decRef\_two}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{771-771}{not\_exclusive\_of\_isMt}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{779-779}{markMtRc\_not\_exclusive}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{787-788}{not\_exclusive\_of\_neverFreed}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{804-805}{run\_never\_exclusive}
+\lawframe{Scidonia/FracPerm/StateVar/RefCount.lean}{819-823}{takeOut\_refCount\_eq\_one}
+
+\subsection{The structured model}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{292-293}{step\_get}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{297-298}{step\_size}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{203-204}{replay\_trace}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{365-366}{eval\_of\_run}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{372-373}{complete\_run\_value}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{415-415}{wf\_leafSum}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{430-431}{wf\_sharesPositive}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{549-552}{reading\_step\_is\_read\_or\_leave}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{559-560}{reading\_step\_store}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{463-468}{wait\_step}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{565-567}{set\_step}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{572-573}{set\_step\_size}
+\lawframe{Scidonia/FracPerm/Structured/Model.lean}{586-587}{writer\_authority\_add}
+
+\subsection{What the permission discipline refuses}
+\lawframe{ScidoniaTest/FracPerm.lean}{96-96}{n1\_write\_while\_read\_outstanding}
+\lawframe{ScidoniaTest/FracPerm.lean}{110-110}{n2\_release\_twice}
+\lawframe{ScidoniaTest/FracPerm.lean}{124-124}{n3\_read\_with\_returned\_token}
+\lawframe{ScidoniaTest/FracPerm.lean}{136-136}{n4\_overcommit}
+\lawframe{ScidoniaTest/FracPerm.lean}{149-149}{n4b\_reused\_ghost\_id}
+\lawframe{ScidoniaTest/FracPerm.lean}{160-161}{n5\_unreturned\_read}
+\lawframe{ScidoniaTest/FracPerm.lean}{313-313}{w3\_escaped\_token}
+
+\subsection{Countermodels: the laws and the count are not vacuous}
+\lawframe{ScidoniaTest/StateVar.lean}{281-281}{bad\_read\_rejected}
+\lawframe{ScidoniaTest/StateVar.lean}{287-287}{bad\_write\_rejected}
+\lawframe{ScidoniaTest/StateVar.lean}{293-293}{bad\_encode\_rejected}
+\lawframe{ScidoniaTest/Model5.lean}{335-336}{leakyArray\_read\_returns\_state}
+\lawframe{ScidoniaTest/Model5.lean}{353-353}{leaky\_root\_not\_detached}
+\lawframe{ScidoniaTest/Count.lean}{44-44}{one\_is\_exclusive}
+\lawframe{ScidoniaTest/Count.lean}{56-57}{stuckSt\_is\_unshared\_not\_exclusive}
+\lawframe{ScidoniaTest/Count.lean}{72-73}{shared\_count\_is\_not\_exclusive}
+\lawframe{ScidoniaTest/Count.lean}{125-125}{not\_exclusive\_after\_handOff}
+\lawframe{ScidoniaTest/Count.lean}{133-135}{takeOut\_counts\_at\_one}
