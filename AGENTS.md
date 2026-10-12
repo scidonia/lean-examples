@@ -120,6 +120,30 @@ The compile-time checks live in the check library:
   offered to the sealed class is rejected, which is what makes the sealed
   guarantee structural. Its `#print axioms` shows the new theorems rest on the
   standard kernel principles only.
+- `ScidoniaTest/Count.lean` checks `Scidonia.FracPerm.StateVar.RefCount` from
+  outside. Its controls are counts that tell the module's two tests apart: the
+  exclusive count itself — the affirmative control for the hypothesis of
+  `not_exclusive_incRefN_one`, which would otherwise say nothing about any count
+  — the count a single-threaded overflow freezes at (`isUnshared` and not
+  `IsExclusive`), a persistent count, and the thread-shared count that sharing
+  leaves. The hazard pair `1 → 2 → 1` is the release's step as a theorem and the
+  increment's step as a `#guard`, because the kernel cannot reduce `incRefN`,
+  whose guard is a `USize` comparison — the limit the vendored file's own
+  concrete examples hit, where they are proved by native evaluation. Its
+  `#print axioms` groups the theorems in three. The vendored block's seventeen
+  public theorems are all printed and read: thirteen carry a generated
+  certificate axiom beside `propext`, `Classical.choice` and `Quot.sound`,
+  because `bv_decide` decides by native evaluation and asserts the result as an
+  axiom, and four print none: `LEAN_RC_STUCK_ST_eq`, `incRefHugeMt_id`,
+  `decRef_spec` and `frozen_shared_count_stays_shared`, of which only the first
+  invokes `bv_decide` at all — the other three are `grind` and `omega` proofs.
+  The facts derived from a vendored theorem are printed with their
+  source named: `run_never_exclusive` inherits the axioms of the vendored
+  `run_never_frees`, and `stuckSt_is_unshared_not_exclusive`, stated through the
+  vendored `LEAN_RC_STUCK_ST_eq`, inherits the standard principles only. This
+  repository's own facts are asserted rather than printed — each `#guard_msgs`
+  pins the list `#print axioms` emits, so any other axiom fails the build — and
+  the file's own proofs use `grind`, `simp` and `decide`, which add none.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -606,6 +630,92 @@ arity reduction cannot reach has to compute and box them.
 `trace.compiler.ir.result` on a client program is the instrument that shows all
 of this.
 
+## The reference count, as a write sees it
+
+`Scidonia/FracPerm/StateVar/RefCount.lean` is the counter-level vocabulary of the
+write path: what a Lean reference count is, what an increment and a drop do to
+it, and the predicate a write tests before it may store in place. It is vendored
+— unchanged, and with the declarations keeping their own names inside the
+module's namespace — from `leanprover/lean4`'s own machine-checked model of
+`lean_inc_ref_n` and `lean_dec_ref`, `tests/elab/rc_model.lean` at the tag
+`v4.35.0-rc3` (Apache 2.0, the Lean 4 licence): the thresholds
+(`LEAN_RC_STICKY`, `LEAN_RC_STICKY_DROP`, `LEAN_RC_INC_MAX`, `LEAN_RC_STUCK_ST`),
+the kinds a count falls into (`isSt`, `isMt`, `isPersistent`, `isStuck`,
+`isStuckSt`, `isUnshared`, `isNeverFreed`), `refCount`, the adjustments
+`incRefN`, `decRef` and `markMtRc`, and the theorems that say what they mean
+(`incRefN_spec`, `decRef_spec`, `markMtRc_spec`, `never_freed_is_absorbing`,
+`run_spec`, `run_never_frees`). Those declarations are the Lean FRO's, not this
+repository's; the module header says so, and this repository's own declarations
+begin after the vendored block.
+
+Two predicates are what a write reads:
+
+```lean
+def IsExclusive (rc : Int32) : Prop := isSt rc ∧ rc = 1   -- lean_is_exclusive
+def IsUnshared (rc : Int32) : Prop := isUnshared rc       -- is_unshared
+```
+
+`IsUnshared` is strictly weaker, and the two are not interchangeable: the
+runtime's `is_unshared` is `rc > 0 || rc ≤ LEAN_RC_STUCK_ST`, so a count that
+overflowed while single-threaded reads as unshared while standing for references
+it can no longer track — it passes `IsUnshared` and fails `IsExclusive`, and a
+write that tested only the former would drop the other references.
+`ScidoniaTest/Count.lean` exhibits that count. The facts beside the predicates
+are what the discipline rests on: an extra reference costs the in-place update
+(`not_exclusive_incRefN_one`), dropping it restores it (`decRef_two`), a
+thread-shared count is never exclusive (`markMtRc_not_exclusive` — the
+`Task.spawn` measurement, read off the model), a never-freed count never becomes
+exclusive however the adjustments run (`not_exclusive_of_neverFreed`,
+`run_never_exclusive`), and the take-out's arithmetic leaves the caller's value
+one reference (`takeOut_refCount_eq_one`).
+
+That last one is an **assumption**, and the module labels it as one: taking a
+value out of a store cell is a run-time operation on the object, not a counter
+operation, so the store does not appear in the module at all — the two
+counter-level effects of its take-out are the theorem's hypotheses, and which
+cell a store holds and what its primitive does are the caller's obligation.
+Non-escape over the command tree and the shape of the emitted `Lean.IR` are not
+in this module either.
+
+What a proof rests on is printed rather than assumed, and the trusted surface is
+kept where the vendoring forces it:
+
+- `bv_decide` and `mvcgen` are used **only inside the vendored block**, which is
+  upstream's text. `mvcgen` is that block's tactic for the `Id.run` loops: it
+  generates verification conditions and is not itself a source of an axiom —
+  `incRefHugeMt_id` is `mvcgen` then `grind` and carries the standard principles
+  alone. `bv_decide` is the one that can add a generated certificate axiom
+  (`<theorem>._native.bv_decide.ax_*`) beside `propext`, `Classical.choice` and
+  `Quot.sound`, by evaluating its certificate and asserting the result. Thirteen
+  of the block's seventeen public theorems carry at least one such axiom; four
+  print none — `LEAN_RC_STUCK_ST_eq`, `incRefHugeMt_id`, `decRef_spec` and
+  `frozen_shared_count_stays_shared` — and of those only `LEAN_RC_STUCK_ST_eq`
+  invokes `bv_decide` at all, its goal having been closed before the certificate
+  step; the other three are `grind` and `omega` proofs, which add no axiom.
+  Those axioms, where they are there, are not
+  this repository's to remove, and the module leaves the vendored arithmetic as it
+  is.
+- This repository's own facts are proved with `grind`, `simp` and `decide`, which
+  are kernel-checked and add no axiom, so each rests on the standard kernel
+  principles alone and `ScidoniaTest/Count.lean` asserts exactly that of them.
+- Anything derived from a vendored theorem **inherits that theorem's axioms** and
+  says so, naming the source. `run_never_exclusive` composes the vendored
+  `run_never_frees` with this repository's `not_exclusive_of_neverFreed`, so it
+  rests on the vendored theorem's certificate axioms and nothing more, and its
+  docstring states which declaration it inherits them from.
+  `stuckSt_is_unshared_not_exclusive` is stated through the vendored
+  `LEAN_RC_STUCK_ST_eq`, whose list carries no certificate, and says so too.
+- A tactic's trust properties belong to the pinned toolchain and to the particular
+  proof, not to the tactic or to the goal's shape. `bv_decide` here adds a
+  certificate axiom when that proof reaches the certificate step, and two goals
+  that look alike can differ: on this toolchain
+  `x + 1 > x ∨ x = Int32.maxValue` came out carrying a certificate while
+  `rc = 1 → rc + 1 = 2` came out clean, both of them symbolic. The property is
+  therefore not predicted from the goal; it is measured. `#print axioms` against
+  the pinned toolchain, run before any check relied on it, is what established the
+  classification above, and the same probe is owed by any check that depends on
+  what a tactic trusts.
+
 ## The in-place check in the generated C
 
 `HSt.write` runs the object's `check` on the operation and the state before
@@ -750,6 +860,7 @@ assertions that ship live in the `inplace` harness.
 | `Scidonia/FracPerm/StateVar/Slot.lean` | The slot: `encode`/`decode`, both inverse laws, and the instance transported at `slotDesc` |
 | `Scidonia/FracPerm/StateVar/Layout5.lean` | Model 5: the observation universe and layouts, paths, the zipper, `read?`/`setLeaf`, and the lawful adapter |
 | `Scidonia/FracPerm/StateVar/Sealed.lean` | `SealedStateVar`: a layout state's type as the whole interface, with the read and the write defined by the library and the derived lawful instance |
+| `Scidonia/FracPerm/StateVar/RefCount.lean` | The reference count as a write sees it: the model of `lean_inc_ref_n`/`lean_dec_ref` vendored from Lean 4, `IsExclusive`/`IsUnshared`, and the counter-level facts the write discipline rests on |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -759,6 +870,7 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaTest/Slot.lean` | The slot's correspondence, instance, snapshot, shape-change, and detector checks |
 | `ScidoniaTest/Model5.lean` | Model 5's reads, zipper laws, frames and snapshots, the whole-array rejection, and the old class's countermodel |
 | `ScidoniaTest/Sealed.lean` | `SealedStateVar`'s reads, writes and theorems at its instances, the rejection of an `observe`/`encodeRead`/mismatched-`rep` instance, and the countermodel comparison |
+| `ScidoniaTest/Count.lean` | The count module's controls — the two tests on counts that tell them apart, the hazard pair `1 → 2 → 1`, and the take-out at the counts a one-reference cell hands out — and `#print axioms` on the representative theorems |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
