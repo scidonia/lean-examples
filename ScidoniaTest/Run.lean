@@ -305,7 +305,7 @@ theorem chain_root_write_count :
       = some (CHeap.cascade (CHeap.writeSlots chain 0 []), handles) := by decide
   refine ⟨by decide, writeStep_leaf_count chain_counted hstep, ?_⟩
   rw [hstep]
-  simp only [Option.map_some, eq_self_iff_true, and_self]
+  simp only [Option.map_some, and_self]
 
 /-! ## The countermodel and its affirmative control
 

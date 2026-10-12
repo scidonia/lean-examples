@@ -875,7 +875,7 @@ theorem plug_refs {c : CHeap} {hs : List Ref} {r : Ref} {i : Nat} {e : Ref}
     decide_eq_true_iff.mpr (plug_check h)
   rw [plug_eq_of_check hchk] at h
   cases Option.some.inj h
-  simp [decRef, CHeap.refs_adjust, CHeap.refs_writeSlots]
+  simp [CHeap.refs_adjust, CHeap.refs_writeSlots]
 
 /-- The put-back's heap names every reference exactly as often as the heap it was
 handed: one occurrence moves from the handle to the cell at hand's slots. -/
