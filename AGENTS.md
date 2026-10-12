@@ -1042,16 +1042,24 @@ assertions that ship live in the `inplace` harness.
 | `gen-laws.py` | Locates each law's statement by line range and writes `laws.tex` |
 | `check-listings.py` | Verifies every frame in the paper against the library |
 
-The paper builds with `pdflatex`. The toolchain's `lualatex` cannot load its
-font loader, so the Unicode in the quoted Lean is mapped to font commands in
-the preamble, both in the body (`newunicodechar`) and inside `lstlisting`
-(`literate`). A character that appears in newly quoted code and has no mapping
-fails the build with `Invalid UTF-8 byte sequence`, which is the signal to add
-one.
+The paper builds with `pdflatex`, and its Lean frames are syntax-highlighted by
+`minted`, which reads each quoted file through Pygments' Lean lexer. Two
+consequences for the build: it needs `-shell-escape` for minted to run
+`pygmentize`, and it needs Pygments on `PATH`. `_minted-<jobname>/` holds
+minted's cache and is ignored by git; deleting it only costs a slower rebuild.
+
+The frames are written `\codeframe[linerange=lo-hi]{../path}`, one delimited
+argument, so a call site is the same in the appendix and in the law frames that
+`gen-laws.py` writes. The toolchain's `lualatex` cannot load its font loader, so
+`pdflatex` it is, and the Unicode in the quoted Lean is mapped to font commands
+in the preamble by `newunicodechar`. A character in a quoted range with no
+mapping fails the build, which is the signal to add one; `minted` reads the
+whole file but typesets only the quoted lines, so a character elsewhere in the
+module does not matter.
 
 ```sh
 cd Paper
-latexmk -pdf unobservable-effects.tex     # the paper
+latexmk -pdf -shell-escape unobservable-effects.tex   # the paper
 python3 check-listings.py                 # every frame, against the library
 python3 gen-laws.py                       # regenerate laws.tex after a library change
 ```
@@ -1065,6 +1073,9 @@ half and its law half are separate lists for that reason: the first names the
 definition each panel must contain, the second names the theorem each frame
 must start at. Neither compiles anything: the library is built separately, and
 the paper's measurements are the `inplace` harness's.
+
+The description, observation and layout universes are quoted in the body, where
+they are defined, rather than in the appendix, so each is shown once.
 
 ## Layout
 

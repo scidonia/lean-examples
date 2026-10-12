@@ -24,11 +24,12 @@ import sys
 from pathlib import Path
 
 CHECK = re.compile(r"^\s*%\s*!check:\s*(?P<frag>.*\S)\s*$")
-LISTING = re.compile(r"\\lstinputlisting\[(?P<opts>[^\]]*)\]\{(?P<path>[^}]*)\}")
+LISTING = re.compile(
+    r"\\codeframe\[linerange=(?P<lo>\d+)-(?P<hi>\d+)\]\{(?P<path>[^}]*)\}"
+)
 LAWFRAME = re.compile(
     r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
 )
-RANGE = re.compile(r"linerange\s*=\s*(?P<lo>\d+)\s*-\s*(?P<hi>\d+)")
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
 
@@ -62,19 +63,13 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
         match = LISTING.search(line)
         if not match:
             continue
-        if "#" in match.group("opts") or "#" in match.group("path"):
-            continue                      # the \lawframe macro's own body
         if pending is None:
-            problems.append(f"{tex.name}:{number}: listing without a %!check:")
+            problems.append(f"{tex.name}:{number}: frame without a %!check:")
             continue
         directive, fragment = pending
         pending, checked = None, checked + 1
         where = f"{tex.name}:{directive}"
-        span = RANGE.search(match.group("opts"))
-        if span is None:
-            problems.append(f"{where}: listing without a linerange")
-            continue
-        lo, hi = int(span.group("lo")), int(span.group("hi"))
+        lo, hi = int(match.group("lo")), int(match.group("hi"))
         body = read_source(tex.parent / match.group("path"), hi, where)
         if body is None:
             continue

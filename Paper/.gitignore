@@ -5,4 +5,5 @@
 /*.out
 /*.toc
 /*.synctex.gz
+/_minted-*/
 __pycache__/

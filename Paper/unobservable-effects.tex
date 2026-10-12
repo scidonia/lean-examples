@@ -1,16 +1,18 @@
 % Unobservable effects: fractional permissions as a discipline for in-place
 % update in Lean 4.
 %
-% Build, from this directory:
-%   latexmk -pdf unobservable-effects.tex
+% Build, from this directory. Highlighting is minted's, so the build needs
+% shell escape and Pygments on PATH:
+%   latexmk -pdf -shell-escape unobservable-effects.tex
 % Check that every quoted frame still quotes the library:
 %   python3 check-listings.py
 % Regenerate the law frames (Paper/laws.tex) after a change to the library:
 %   python3 gen-laws.py
 %
-% pdflatex rather than lualatex: the toolchain's lualatex cannot load its font
-% loader. The Unicode in the quoted Lean is mapped to font commands below, both
-% in the body (newunicodechar) and inside lstlisting (literate).
+% pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
+% in the quoted Lean is mapped to font commands by newunicodechar below. A
+% character in a quoted range with no mapping fails the build, which is the
+% signal to add one.
 \documentclass[11pt,a4paper]{article}
 
 % pdflatex: the toolchain's lualatex cannot load its font loader, so the
@@ -39,74 +41,37 @@
 \newunicodechar{⟨}{\ensuremath{\langle}}
 \newunicodechar{⟩}{\ensuremath{\rangle}}
 \newunicodechar{…}{\ensuremath{\ldots}}
+\newunicodechar{¬}{\ensuremath{\neg}}
+\newunicodechar{γ}{\ensuremath{\gamma}}
+\newunicodechar{∨}{\ensuremath{\lor}}
+\newunicodechar{↔}{\ensuremath{\leftrightarrow}}
+\newunicodechar{≃}{\ensuremath{\simeq}}
+\newunicodechar{₀}{\textsubscript{0}}
+\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{₂}{\textsubscript{2}}
 \newunicodechar{◾}{\ensuremath{\blacksquare}}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage[margin=1in]{geometry}
 \usepackage{microtype}
 \usepackage{xcolor}
-\usepackage{listings}
+\usepackage{minted}
+\usemintedstyle{friendly}
+\setminted{fontsize=\footnotesize,frame=single,rulecolor=\color{black!30},
+           framesep=4pt,breaklines=true,baselinestretch=1.0}
+% Every quoted frame is written \codeframe[linerange=lo-hi]{../path}: a line
+% range of a library file, highlighted by minted's Pygments Lean lexer. One
+% delimited argument keeps the call sites uniform across the appendix and the
+% law frames that gen-laws.py writes.
+\def\codeframe[linerange=#1-#2]#3{\inputminted[firstline=#1,lastline=#2]{lean}{#3}}
+% A path is set with \path so that it may break at its slashes: a long title and
+% a long module path on one caption line would otherwise overrun the margin.
+\usepackage{url}\urlstyle{same}
+% A body frame is labelled with the file and lines it quotes:
+\newcommand{\sourceline}[3]{\par\smallskip\noindent\textbf{#1}\hfill
+  {\footnotesize\itshape\path{#2}, lines #3}\par\nobreak}
 \usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!55!black]{hyperref}
 \usepackage{cleveref}
-
-\lstdefinelanguage{Lean}{
-  keywords={def,abbrev,structure,class,inductive,theorem,lemma,instance,where,deriving,
-            namespace,end,open,import,private,protected,partial,unsafe,fun,let,in,if,then,else,
-            match,with,mutual,do,return,Type,Prop,Sort,have,show,by,rfl,exact,intro,cases,
-            induction,simp,grind,decide,omega,constructor,apply,rw,at,forall,exists,outParam},
-  sensitive=true,
-  morecomment=[l]{--},
-  morecomment=[s]{/-}{-/},
-  morestring=[b]",
-}
-\lstset{
-  language=Lean,
-  basicstyle=\footnotesize\ttfamily,
-  commentstyle=\itshape\color{black!55},
-  keywordstyle=\bfseries,
-  columns=fullflexible,
-  keepspaces=true,
-  breaklines=true,
-  showstringspaces=false,
-  frame=single,
-  framesep=4pt,
-  framerule=0.3pt,
-  rulecolor=\color{black!30},
-  xleftmargin=8pt,
-  numbers=left,
-  numberstyle=\tiny\color{black!45},
-  numbersep=6pt,
-  aboveskip=8pt,
-  belowskip=8pt,
-  literate=
-   {×}{{\ensuremath{\times}}}1
-   {α}{{\ensuremath{\alpha}}}1
-   {β}{{\ensuremath{\beta}}}1
-   {σ}{{\ensuremath{\sigma}}}1
-   {τ}{{\ensuremath{\tau}}}1
-   {ℓ}{{\ensuremath{\ell}}}1
-   {→}{{\ensuremath{\to}}}1
-   {∀}{{\ensuremath{\forall}}}1
-   {∃}{{\ensuremath{\exists}}}1
-   {∈}{{\ensuremath{\in}}}1
-   {∉}{{\ensuremath{\notin}}}1
-   {∧}{{\ensuremath{\wedge}}}1
-   {≠}{{\ensuremath{\neq}}}1
-   {≤}{{\ensuremath{\leq}}}1
-   {⟨}{{\ensuremath{\langle}}}1
-   {⟩}{{\ensuremath{\rangle}}}1
-   {…}{{\ensuremath{\ldots}}}1
-   {¬}{{\ensuremath{\neg}}}1
-   {γ}{{\ensuremath{\gamma}}}1
-   {∨}{{\ensuremath{\lor}}}1
-   {↔}{{\ensuremath{\leftrightarrow}}}1
-   {≃}{{\ensuremath{\simeq}}}1
-   {₀}{{\textsubscript{0}}}1
-   {₁}{{\textsubscript{1}}}1
-   {₂}{{\textsubscript{2}}}1
-   {—}{{---}}1
-   {◾}{{\ensuremath{\blacksquare}}}1,
-}
 
 \theoremstyle{definition}
 \newtheorem{definition}{Definition}[section]
@@ -726,14 +691,14 @@ release of its own to forget.
 \begin{example}[two readers and a write]\label{ex:two}
 A program that lends a third and two thirds to two readers, reads with each,
 returns both, and then writes:
-\begin{lstlisting}[numbers=none,xleftmargin=0pt,frame=none,aboveskip=2pt,belowskip=2pt]
+\begin{minted}[frame=none,framesep=0pt]{lean}
 acquire 0 (1/3)  >>>= fun t1 =>
 acquire 1 (2/3)  >>>= fun t2 =>
 read t1 0        >>>= fun v  =>
 release t1       >>>= fun _  =>
 release t2       >>>= fun _  =>
 write (0, 9)     >>>= fun _  => ret v
-\end{lstlisting}
+\end{minted}
 Each \code{acquire} is justified by the held fraction: of the whole, a third is
 lent and then two thirds, leaving nothing, which is exactly what the write
 requires. The program is accepted; a second \code{release t1} would not be.
@@ -1120,17 +1085,28 @@ universe.
 \subsection{The universe and its interpretation}
 
 \begin{definition}[descriptions]\label{def:desc}
-A description is a unit, a natural, or a sum of two descriptions:
-$\mathsf{Desc} ::= \mathtt{.unit} \mid \mathtt{.nat} \mid \mathtt{.sum}\ d\ d$.
-The type a description denotes is
-$\mathsf{El}\ \mathtt{.unit} = \mathbf{1}$,
-$\mathsf{El}\ \mathtt{.nat} = \mathbb{N}$, and
-$\mathsf{El}\ (\mathtt{.sum}\ d_1\ d_2) = \mathsf{El}\ d_1 + \mathsf{El}\ d_2$.
-The definition of \code{El} is an abbreviation rather than a definition, so for
-a client it is reducible: a description of a slot has $\mathsf{El}$ equal to
-$\mathbf{1} + \mathbb{N}$ definitionally, and a literal injection can be given at
-such a type without an ascription.
+A description is a unit, a natural, or a sum of two descriptions, and a
+description denotes a type:
+\[
+\mathsf{Desc} ::= \mathtt{.unit} \;\mid\; \mathtt{.nat} \;\mid\;
+  \mathtt{.sum}\ (\mathit{left}\ \mathit{right} : \mathsf{Desc}),
+\qquad
+\begin{array}{rcl}
+\mathsf{El}\ \mathtt{.unit} &=& \mathbf{1} \\
+\mathsf{El}\ \mathtt{.nat} &=& \mathbb{N} \\
+\mathsf{El}\ (\mathtt{.sum}\ d_1\ d_2) &=& \mathsf{El}\ d_1 + \mathsf{El}\ d_2
+\end{array}
+\]
+Three declarations, in full: the description type, its interpretation, and the
+description of a slot. \code{El} is an abbreviation rather than a definition, so
+it is reducible for a client: \code{slotDesc} denotes $\mathbf{1} +
+\mathbb{N}$ definitionally, and a literal injection can be given at such a type
+without an ascription.
 \end{definition}
+
+%!check: inductive Desc where
+\sourceline{The description universe}{Scidonia/FracPerm/StateVar/Description.lean}{24--46}
+\codeframe[linerange=24-46]{../Scidonia/FracPerm/StateVar/Description.lean}
 
 The universe is deliberately non-recursive. Its types are built from the unit,
 the natural and the sum alone, so a proof over it is a finite case analysis
@@ -1171,9 +1147,9 @@ the universe's law after an inverse law cancels the conjugation.
 \begin{example}[the slot, by transport]\label{ex:slot}
 A slot is a genuine inductive type --- empty, or holding a natural payload ---
 described by a unit summed with a natural. Its instance is one line:
-\begin{lstlisting}[numbers=none,xleftmargin=0pt,frame=none,aboveskip=2pt,belowskip=2pt]
+\begin{minted}[frame=none,framesep=0pt]{lean}
 transport slotDesc Slot encode decode decode_encode encode_decode
-\end{lstlisting}
+\end{minted}
 Every operation is the universe instance's conjugated by \code{encode} and
 \code{decode}, and every law is the universe's, so nothing specific to the slot's
 description is proved. The theorems of the generic model then apply at it: a read
@@ -1223,30 +1199,96 @@ supply nothing but the layout and an equality.
 \subsection{Two universes, and the asymmetry between them}
 
 \begin{definition}[observations and layouts]\label{def:layouts}
-The observation universe is closed: a unit, a natural, an unsigned word, a
-boolean, a sum, an optional, a pair. No array, no structure of the state and no
-reference appears in it. The layout universe has three constructors: a stored
-observation, a binary product of layouts, and an array of a layout. The
-interpretation of a layout is the Lean type a program holds: a pair, or an
-\code{Array} of the interpretations of its element layout.
+The observation universe is closed, with one constructor per shape a read may
+return and an interpretation that is total on it:
+\[
+\mathsf{ObsDesc} ::= \mathtt{.unit} \mid \mathtt{.nat} \mid \mathtt{.uint}
+  \mid \mathtt{.bool} \mid \mathtt{.sum}\ o\ o \mid \mathtt{.option}\ o
+  \mid \mathtt{.pair}\ o\ o
+\]
+\[
+\begin{array}{rcl@{\qquad}rcl}
+\mathsf{ObsEl}\ \mathtt{.unit} &=& \mathbf{1} &
+\mathsf{ObsEl}\ \mathtt{.sum}\ a\ b &=& \mathsf{ObsEl}\ a + \mathsf{ObsEl}\ b \\
+\mathsf{ObsEl}\ \mathtt{.nat} &=& \mathbb{N} &
+\mathsf{ObsEl}\ \mathtt{.option}\ a &=& \mathsf{Option}\ (\mathsf{ObsEl}\ a) \\
+\mathsf{ObsEl}\ \mathtt{.uint} &=& \mathsf{UInt64} &
+\mathsf{ObsEl}\ \mathtt{.pair}\ a\ b &=& \mathsf{ObsEl}\ a \times \mathsf{ObsEl}\ b \\
+\mathsf{ObsEl}\ \mathtt{.bool} &=& \mathsf{Bool}
+\end{array}
+\]
+No constructor of it denotes an array, a structure of the state or a reference.
+The layout universe has three constructors, and its interpretation is the type a
+program holds:
+\[
+\mathsf{Layout} ::= \mathtt{.leaf}\ \mathsf{ObsDesc} \;\mid\;
+  \mathtt{.struct}\ \mathsf{Layout}\ \mathsf{Layout} \;\mid\;
+  \mathtt{.arr}\ \mathsf{Layout}
+\]
+\[
+\begin{array}{rcl}
+\mathsf{State}\ (\mathtt{.leaf}\ o) &=& \mathsf{ObsEl}\ o \\
+\mathsf{State}\ (\mathtt{.struct}\ a\ b) &=& \mathsf{State}\ a \times \mathsf{State}\ b \\
+\mathsf{State}\ (\mathtt{.arr}\ a) &=& \mathsf{Array}\ (\mathsf{State}\ a)
+\end{array}
+\]
+A layout may contain an array; an observation may not. That asymmetry is the
+whole of the next section's guarantee: an array of structures is
+\code{Array (UInt64 × UInt64)} as a state and an atom as a read, so no read can
+return a piece of the state.
 \end{definition}
 
-The asymmetry is the point. A layout may contain an array; an observation may
-not. The type an array of structures denotes is a pair of machine words
-$\times$ \code{Array} of those, and the type a read may return is built from
-atoms. Consequently a read cannot return a piece of the state, because no
-observation denotes one.
+%!check: inductive ObsDesc where
+\sourceline{The observation universe}{Scidonia/FracPerm/StateVar/Layout5.lean}{91--119}
+\codeframe[linerange=91-119]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: abbrev State : Layout → Type
+\sourceline{The layout universe and its interpretation}{Scidonia/FracPerm/StateVar/Layout5.lean}{122--138}
+\codeframe[linerange=122-138]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 \subsection{Paths, and a whole-array read that cannot be written down}
 
 \begin{definition}[path and observation path]\label{def:path}
-A path into a layout is an address: the whole layout, a descent into the left or
-right component of a product, or a descent into an index of an array. The
-product steps exist only under a product and the array step only under an array,
-so the type of a path is indexed by the layout it walks. A function computed from
-the path gives the layout at its end. An \emph{observation path} is a path
-together with the proof that its end is a stored observation.
+A path into a layout is an address, indexed by the layout it walks and built by
+four constructors, of which the first is the trivial path and the middle two
+exist only under a product:
+\[
+\begin{array}{rcl}
+\mathsf{Path} & : & \mathsf{Layout} \to \mathsf{Type}, \\
+\mathtt{.here} & : & \mathsf{Path}\ d \\
+\mathtt{.left} & : & \mathsf{Path}\ a \to \mathsf{Path}\ (\mathtt{.struct}\ a\ b) \\
+\mathtt{.right} & : & \mathsf{Path}\ b \to \mathsf{Path}\ (\mathtt{.struct}\ a\ b) \\
+\mathtt{.index} & : & (i : \mathbb{N}) \to \mathsf{Path}\ a \to \mathsf{Path}\ (\mathtt{.arr}\ a)
+\end{array}
+\]
+The layout at a path's end is a function of the path alone, so it is a function
+computed from the constructors rather than a search of the state:
+\[
+\begin{array}{rclcrcl}
+\mathsf{At}\ \mathtt{.here} &=& d &\qquad&
+\mathsf{At}\ (\mathtt{.left}\ p) &=& \mathsf{At}\ p \\
+\mathsf{At}\ (\mathtt{.right}\ p) &=& \mathsf{At}\ p &\qquad&
+\mathsf{At}\ (\mathtt{.index}\ i\ p) &=& \mathsf{At}\ p
+\end{array}
+\]
+An \emph{observation path} is a path together with the proof that its end is a
+stored observation. It is a structure of three fields, and the third is the
+proof:
+\[
+\mathsf{ObsPath}\ d = \{\;
+  \mathit{path} : \mathsf{Path}\ d,\quad
+  \mathit{obs} : \mathsf{ObsDesc},\quad
+  \mathit{leaf} : \mathsf{At}\ \mathit{path} = \mathtt{.leaf}\ \mathit{obs} \;\}
+\]
 \end{definition}
+
+%!check: abbrev At {d : Layout} : Path d → Layout
+\sourceline{Typed paths and the layout at their end}{Scidonia/FracPerm/StateVar/Layout5.lean}{147--166}
+\codeframe[linerange=147-166]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: leaf : At path = .leaf obs
+\sourceline{The observable path}{Scidonia/FracPerm/StateVar/Layout5.lean}{169--177}
+\codeframe[linerange=169-177]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 The proof field in \cref{def:path} is what makes the interface's guarantee
 structural rather than a rule. It is an equality
@@ -1750,10 +1792,13 @@ a runtime problem as much as a permission problem.
 \section{Quoted declarations}\label{app:listings}
 
 The appendix reproduces the definitions and the law statements the paper's
-claims rest on, read from the library by \code{\textbackslash lstinputlisting}
-with an explicit line range, so it quotes the source and not a transcription of
-it. The first half is 37 panels for the types and the operations; the second
-half is 110 law statements, grouped as the prose groups them.
+claims rest on, read from the library by \code{\textbackslash codeframe} with an
+explicit line range, so it quotes the source and not a transcription of it, and
+highlighted by \code{minted}, which reads each file through Pygments' Lean
+lexer. The description, observation and layout universes are quoted where they
+are defined, in \cref{sec:levitation} and \cref{sec:sealed}; what follows is the
+rest of the types and the operations, 32 panels, and then 110 law statements,
+grouped as the prose groups them.
 
 Two conventions are worth stating. A frame is a whole source line range, so a
 declaration short enough to fit on one line shows its proof on that line: the
@@ -1772,163 +1817,143 @@ drifted either way. The ranges are produced by \code{gen-laws.py}. This checks
 that the paper quotes what it claims to quote, and not that the Lean compiles:
 the library is built separately.
 
-\newcommand{\listingcaption}[3]{\par\medskip\noindent\textbf{#1} \emph{(#2, lines #3)}}
+\newcommand{\listingcaption}[3]{\par\medskip\noindent\textbf{#1}\hfill
+  {\footnotesize\itshape\path{#2}, lines #3}\par\nobreak}
 \newcommand{\lawframe}[3]{%
-  \par\smallskip\noindent\texttt{#3}\hfill{\footnotesize\itshape #1:\,#2}\par
-  \lstinputlisting[linerange={#2},numbers=none]{../#1}}
-
-\lstset{numbers=none}
+  \par\smallskip\noindent\texttt{#3}\hfill
+  {\footnotesize\itshape\path{#1}:#2}\par\nobreak
+  \codeframe[linerange=#2]{../#1}}
 
 \subsection{The types and the operations}
 
 %!check: def held (l : Ledger) : Rat := 1 - (l.map Prod.snd).sum
 \listingcaption{The ledger and the held fraction}{Scidonia/FracPerm/Ledger.lean}{16--22}
-\lstinputlisting[linerange=16-22]{../Scidonia/FracPerm/Ledger.lean}
+\codeframe[linerange=16-22]{../Scidonia/FracPerm/Ledger.lean}
 
 %!check: check_eq : ∀ site o s, check site o s = s
 \listingcaption{The object interface}{Scidonia/FracPerm/Hoare.lean}{107--132}
-\lstinputlisting[linerange=107-132]{../Scidonia/FracPerm/Hoare.lean}
+\codeframe[linerange=107-132]{../Scidonia/FracPerm/Hoare.lean}
 
 %!check: structure ReadTok (n : Nat) (q : Rat) : Type where
 \listingcaption{The read token}{Scidonia/FracPerm/Hoare.lean}{145--152}
-\lstinputlisting[linerange=145-152]{../Scidonia/FracPerm/Hoare.lean}
+\codeframe[linerange=145-152]{../Scidonia/FracPerm/Hoare.lean}
 
 %!check: private run : Cap → (s : σ) → (∃ l, P l s) →
 \listingcaption{The program type}{Scidonia/FracPerm/Hoare.lean}{178--184}
-\lstinputlisting[linerange=178-184]{../Scidonia/FracPerm/Hoare.lean}
+\codeframe[linerange=178-184]{../Scidonia/FracPerm/Hoare.lean}
 
 %!check: def write [FracObject σ ReadOp WriteOp] (o : WriteOp) :
 \listingcaption{The primitives and their specifications}{Scidonia/FracPerm/Hoare.lean}{229--266}
-\lstinputlisting[linerange=229-266]{../Scidonia/FracPerm/Hoare.lean}
+\codeframe[linerange=229-266]{../Scidonia/FracPerm/Hoare.lean}
 
 %!check: inductive WriteOp where
 \listingcaption{The second object: a count and a log}{Scidonia/FracPerm/Counter.lean}{22--49}
-\lstinputlisting[linerange=22-49]{../Scidonia/FracPerm/Counter.lean}
+\codeframe[linerange=22-49]{../Scidonia/FracPerm/Counter.lean}
 
 %!check: inductive Value where
 \listingcaption{The value language, in which a reference can be written down}{Scidonia/FracPerm/StateVar/Value.lean}{46--67}
-\lstinputlisting[linerange=46-67]{../Scidonia/FracPerm/StateVar/Value.lean}
+\codeframe[linerange=46-67]{../Scidonia/FracPerm/StateVar/Value.lean}
 
 %!check: def NoRef (ℓ : Loc) : Value → Prop
 \listingcaption{Detachment}{Scidonia/FracPerm/StateVar/Value.lean}{68--82}
-\lstinputlisting[linerange=68-82]{../Scidonia/FracPerm/StateVar/Value.lean}
+\codeframe[linerange=68-82]{../Scidonia/FracPerm/StateVar/Value.lean}
 
 %!check: observe_detached : ∀ (ℓ : Loc) (o : ReadOp) (s : σ),
 \listingcaption{The lawful state variable}{Scidonia/FracPerm/StateVar/Class.lean}{59--91}
-\lstinputlisting[linerange=59-91]{../Scidonia/FracPerm/StateVar/Class.lean}
+\codeframe[linerange=59-91]{../Scidonia/FracPerm/StateVar/Class.lean}
 
 %!check: abbrev Heap (σ : Type) := Loc → Option σ
 \listingcaption{The single-root heap}{Scidonia/FracPerm/StateVar/Heap.lean}{44--47}
-\lstinputlisting[linerange=44-47]{../Scidonia/FracPerm/StateVar/Heap.lean}
+\codeframe[linerange=44-47]{../Scidonia/FracPerm/StateVar/Heap.lean}
 
 %!check: def Heap.update (h : Heap σ) (ℓ : Loc) (v : Option σ) : Heap σ :=
 \listingcaption{The heap's own point update and its two laws}{Scidonia/FracPerm/StateVar/Heap.lean}{49--68}
-\lstinputlisting[linerange=49-68]{../Scidonia/FracPerm/StateVar/Heap.lean}
+\codeframe[linerange=49-68]{../Scidonia/FracPerm/StateVar/Heap.lean}
 
 %!check: def ReadAt {σ Init ReadOp WriteOp : Type} (inst : LawfulStateVar σ Init ReadOp WriteOp)
 \listingcaption{A read step against the heap}{Scidonia/FracPerm/StateVar/Heap.lean}{70--77}
-\lstinputlisting[linerange=70-77]{../Scidonia/FracPerm/StateVar/Heap.lean}
+\codeframe[linerange=70-77]{../Scidonia/FracPerm/StateVar/Heap.lean}
 
 %!check: def WriteAt {σ Init ReadOp WriteOp : Type} (inst : LawfulStateVar σ Init ReadOp WriteOp)
 \listingcaption{A write step against the heap}{Scidonia/FracPerm/StateVar/Heap.lean}{79--89}
-\lstinputlisting[linerange=79-89]{../Scidonia/FracPerm/StateVar/Heap.lean}
+\codeframe[linerange=79-89]{../Scidonia/FracPerm/StateVar/Heap.lean}
 
 %!check: inductive RTree (ReadOp : Type) (Result : ReadOp → Type) : Type → Type 1 where
 \listingcaption{The generic recipes}{Scidonia/FracPerm/StateVar/Surface.lean}{38--59}
-\lstinputlisting[linerange=38-59]{../Scidonia/FracPerm/StateVar/Surface.lean}
+\codeframe[linerange=38-59]{../Scidonia/FracPerm/StateVar/Surface.lean}
 
 %!check: def arrayObserve (o : ArrayReadOp) (a : Array UInt64) : ArrayResult o :=
 \listingcaption{The array witness}{Scidonia/FracPerm/StateVar/Array.lean}{57--76}
-\lstinputlisting[linerange=57-76]{../Scidonia/FracPerm/StateVar/Array.lean}
-
-%!check: def slotDesc : Desc := .sum .unit .nat
-\listingcaption{The description universe}{Scidonia/FracPerm/StateVar/Description.lean}{24--46}
-\lstinputlisting[linerange=24-46]{../Scidonia/FracPerm/StateVar/Description.lean}
+\codeframe[linerange=57-76]{../Scidonia/FracPerm/StateVar/Array.lean}
 
 %!check: structure Described (d : Desc) where
 \listingcaption{The description-indexed wrapper}{Scidonia/FracPerm/StateVar/Universe.lean}{111--117}
-\lstinputlisting[linerange=111-117]{../Scidonia/FracPerm/StateVar/Universe.lean}
+\codeframe[linerange=111-117]{../Scidonia/FracPerm/StateVar/Universe.lean}
 
 %!check: LawfulStateVar τ τ Unit τ where
 \listingcaption{Transport along an isomorphism}{Scidonia/FracPerm/StateVar/Universe.lean}{210--240}
-\lstinputlisting[linerange=210-240]{../Scidonia/FracPerm/StateVar/Universe.lean}
+\codeframe[linerange=210-240]{../Scidonia/FracPerm/StateVar/Universe.lean}
 
 %!check: def encode : Slot → El slotDesc
 \listingcaption{The slot, and its isomorphism to its description}{Scidonia/FracPerm/StateVar/Slot.lean}{46--63}
-\lstinputlisting[linerange=46-63]{../Scidonia/FracPerm/StateVar/Slot.lean}
+\codeframe[linerange=46-63]{../Scidonia/FracPerm/StateVar/Slot.lean}
 
 
 %!check: rep : σ = State layout
 \listingcaption{The sealed class}{Scidonia/FracPerm/StateVar/Sealed.lean}{52--60}
-\lstinputlisting[linerange=52-60]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+\codeframe[linerange=52-60]{../Scidonia/FracPerm/StateVar/Sealed.lean}
 
 %!check: fun s => Layout5.read? p (toState s)
 \listingcaption{The library's read of a sealed state}{Scidonia/FracPerm/StateVar/Sealed.lean}{66--74}
-\lstinputlisting[linerange=66-74]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+\codeframe[linerange=66-74]{../Scidonia/FracPerm/StateVar/Sealed.lean}
 
 %!check: (ofState r.1, r.2)
 \listingcaption{The library's write of a sealed state}{Scidonia/FracPerm/StateVar/Sealed.lean}{83--90}
-\lstinputlisting[linerange=83-90]{../Scidonia/FracPerm/StateVar/Sealed.lean}
-
-%!check: inductive ObsDesc where
-\listingcaption{The observation universe}{Scidonia/FracPerm/StateVar/Layout5.lean}{91--119}
-\lstinputlisting[linerange=91-119]{../Scidonia/FracPerm/StateVar/Layout5.lean}
-
-%!check: abbrev State : Layout → Type
-\listingcaption{The layout universe and its interpretation}{Scidonia/FracPerm/StateVar/Layout5.lean}{122--138}
-\lstinputlisting[linerange=122-138]{../Scidonia/FracPerm/StateVar/Layout5.lean}
-
-%!check: abbrev At {d : Layout} : Path d → Layout
-\listingcaption{Typed paths and the layout at their end}{Scidonia/FracPerm/StateVar/Layout5.lean}{147--166}
-\lstinputlisting[linerange=147-166]{../Scidonia/FracPerm/StateVar/Layout5.lean}
-
-%!check: leaf : At path = .leaf obs
-\listingcaption{The observable path}{Scidonia/FracPerm/StateVar/Layout5.lean}{169--177}
-\lstinputlisting[linerange=169-177]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=83-90]{../Scidonia/FracPerm/StateVar/Sealed.lean}
 
 %!check: def Disjoint {d : Layout} (p q : Path d) : Prop :=
 \listingcaption{Disjointness of paths}{Scidonia/FracPerm/StateVar/Layout5.lean}{203--208}
-\lstinputlisting[linerange=203-208]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=203-208]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: private def takeOut (s : Array α) (i : Nat) (h : i < s.size) (d : α) : Array α × α
 \listingcaption{The take-out}{Scidonia/FracPerm/StateVar/Layout5.lean}{298--308}
-\lstinputlisting[linerange=298-308]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=298-308]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: def encodeObs : (o : ObsDesc) → ObsEl o → Value
 \listingcaption{The library's encoding of an observation}{Scidonia/FracPerm/StateVar/Layout5.lean}{457--471}
-\lstinputlisting[linerange=457-471]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=457-471]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: private inductive Context : (d : Layout) → Path d → Type where
 \listingcaption{The one-hole context}{Scidonia/FracPerm/StateVar/Layout5.lean}{539--555}
-\lstinputlisting[linerange=539-555]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=539-555]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: def read? {d : Layout} (p : ObsPath d) (s : State d) : Option Value
 \listingcaption{The library's read}{Scidonia/FracPerm/StateVar/Layout5.lean}{679--684}
-\lstinputlisting[linerange=679-684]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=679-684]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: private def setAt : {d : Layout} → (p : Path d) → State (At p) → State d → State d
 \listingcaption{The fused update}{Scidonia/FracPerm/StateVar/Layout5.lean}{710--729}
-\lstinputlisting[linerange=710-729]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=710-729]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: (setAt p.path (cast (congrArg State p.leaf.symm) x) s, true)
 \listingcaption{The public write}{Scidonia/FracPerm/StateVar/Layout5.lean}{772--784}
-\lstinputlisting[linerange=772-784]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+\codeframe[linerange=772-784]{../Scidonia/FracPerm/StateVar/Layout5.lean}
 
 %!check: def IsExclusive (rc : Int32) : Prop := isSt rc ∧ rc = 1
 \listingcaption{What a write tests}{Scidonia/FracPerm/StateVar/RefCount.lean}{713--728}
-\lstinputlisting[linerange=713-728]{../Scidonia/FracPerm/StateVar/RefCount.lean}
+\codeframe[linerange=713-728]{../Scidonia/FracPerm/StateVar/RefCount.lean}
 
 %!check: inductive RTree : Type → Type 1 where
 \listingcaption{The structured interface's command trees}{Scidonia/FracPerm/Structured/Surface.lean}{127--149}
-\lstinputlisting[linerange=127-149]{../Scidonia/FracPerm/Structured/Surface.lean}
+\codeframe[linerange=127-149]{../Scidonia/FracPerm/Structured/Surface.lean}
 
 %!check: structure Reader (α : Type) where
 \listingcaption{The reader and the program, each behind a private field}{Scidonia/FracPerm/Structured/Surface.lean}{166--179}
-\lstinputlisting[linerange=166-179]{../Scidonia/FracPerm/Structured/Surface.lean}
+\codeframe[linerange=166-179]{../Scidonia/FracPerm/Structured/Surface.lean}
 
 %!check: structure Init where
 \listingcaption{What a fresh session starts from}{Scidonia/FracPerm/Structured/Surface.lean}{263--270}
-\lstinputlisting[linerange=263-270]{../Scidonia/FracPerm/Structured/Surface.lean}
+\codeframe[linerange=263-270]{../Scidonia/FracPerm/Structured/Surface.lean}
 
 \input{laws.tex}
 
