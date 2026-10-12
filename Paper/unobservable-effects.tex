@@ -1,0 +1,2012 @@
+% Unobservable effects: fractional permissions as a discipline for in-place
+% update in Lean 4.
+%
+% Build (from the repository root):
+%   cd Paper && latexmk -lualatex -interaction=nonstopmode unobservable-effects.tex
+%
+% The listings in the appendix are read from the library source by line range,
+% so the paper quotes the source rather than a transcription of it. Their
+% content is checked by check-listings.py.
+\documentclass[11pt,a4paper]{article}
+
+% pdflatex: the toolchain's lualatex cannot load its font loader, so the
+% Unicode in the quoted Lean is mapped to font commands below, both in the
+% body (newunicodechar) and inside lstlisting (literate).
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{mathpartir}
+\usepackage{newunicodechar}
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{α}{\ensuremath{\alpha}}
+\newunicodechar{β}{\ensuremath{\beta}}
+\newunicodechar{σ}{\ensuremath{\sigma}}
+\newunicodechar{τ}{\ensuremath{\tau}}
+\newunicodechar{ℓ}{\ensuremath{\ell}}
+\newunicodechar{→}{\ensuremath{\to}}
+\newunicodechar{∀}{\ensuremath{\forall}}
+\newunicodechar{∃}{\ensuremath{\exists}}
+\newunicodechar{∈}{\ensuremath{\in}}
+\newunicodechar{∉}{\ensuremath{\notin}}
+\newunicodechar{∧}{\ensuremath{\wedge}}
+\newunicodechar{≠}{\ensuremath{\neq}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{⟨}{\ensuremath{\langle}}
+\newunicodechar{⟩}{\ensuremath{\rangle}}
+\newunicodechar{…}{\ensuremath{\ldots}}
+\newunicodechar{◾}{\ensuremath{\blacksquare}}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!55!black]{hyperref}
+\usepackage{cleveref}
+
+\lstdefinelanguage{Lean}{
+  keywords={def,abbrev,structure,class,inductive,theorem,lemma,instance,where,deriving,
+            namespace,end,open,import,private,protected,partial,unsafe,fun,let,in,if,then,else,
+            match,with,mutual,do,return,Type,Prop,Sort,have,show,by,rfl,exact,intro,cases,
+            induction,simp,grind,decide,omega,constructor,apply,rw,at,forall,exists,outParam},
+  sensitive=true,
+  morecomment=[l]{--},
+  morecomment=[s]{/-}{-/},
+  morestring=[b]",
+}
+\lstset{
+  language=Lean,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{black!55},
+  keywordstyle=\bfseries,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  showstringspaces=false,
+  frame=single,
+  framesep=4pt,
+  framerule=0.3pt,
+  rulecolor=\color{black!30},
+  xleftmargin=8pt,
+  numbers=left,
+  numberstyle=\tiny\color{black!45},
+  numbersep=6pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+  literate=
+   {×}{{\ensuremath{\times}}}1
+   {α}{{\ensuremath{\alpha}}}1
+   {β}{{\ensuremath{\beta}}}1
+   {σ}{{\ensuremath{\sigma}}}1
+   {τ}{{\ensuremath{\tau}}}1
+   {ℓ}{{\ensuremath{\ell}}}1
+   {→}{{\ensuremath{\to}}}1
+   {∀}{{\ensuremath{\forall}}}1
+   {∃}{{\ensuremath{\exists}}}1
+   {∈}{{\ensuremath{\in}}}1
+   {∉}{{\ensuremath{\notin}}}1
+   {∧}{{\ensuremath{\wedge}}}1
+   {≠}{{\ensuremath{\neq}}}1
+   {≤}{{\ensuremath{\leq}}}1
+   {⟨}{{\ensuremath{\langle}}}1
+   {⟩}{{\ensuremath{\rangle}}}1
+   {…}{{\ensuremath{\ldots}}}1
+   {—}{{---}}1
+   {◾}{{\ensuremath{\blacksquare}}}1,
+}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{example}[definition]{Example}
+\newtheorem{remark}[definition]{Remark}
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{corollary}[definition]{Corollary}
+
+\newcommand{\lrc}{\textup{$\lambda$RC}}
+\newcommand{\lpure}{\textup{$\lambda$Pure}}
+\newcommand{\Loc}{\mathsf{Loc}}
+\newcommand{\Obj}{\mathsf{Obj}}
+\newcommand{\rc}{\mathrm{rc}}
+\newcommand{\held}{\mathsf{held}}
+\newcommand{\Val}{\mathsf{Val}}
+\newcommand{\ers}[1]{\lfloor #1 \rfloor}
+\newcommand{\cm}{\mathrel{\approx}}
+\newcommand{\step}{\longrightarrow}
+\newcommand{\stepstar}{\twoheadrightarrow}
+\newcommand{\Lean}[1]{\textsf{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\Code}[1]{\texttt{#1}}
+\newcommand{\doi}[1]{\textsc{doi}:\,#1}
+
+\title{Unobservable effects\\[2pt]
+\large Fractional permissions as a discipline for in-place update in a pure language}
+\author{Gavin Mendel-Gleason\\\small Scidonia}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A pure functional language can update in place. Lean's \code{Array.set!} denotes a
+new array, and its compiled code stores into the existing buffer whenever that
+buffer has exactly one reference. Both statements are true at once because the
+store is \emph{unobservable}: nothing in the source language can distinguish a
+value that was mutated in place from one that was copied, provided the old
+value had no other reference. That condition, however, is a fact about the
+compiled code rather than about the meaning of the program, and the compiler
+decides it per site, from use counts, aliasing and projections. This paper
+presents a discipline that makes the condition hold where a programmer wants it,
+and that is erased before it runs. The discipline is a fractional permission
+protocol in a ghost ledger, packaged in a Hoare monad whose programs can only be
+built from its own primitives and runs only through one entry point. It is
+stated once as a fact about compilation to a reference-counted intermediate
+language, which is where the count is visible, and then lifted: over an
+arbitrary object, over an arbitrary state type whose laws are proof fields, and,
+through a description universe in the sense of levitation, over a family of
+shapes for which one instance suffices. A sealed class in which the library owns
+the reading, the writing and the encoding of the state closes the last route by
+which a client can hold an alias. Throughout, the paper separates what is proved
+in Lean, what is a property of the exported surface, what is measured by running
+compiled code, and what is trusted of the compiler and the run time.
+\end{abstract}
+
+\section{Introduction}
+
+Lean's values are immutable. A term such as \code{a.set! i v} denotes a new
+array: same length, same elements except at \code{i}. No term of the language can
+change a value that already exists, and no program can tell whether some other
+array happens to share a buffer with this one. The source language is pure, and
+the compiler is free to make it fast.
+
+The compiler is fast in a specific way. When the array that \code{set!} is
+applied to has exactly one reference, the emitted code stores into that array's
+buffer and returns a pointer to the same buffer. When the array has two or more
+references, the emitted code allocates a copy and stores into that. The two
+implementations denote the same value, so nothing has to be decided about which
+one to use for the program to be correct. The only thing at stake is allocation,
+and therefore speed. This is the reference-counting discipline of Lean's
+runtime, described by Ullrich and de Moura \cite{ullrich2019counting}, with the
+reuse pass of Perceus \cite{reinking2021perceus}: an exact count lets an
+implementation perform a destructive update precisely when the updated value is
+about to die.
+
+Both statements --- the source denotes a new array, the compiled code writes ---
+are therefore true, and they are compatible because the write is
+\emph{unobservable}. The observation language is the pure term language, and no
+term of it can name an address. Unobservability is not a matter of intent,
+though; it is exactly the condition that no other reference to the buffer is
+live at the moment of the store. The compiler does not check whether a
+programmer \emph{wanted} a mutation. It reads the uses of the value off the code
+it is compiling, and it stores in place when its count is 1.
+
+\subsection{The problem}
+
+That puts the programmer in an awkward position. Whether a particular write
+updates in place depends on facts about the \emph{compiled} code: how many times
+a variable is used in an expression, whether a projection is held across a call,
+whether an alias is still live, whether a value was produced at run time or is a
+compile-time constant. None of these are visible in the meaning of the program,
+and none of them can be inferred from its type. A program can be correct and
+slow, and a small edit that looks semantically neutral --- returning
+\code{a.size} alongside \code{a.set! i v} --- can cost a full copy of the buffer.
+We measured this: on the toolchain used here, \code{(a.set! i v, a.size)} copies,
+while \code{a.set! i v} alone does not.
+
+The engineering goal is therefore not to make the compiler mutate, which is not
+in our gift, but to arrange programs so that the condition under which it
+mutates holds where we want the mutation, and to know that it holds.
+
+\subsection{The idea}
+
+We give the condition a type discipline.
+
+A write needs exclusive access to the object. Reads may be shared. That is the
+shape of a \emph{fractional permission} \cite{boyland2003checking}: the whole
+permission, $1$, is required to write, while any positive share may be lent to a
+reader; shares split and recombine, and once every read has been returned the
+shares sum to $1$ and writing is permitted again.
+
+Lean has no linear types. A token value can be copied like any other value, so
+the permission cannot live in the token. It lives instead in a \emph{ghost
+ledger} of entries $(\mathit{id}, q)$ that appears only in the types and proofs
+of the program, and that the compiler erases. A token is a name for an entry; a
+copied token is a second name for one permission, not a second permission. The
+program type is a Hoare monad whose precondition and postcondition speak about
+the ledger and about the state, and the only entry point demands a proof that
+the program ends holding the whole object.
+
+The discipline is stated once, in a form that does not depend on the object: an
+object supplies its read and write operations, and the permission rules are
+uniform over every object. Then it is lifted in three steps.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item \emph{Any object.} An object joins the interface by naming its read and
+write operations and by supplying a check that the runtime runs before an
+update. The check is the identity in the logic, so no specification or proof
+mentions it, and its compiled form is the exclusivity test.
+\item \emph{Any state type.} A second interface makes the logical part of the
+rules into proof fields of a class. An instance must prove that its initial
+states are admissible, that writes preserve admissibility, that its encoding of
+read results is injective, and that a read of an admissible state names no
+protected location. Every theorem of the generic model is then stated once, for
+every instance.
+\item \emph{Any shape.} The last step is the one that answers ``can this be done
+for shapes we have not written yet?''. It can, by \emph{levitation}
+\cite{chapman2010levitation}: describe the shapes in a universe of
+descriptions, interpret a description as a type, and prove the laws once for the
+whole universe rather than once per shape. A user's type enters by a bijection
+to a described type, along which the one instance's operations are transported.
+When the relation to the described type is an equality rather than a bijection,
+something stronger becomes possible: the library can own the reading, the
+writing and the encoding of the state, and a client can then neither introduce
+an alias nor choose an encoding that hides one.
+\end{enumerate}
+
+The chain of the paper is therefore: a pure language whose implementation has
+\emph{unobservable} effects; a proof that the effects are unobservable,
+conditional on a reference count of one; a type discipline that establishes the
+condition; generalisation of that discipline from one array to an arbitrary
+object, to an arbitrary state type, and to a family of shapes by levitation; and
+a sealed surface where the library, rather than the client, decides what a read
+means.
+
+\subsection{Contributions}
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item A rendering of the reference-counted write as a rule of a small
+intermediate language \lrc, and a proof that the rule is equivalent to the pure
+copy exactly when the count is one (\cref{sec:lambda}). Unobservability is thus
+made into a statement with a premise, and the premise is the thing a discipline
+has to deliver.
+\item A permission discipline with no linear types in the host language
+(\cref{sec:perm}): fractional permissions in an erased ghost ledger, a Hoare
+monad sealed by private constructors and a private capability, and an
+identification of what it does and does not establish --- authority is not
+reference.
+\item Generalisation over objects and state types (\cref{sec:object,sec:lawful}),
+with the obligations that are proof fields and the negative controls that show
+they are not vacuous.
+\item The levitation step (\cref{sec:levitation,sec:sealed}): one lawful instance
+for every description of a small universe, transport along a bijection for a
+user's type, and a sealed class that removes the author's choice of read,
+write and encoding altogether.
+\item A worked path calculus over layouts, with take-out writes, and two
+exclusivity checks that are the difference between an update in place and a
+copy (\cref{sec:sealed}).
+\item An explicit statement of the correspondence chain that connects the
+discipline to the compiled program, with each link labelled as proved,
+structural, measured or trusted (\cref{sec:evidence}).
+\end{enumerate}
+
+All of the code discussed here is Lean 4, on a pinned toolchain, in a library
+that builds and whose checks are theorems rather than test assertions. The
+paper quotes the library's declarations verbatim in \cref{app:listings}; the
+quotations are read from the source files by line range at build time, and
+\code{check-listings.py} verifies that each quoted range still contains the
+declaration it is claimed to contain.
+
+\subsection{How much is claimed}
+
+The paper is careful about the status of each statement, and says so where the
+statement is made. Four labels are used throughout.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item \emph{Proved}: a theorem of the Lean development. For example, that a
+returned read gives back exactly its fraction, or that a read of a valid state
+contains no reference.
+\item \emph{Structural}: a property of the exported surface, shown by probes
+from another module that the elaborator refuses. For example, that no public
+route returns the state a session owns.
+\item \emph{Measured}: a fact about compiled code on this toolchain, established
+by running an executable that observes addresses. For example, that a write on a
+uniquely owned array keeps the buffer's address.
+\item \emph{Trusted}: what remains outside all of it --- the compiler's
+translation, the runtime's primitives, and the arithmetic of the reference
+count.
+\end{itemize}
+
+No theorem here certifies that a compiled write updates in place. What is proved
+is the permission protocol and the shape of the interfaces; what is measured is
+the in-place behaviour of the compiled code; what connects them is a
+correspondence chain that \cref{sec:evidence} states in full, link by link, with
+the links that are assumptions named as assumptions.
+
+\section{Setting: counts, and why the condition is not a typing fact}\label{sec:setting}
+
+\subsection{A value, an address, and a count}
+
+A Lean value of an immutable type is a fully determined piece of data. Arrays
+and structures of scalar data are represented at run time as heap objects whose
+fields are values, and a value that occurs several times in the program may be
+represented by one object with several references. The runtime keeps an exact
+count of those references. The count is not part of the value; it is part of the
+machine, and the source language has no term that can read it.
+
+The count $n$ of an object supports exactly three questions.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item $n = 1$: this reference is the only one. If the code that holds it
+replaces the object by a new value, nothing can still be holding the old one, so
+the old object's storage may be overwritten in place. The runtime's
+\code{lean\_is\_exclusive} asks this question.
+\item $n \geq 2$: something else may still read the object. A write must
+allocate and copy.
+\item $n = 0$: the object is a compile-time constant, held in a read-only
+segment. It can never be exclusive, and a write to it always copies.
+\end{itemize}
+
+A fourth case exists in the runtime and matters for anyone writing a test from
+the count: a count that has overflowed while single-threaded is parked at a
+sticky value and reads as ``unshared'' (\code{lean\_is\_unshared}, which is
+$\mathit{rc} > 0 \lor \mathit{rc} \leq \mathsf{LEAN\_RC\_STUCK\_ST}$) while
+standing for more references than it can still track. \code{isUnshared} is
+strictly weaker than \code{IsExclusive}, and a write that tested the former
+would lose those references. \Cref{app:listings} quotes both predicates from the
+development, which vendors the Lean repository's own machine-checked model of
+\code{lean\_inc\_ref\_n} and \code{lean\_dec\_ref}
+\cite{lean4rcmodel} and adds the counter-level facts the write discipline rests
+on: that an extra reference costs the in-place update, that dropping it restores
+it, that a thread-shared count is never exclusive, and that a never-freed count
+never becomes exclusive however the adjustments run.
+
+\subsection{What the compiler reads}
+
+The count is maintained by insertions the compiler makes while translating to
+its intermediate representation: an increment wherever a value acquires a second
+reference, a drop wherever one goes out of scope. Which counts those insertions
+produce is decided by the \emph{use} of values in the code being compiled.
+Three signals decide every case we have measured.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item An \code{inc} before a mutation: the value is used again in the same
+expression, or an alias is live. \code{(a.set! i v, a.size)} emits
+\code{inc x; Array.set! ◾ x …; Array.size ◾ x} --- one extra use of the same
+array, and a copy.
+\item \code{isShared} before a whole-value rebuild: the reset/reuse pass rewrites
+the \emph{incoming} cell of a constructor when that cell is exclusive, and
+allocates when it is not. The pass matches on shape, so when two same-shaped
+constructors appear in one expression the reused cell can go to the wrong one.
+\item Take-out against a borrowed read: an element exchanged out of an array is
+owned by the caller, while an element read by a borrowed accessor is not, and
+the two differ by exactly one \code{inc}. Identical intent, opposite outcome.
+\end{itemize}
+
+None of this is visible in the type of the program or in its meaning as a pure
+term. It is a local, syntactic property of the code the compiler emits. A source
+language cannot make the property true by typing alone; it can only arrange that
+the code it accepts is the code whose uses are forgiving.
+
+We take from this a precise formulation of the goal. Give the source language a
+discipline under which a well-disciplined program compiles to code in which the
+object at each mutation site has no other reference. The discipline must be
+checked where the program is written, must cost nothing at run time, and must
+not depend on the shape of the object.
+
+\section{\texorpdfstring{\lpure}{Pure} and \texorpdfstring{\lrc}{RC}: the store, and when it is invisible}\label{sec:lambda}
+
+This section fixes the language in which the claim of unobservability is
+stated. \lpure\ is the pure source language, and its meaning is what a client is
+entitled to observe. \lrc\ is the language the compiler targets, with addresses
+and reference counts and a store instruction. Erasing the addresses of a \lrc\
+configuration recovers a \lpure\ value, and a store step preserves that erasure.
+The condition under which it does is precisely that the stored-into object has
+one reference, which is the premise a discipline must deliver.
+
+\subsection{The pure language}
+
+\begin{definition}[\lpure, syntax]
+Types and terms are given by
+\[
+\begin{array}{rcl}
+\tau & ::= & \mathbf{1} \mid \mathbb{N} \mid \mathbb{B} \mid \tau \times \tau \mid \tau + \tau \mid [\tau] \\[2pt]
+e & ::= & x \mid c \mid \langle\rangle \mid \langle e, e \rangle \mid \mathsf{inl}\, e \mid \mathsf{inr}\, e \mid \mathsf{case}\ e\ \mathsf{of}\ \{\dots\} \\
+ & & \mid \lambda x{:}\tau.\, e \mid e\,e \mid \mathsf{arr}(e_1,\dots,e_k) \mid e[e] \mid {|e|} \mid \mathsf{let}\ x = e\ \mathsf{in}\ e
+\end{array}
+\]
+The type $[\tau]$ is that of arrays, written \code{Array τ} in the development.
+Values are the customary closed forms: constants, the unit, pairs, injections,
+abstractions, and arrays, where an array value $a$ is a finite map from indices
+to values.
+\end{definition}
+
+\begin{definition}[the pure write]\label{def:set}
+If $a$ is an array value, $i$ an index and $v$ a value, then
+$a[i \leftarrow v]$ is the array agreeing with $a$ at every index except $i$,
+where it is $v$, if $i$ is within bounds; and $a$ itself otherwise. There is no
+case in which $a$ changes.
+\end{definition}
+
+Evaluation is the usual call-by-value big-step relation $e \Downarrow v$ for
+closed terms, with \cref{def:set} as the meaning of the store syntax. Every
+closed well-typed term evaluates to a value; there is no store, no allocation
+and no failure in the language. It follows that the observation a client is
+entitled to make of a run is a value of the pure language, and two runs that
+produce the same value are indistinguishable to every client context.
+
+\subsection{The counted language}
+
+\lrc\ has the same terms, and additionally addresses and two bookkeeping
+instructions.
+
+\begin{definition}[\lrc, syntax and store]\label{def:lrc}
+Values are extended by addresses $\ell \in \Loc$. A store $\sigma$ is a finite
+map from addresses to objects, where an object is a box $\langle v_1,\dots,v_k
+\rangle$ of values together with a count $n \in \mathbb{Z}$. A configuration is
+a pair $\langle \sigma, e \rangle$ with $e$ a closed term. The two additions to
+the syntax are $\mathsf{inc}\ \ell$ and $\mathsf{dec}\ \ell$; $\mathsf{arr}(v_1,
+\dots, v_k)$ is now an allocating form.
+\end{definition}
+
+The step relation is call-by-value with evaluation contexts $C$, and the
+following rules, omitting the congruence rules.
+
+\begin{mathpar}
+\inferrule*[Right=\textup{\textsc{alloc}}]
+  { \ell \notin \mathrm{dom}(\sigma) }
+  { \langle \sigma, C[\mathsf{arr}(v_1,\dots,v_k)] \rangle \step
+    \langle \sigma[\ell \mapsto (\langle v_1,\dots,v_k \rangle, 1)], C[\ell] \rangle }
+
+\inferrule*[Right=\textup{\textsc{inc}}]
+  { \sigma(\ell) = (b, n) }
+  { \langle \sigma, C[\mathsf{inc}\ \ell] \rangle \step
+    \langle \sigma[\ell \mapsto (b, n{+}1)], C[\langle\rangle] \rangle }
+
+\inferrule*[Right=\textup{\textsc{dec}}]
+  { \sigma(\ell) = (b, n) \quad n \geq 2 }
+  { \langle \sigma, C[\mathsf{dec}\ \ell] \rangle \step
+    \langle \sigma[\ell \mapsto (b, n{-}1)], C[\langle\rangle] \rangle }
+
+\inferrule*[Right=\textup{\textsc{dec-free}}]
+  { \sigma(\ell) = (b, 1) }
+  { \langle \sigma, C[\mathsf{dec}\ \ell] \rangle \step
+    \langle \sigma \setminus \ell, C[\langle\rangle] \rangle }
+\end{mathpar}
+
+and, for the array write, two rules that differ only in the count.
+
+\begin{mathpar}
+\inferrule*[Right=\textup{\textsc{store-1}}]
+  { \sigma(\ell) = (\langle v_1,\dots,v_k \rangle, 1) \quad i \leq k }
+  { \langle \sigma, C[\ell[i] \leftarrow v] \rangle \step
+    \langle \sigma[\ell \mapsto (\langle v_1,\dots,v_{i-1},v,v_{i+1},\dots,v_k \rangle, 1)],
+    C[\ell] \rangle }
+
+\inferrule*[Right=\textup{\textsc{store-\(n\)}}]
+  { \sigma(\ell) = (\langle v_1,\dots,v_k \rangle, n) \quad n \geq 2 \quad i \leq k \quad
+    \ell' \notin \mathrm{dom}(\sigma) }
+  { \langle \sigma, C[\ell[i] \leftarrow v] \rangle \step
+    \langle \sigma[\ell \mapsto (\langle v_1,\dots,v_k \rangle, n{-}1),
+      \ell' \mapsto (\langle v_1,\dots,v_{i-1},v,v_{i+1},\dots,v_k \rangle, 1)],
+    C[\ell'] \rangle }
+\end{mathpar}
+
+\Cref{def:lrc} omits a read rule. The one that matters here is the access that
+\emph{retains} what it reads: an array read whose result is a box must
+$\mathsf{inc}$ that box, otherwise the count would not account for the second
+reference. Which accesses retain is again the compiler's decision, taken from
+the uses of the result, and it is the same question as the \textup{\textsc{store}} rules'
+count. We therefore state reads as reading a scalar leaf without a count change,
+and note where a retaining read would be an \textup{\textsc{inc}} in the same style.
+
+\subsection{Erasure, and the theorem about the store}
+
+\begin{definition}[erasure]\label{def:erasure}
+The erasure $\ers{\sigma}$ of a store is the partial function from addresses to
+pure array values that unfolds each object's contents, replacing addresses by
+the arrays they denote. A configuration $\langle \sigma, e \rangle$ erases to the
+\lpure\ term obtained from $e$ by replacing each address with the value it
+denotes under $\ers{\sigma}$. The unfolding terminates because the language has
+no way to build cyclic data.
+\end{definition}
+
+Write $\langle \sigma, e \rangle \cm \langle \sigma', e' \rangle$ when the two
+configurations have the same erasure and the same free variables. Since the only
+observation a client can make is the value of a closed program, and that value
+is a function of the erasure, $\cm$ implies indistinguishability: no \lpure\
+context separates two $\cm$-related configurations.
+
+\begin{lemma}[bookkeeping is invisible]\label{lem:bookkeeping}
+The rules \textup{\textsc{alloc}}, \textup{\textsc{inc}}, \textup{\textsc{dec}} and \textup{\textsc{dec-free}}
+preserve $\cm$.
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+\textup{\textsc{alloc}} introduces an address that is not yet reachable from $e$, so the
+erasure of the term is unchanged; when the new address is later read, it denotes
+the box that was written into it, which is the box the pure term denoted.
+\textup{\textsc{inc}} and \textup{\textsc{dec}} change only counts, and the erasure of
+\cref{def:erasure} reads objects' contents and never their counts.
+\textup{\textsc{dec-free}} removes an object whose count was $1$; the address occurred
+exactly once in the term being evaluated, in the $\mathsf{dec}$, and erasure
+replaces addresses by denotations, so an address occurring nowhere contributes
+nothing. Each case is by induction on the evaluation context.
+\end{proof}
+
+\begin{theorem}[the store is invisible exactly at count one]\label{thm:store}
+Let $\langle \sigma, C[\ell[i] \leftarrow v] \rangle$ be a configuration, with
+$\sigma(\ell) = (b, n)$ and $i$ in bounds. Write $c_1$ for the result of a
+\textup{\textsc{store-1}} step and $c_2$ for the result of a \textup{\textsc{store-\(n\)}} step
+taken in its place. Then $c_1 \cm c_2$ if and only if $n = 1$.
+\end{theorem}
+
+\begin{proof}
+The forward direction is the interesting one. Suppose $n \geq 2$. Then there is
+another occurrence of $\ell$ in the term, since the count exceeds the reference
+held by the store site. That occurrence is not inside $v$, whose erasure is
+fixed by $v$ alone; it is elsewhere in $C$. After \textup{\textsc{store-1}}, the address
+$\ell$ still denotes the updated box at that other occurrence, while after
+\textup{\textsc{store-\(n\)}} it denotes the box as it was, and the updated box lives at
+the fresh address $\ell'$. The two erasures differ at the other occurrence, so
+they are not $\cm$-related. For $n = 1$ there is no such other occurrence, so
+the erasure after \textup{\textsc{store-1}} is the erasure of the term with the updated
+box at $\ell$; which is also the erasure after \textup{\textsc{store-\(n\)}}, and
+\cref{lem:bookkeeping} covers the rest.
+\end{proof}
+
+\begin{corollary}[unobservability]\label{cor:unobs}
+If a program's \lrc\ execution reaches every store with count one, then its
+result is a value of \lpure, and the choice between storing in place and copying
+at each of those sites is invisible to every pure context.
+\end{corollary}
+
+\Cref{thm:store} says what the discipline has to achieve, and says it without
+mentioning types: the count at the store, and nothing else. It also explains why
+a discipline is needed at all rather than an assumption. The count is
+maintained by the compiler from the uses of values; the source program's meaning
+does not determine it, and no amount of care in the \emph{meaning} of the
+program will move it. What a discipline can do is constrain the code so that the
+uses are the forgiving ones. That is what the next section builds.
+
+\begin{remark}
+\Cref{thm:store} is a theorem about \lrc\ as defined here, not about Lean's
+implementation. The implementation is the subject of \cref{sec:evidence}, where
+the correspondences between this calculus, the emitted code and the runtime are
+either measured or named as assumptions.
+\end{remark}
+
+\section{A permission discipline, erased}\label{sec:perm}
+
+The discipline has to establish the premise of \cref{thm:store} without
+measuring anything at run time, without a linear type system in the host
+language, and without restricting which objects it applies to. This section
+gives the core of it: fractions in a ghost ledger, a program type that speaks
+about the ledger, and a sealing discipline that keeps a client from obtaining a
+program except through the primitives.
+
+\subsection{Fractions, held fractions, and the ledger}
+
+\begin{definition}[permission]\label{def:frac}
+A \emph{fractional permission} is a rational $q$ with $0 < q \leq 1$. A write
+requires the whole permission; a read requires a positive share. Shares lend and
+return additively.
+\end{definition}
+
+The reading we use is Boyland's \cite{boyland2003checking}: a permission is a
+share of an object, so authorisation to write is the whole share and
+authorisation to read is any part of it. What the discipline has to prove is
+that the shares that are out at the moment of a write amount to nothing.
+
+\begin{definition}[ledger and held fraction]\label{def:ledger}
+A \emph{ledger} is a list of pairs $(\mathit{id}, q)$, one for each read that is
+currently lent out. The \emph{held} fraction of a ledger is
+\[
+\held(l) \;=\; 1 - \sum_{(n,q) \in l} q .
+\]
+\end{definition}
+
+Two facts about \cref{def:ledger} are what the protocol rests on: lending a
+fraction lowers the held fraction by exactly that fraction, and returning an
+entry raises it by exactly the same fraction. The latter is
+\code{Ledger.held\_erase\_of\_mem}, quoted in \cref{app:listings}: for any
+$(n,q) \in l$, $\held(l.\mathit{erase}\,(n,q)) = \held(l) + q$. The ledger is
+thus a complete account of how much of the object is unavailable to a writer,
+and the sum returns to its starting point once every entry is erased.
+
+\subsection{Why the permission cannot live in the token}
+
+The obvious design puts the permission in the value that represents it: a token
+of some linear type, consumed by a release. That design does not survive contact
+with Lean, and the reason shapes everything that follows.
+
+Lean has no linear, affine or uniqueness typing. A value can always be copied.
+If the permission were a token carrying the fraction, then \code{let t' := t}
+would produce a second permission out of one, and nothing in the type system
+would notice. This is not a limitation of our particular interface; it is a
+property of the host language, and it rules out the direct translation of any
+ownership discipline that assumes linear values \cite{barensen1993uniqueness,
+bernardy2018linear}.
+
+The permission therefore lives outside the values, in a place the language can
+reason about but the program cannot inspect: the type of the program, and the
+proofs attached to it. The token becomes a \emph{name} for a ledger entry. A
+copied token is a second name for the same entry; it is usable only while the
+entry is present, and a release removes the entry, so a second release of the
+same token has a false precondition. There is no second permission, only a
+second handle.
+
+The same argument applies to the ghost identifier. The fraction alone would not
+say which outstanding read a token names, since two concurrent reads may hold
+equal fractions, so each entry carries an identifier chosen by the caller. There
+is no runtime counter for it: the ledger does not exist at run time, so the
+identifiers must be chosen in the proof rather than drawn from the machine.
+
+\subsection{The program type}
+
+\begin{definition}[pre- and postcondition]\label{def:prepost}
+$\mathsf{Pre}\ \sigma = \mathsf{Ledger} \to \sigma \to \mathsf{Prop}$ and
+$\mathsf{Post}\ \sigma\ \beta = \mathsf{Ledger} \to \sigma \to \beta \to
+\mathsf{Ledger} \to \sigma \to \mathsf{Prop}$. Both are predicates over the
+ghost ledger and the state, and both live in $\mathsf{Prop}$.
+\end{definition}
+
+\begin{definition}[program]\label{def:hst}
+$\mathsf{HSt}\ \sigma\ P\ \beta\ Q$ is the type of a program over the state
+$\sigma$ whose precondition is $P$ and postcondition $Q$. Its constructor is
+private to the module that defines it, so a client cannot build a program out of
+nothing, and its single accessor is private and demands a \emph{capability}
+$\mathsf{Cap}$, a private proposition that only the module can inhabit and that
+the compiler erases. The only entry point from outside is
+\[
+\mathsf{exec} : \mathsf{HSt}\ \sigma\ P\ \beta\ Q \to (s : \sigma) \to P\,[\,]\,s
+  \to (\forall b\ l'\ s',\ Q\,[\,]\,s\ b\ l'\ s' \to \held(l') = 1) \to \beta \times \sigma .
+\]
+\end{definition}
+
+Two things about \cref{def:hst} are load-bearing, and both are refinements that
+were forced by a failure rather than chosen in advance.
+
+The private constructor stops a client from \emph{building} a program. It does
+not stop a client from \emph{running} one: Lean's generated eliminators for a
+structure expose its fields, so a private field alone still leaves the accessor
+callable. Hence the capability. \code{Cap} is an uninhabited private proposition
+whose only constructor is in the defining module, so an accessor that demands
+one cannot be called from outside, and the eliminators cannot supply one either.
+Both refusals are pinned in the source by checks that the elaborator must reject,
+so a future change that reopens one fails the build.
+
+The precondition of \code{exec} is the empty ledger, and its closing obligation
+is that the program ends holding the whole object. That is the whole of the
+linearity this design has: not linearity of tokens, which Lean cannot give, but
+exactness of the ledger, which it can. A program that never returns a read fails
+the closing obligation; a program that returns one twice fails the precondition
+of the second release; a program that reads with a token whose entry is gone
+fails the precondition of the read.
+
+\subsection{The primitives}
+
+Every primitive carries its specification in its type. The four that matter are
+the following, quoted verbatim with their bodies in \cref{app:listings}.
+
+\begin{definition}[primitives]\label{def:prims}
+With $\sigma$ an object whose instance is in scope, and $\mathit{held}$ as in
+\cref{def:ledger},
+{\small\[
+\begin{array}{rcll}
+\code{acquire}\ n\ q & : & \mathsf{HSt}\ \sigma\ (\lambda l\_.\ n \notin \mathrm{ids}(l) \land
+  0 < q \land q \leq \held(l))\ (\mathsf{ReadTok}\ n\ q)\ (\lambda l\ s\_.\ l' = (n,q)::l)
+\\[2pt]
+\code{read}\ t\ o & : & \mathsf{HSt}\ \sigma\ (\lambda l\_.\ (n,q) \in l)\ (\mathsf{Result}\ o)\
+  (\lambda l\ s\ v\ l'\ s'.\ l' = l \land s' = s \land v = \code{observe}\ o\ s)
+\\[2pt]
+\code{release}\ t & : & \mathsf{HSt}\ \sigma\ (\lambda l\_.\ (n,q) \in l)\ \mathbf{1}\
+  (\lambda l\ s\_.\ l' = l.\mathit{erase}\,(n,q) \land s' = s)
+\\[2pt]
+\code{write}\ o & : & \mathsf{HSt}\ \sigma\ (\lambda l\_.\ \held(l) = 1)\ \mathbf{1}\
+  (\lambda l\ s\_.\ l' = l \land s' = \code{update}\ o\ s)
+\end{array}
+\]}
+\end{definition}
+
+Sequence is \code{bind}, whose precondition requires the first program's
+postcondition to establish the second's precondition, and whose postcondition
+composes the two existentially. Weakening is \code{conseq}: a stronger
+precondition and a weaker postcondition are both sound. \code{withRead} is
+\code{acquire}, the body, \code{release}, and return the body's result: it is
+derived from the primitives and adds no trust, and it has the property that the
+fraction comes back however the body ends, so a client cannot leak it and has no
+release of its own to forget.
+
+\begin{example}[two readers and a write]\label{ex:two}
+A program that lends a third and two thirds to two readers, reads with each,
+returns both, and then writes:
+\begin{lstlisting}[numbers=none,xleftmargin=0pt,frame=none,aboveskip=2pt,belowskip=2pt]
+acquire 0 (1/3)  >>>= fun t1 =>
+acquire 1 (2/3)  >>>= fun t2 =>
+read t1 0        >>>= fun v  =>
+release t1       >>>= fun _  =>
+release t2       >>>= fun _  =>
+write (0, 9)     >>>= fun _  => ret v
+\end{lstlisting}
+Each \code{acquire} is justified by the held fraction: of the whole, a third is
+lent and then two thirds, leaving nothing, which is exactly what the write
+requires. The program is accepted; a second \code{release t1} would not be.
+\end{example}
+
+\subsection{What is refused, and how the refusals are stated}
+
+Each way of misusing the discipline is refused, and the refusal is not merely a
+tactic that gave up: it is a theorem that the obligation of the offending
+program is \emph{false}. Writing while a read is outstanding, returning a token
+twice, reading after returning, taking out more than is held, reusing an
+identifier, and never returning a read are each a proposition about
+\code{HSt.pre} or about the closing condition of \code{exec} that the
+development proves false.
+
+Stating refusals this way matters for two reasons. A check whose reason could be
+a failure of the elaborator says nothing when the elaborator succeeds later for
+an unrelated reason; a theorem of falsity says that no proof exists, so the
+program can never be accepted, on any toolchain. And the theorem names the
+obligation, so a reader can see which rule of \cref{def:prims} is doing the work.
+
+\subsection{Erasure: what the compiler drops}
+
+The discipline is specification. Every part of it that is a type former or a
+proposition is erased by the compiler, and the erasure is observable in the
+intermediate representation.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item The ledger, every precondition, every postcondition, every proof and the
+capability \code{Cap} are propositions or type formers; they appear as $\blacksquare$
+in the emitted \code{Lean.IR}.
+\item A read token is a \emph{type}, so it is not erased, but it has no fields:
+it compiles to a constant scalar, the same representation as \code{Unit}, and
+allocates nothing.
+\item The ghost identifier and the fraction are ordinary \code{Nat} and
+\code{Rat} arguments. Lean erases arguments by their \emph{type} --- proofs,
+types, type formers --- and not by whether the body uses them, so these are not
+erased as such. Written literally they are dropped by the compiler's arity
+reduction; written symbolically, as \code{r/2}, they are not evaluated either,
+because a call to a reduced entry removes the argument code as dead. They survive
+as unused borrowed parameters only in a definition that is generic in them, and
+they are computed and boxed only when a call cannot be brought to a reduced
+entry at all, as through a procedure value.
+\end{itemize}
+
+The result is that a compiled client program threads one reference-counted
+object and nothing else. The permission accounting costs no allocation on the
+run-time path, which is the property that makes the design worth the trouble: a
+discipline that allocated to prove that no allocation happens would be
+self-defeating.
+
+\subsection{Authority is not reference}\label{sec:gap}
+
+The discipline establishes an \emph{authority} invariant and not a
+\emph{reference} invariant, and the gap between them is where the rest of the
+paper lives.
+
+$\held(l) = 1$ says that no reader holds a share. It is a statement about the
+ledger. Whether the object is exclusively owned by the machine is a statement
+about the object graph, and the ledger is ghost state that the object graph
+knows nothing about. Three routes defeat the inference from authority to
+reference.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item The caller's binding. \code{exec} takes the state from the caller. A
+caller that still holds its own reference to that state has two references, and
+the write copies. Measured: the shared control case in the harness.
+\item A read result that shares memory. A consumer of a read may return its
+fraction honestly and keep the value it received. If that value shares mutable
+structure with the state, the next write copies. The array interface's read
+returns an \code{Option α}, which for an array element is a scalar, so the leak
+does not arise there; it arises as soon as an object's read can return a part of
+the state.
+\item The library's own temporaries. A take-out write returns a pair, and while
+that pair is live the extracted element has two references. The check must
+therefore run after the pair has been destructured, which is a fact about the
+emitted code and was found by measurement, not by reading the source.
+\end{enumerate}
+
+So the permission discipline closes one half of the problem: it makes a write's
+\emph{authority} condition a proof obligation rather than a hope. The other
+half --- that no other reference to the object exists --- is a property of the
+interface and of the code the interface is compiled to, and \cref{sec:object}
+begins the work of making it structural.
+
+\section{Any object, not only arrays}\label{sec:object}
+
+Nothing in \cref{sec:perm} mentions arrays. This section makes that explicit by
+letting an object join the interface, and by moving the in-place check into the
+object, where it can know what a write touches.
+
+\subsection{The object interface}
+
+\begin{definition}[object]\label{def:fracobject}
+An object $\sigma$ is an instance of a class with the following fields: a type
+family \code{Result} of the values its read operations yield, a reading function
+\code{observe}, a writing function \code{update}, a check
+\code{check : String → WriteOp → σ → σ}, and a law
+$\code{check}\ \mathit{site}\ o\ s = s$. The two operation types are class
+\emph{parameters} rather than fields, because an argument whose expected type is
+a projection of the class is not reducible until that projection's instance is
+known, and instance search does not resolve the nested goal; with the types as
+parameters, a literal such as the array's index, or the pair $(0,7)$, can be
+given as an operation.
+\end{definition}
+
+The check is the identity in the logic. That is what the law says, and it is why
+no specification or proof mentions it: a specification states what \code{update}
+does, and \code{update} is what runs after the check returns. Its compiled form
+is something else entirely. The default check is
+\code{assertExclusive}, whose logical content is the identity and whose compiled
+content, supplied by an \code{implemented\_by} attribute, tests the object's
+exclusivity and, when the process environment asks for it, reports the site and
+exits. A write therefore pays one out-of-line call, one load and one branch, and
+nothing on the write path reads the environment: the switch is read once, at
+initialization.
+
+\begin{definition}[the array instance]\label{def:arrayinst}
+An array joins the interface as follows: a read operation is an index and yields
+\code{a[i]?}; a write operation is an index and a value and sets that element;
+and the check is the array's exclusivity check, which names the array's size in
+its report.
+\end{definition}
+
+\begin{example}[a second object]\label{ex:counter}
+A structure of a count and a log joins the interface with a check of its own:
+exclusivity of the structure, and, for the operation that appends to the log,
+exclusivity of the log. A projection of a constructor takes no reference of its
+own, so checking the field does not itself share it. This is what the check hook
+is for: the operation is a parameter, so a check can leave alone what that
+operation does not write. An abort in checked mode then means that \emph{this}
+write is about to copy, not merely that some part of the object is shared.
+\end{example}
+
+\subsection{The two rules that no specification can state}
+
+Two obligations attach to any instance, and neither is enforceable from the
+specifications, because both are about how Lean's values are represented rather
+than about their mathematics. The interface states them in prose, in the
+documentation of the class.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item \code{observe} must not return a reference to a part of the state that some
+write updates in place. A read that hands back the array field of a structure
+leaves an alias behind, and the next write copies that field. Sharing values
+that no write mutates in place --- a \code{Nat}, or an element's own value --- is
+harmless and intended; it is the mutable parts that a read result must not name.
+\item \code{update} must not keep an old part of the state alive. Writing one
+field with functional update syntax rebuilds the state around the other fields;
+a rebuild that copies them makes the next write copy them.
+\end{enumerate}
+
+These obligations are the subject of \cref{sec:lawful} and \cref{sec:sealed},
+where they become proof fields of a class and then disappear into the library.
+Before that, the discipline already has a property worth stating: leaking an
+alias does not make a program wrong. Lean is pure, so a missed in-place update
+costs an allocation and a copy, and never a wrong result or a race. The
+discipline is a performance discipline, and its failure mode is time.
+
+\section{A notional interface: fractions internal, one runner}\label{sec:notional}
+
+The next step removes the fraction from the client's view without removing it
+from the theory. The client writes effectful-looking code over an object it
+cannot name; the fractions are what justify the interleavings the semantics
+admits.
+
+\subsection{Readers and programs}
+
+The surface has two computation types. A \code{Reader} may read: \code{get} at
+an index, \code{size}, and \code{parallel}, which pairs two readers. A
+\code{Program} may read and write: \code{readPhase} runs a reader, and \code{set}
+writes an element and reports whether the write was in bounds. A program is run
+by \code{runFresh}, which is given a size and a fill value, creates the array
+itself, runs the program, and returns the result; \code{runFresh} is an
+\code{IO} action precisely because the array must be created at run time, and a
+compile-time constant can never be exclusive.
+
+Both computation types carry their command tree behind a private constructor and
+a private field, and the interpreter that runs a tree against an array is
+private to its module. \code{runFresh} is therefore the only runner, and no
+public function of the executor accepts an array. What the types do expose ---
+through generated eliminators and through \code{Reader.treeOf} and
+\code{Program.treeOf} --- is a tree of reads, writes, forks and pure
+continuations over observations: a recipe, with no state in it. The model's own
+evaluators are public and pure; they take the array from the caller, they are
+what the theorems are stated about, and they are not a route to the array a
+session creates.
+
+\subsection{The semantics, and why the fractions are still there}
+
+The model is a small-step relation over threads, where a thread is a running
+read phase. It has a step for every interleaving of a fork's branches, and that
+is what makes \code{parallel} notional: the shipped executor runs the left
+branch and then the right, while the model admits every order, and the theorems
+say the two agree.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item Shares are conserved at a fork and restored at a join, and a fork halves
+its parent's share. A well-formed leaf's shares sum to the thread's share and
+stay positive.
+\item No write step has a source while a read phase runs, and a well-formed
+reading configuration leaves the writer no authority. This is the semantic
+counterpart of the ledger's $\held = 1$.
+\item A join becomes a run only when both children have finished.
+\item A read's result is a function of its observations alone; a write preserves
+the array's size and yields \code{true} exactly when it is in bounds.
+\item Every interleaving computes what the sequential denotation computes. The
+harness cases that arm the in-place check for this executor exit zero, which is
+the run-time counterpart of the same claim.
+\end{itemize}
+
+The fractions are specification, and more so here than in \cref{sec:perm}: on
+the run-time path there is neither a token nor a ledger, and the compiled
+executor threads one array and the command trees it is walking. A read phase
+therefore costs no allocation for permissions; only the continuations the trees
+already carry.
+
+\subsection{What has changed about the discipline}
+
+Sealing the state changes the role of the fractions, and it is worth being
+explicit because it changes the pitch.
+
+An object's read and write operations are only reachable through \code{Reader}
+and \code{Program}, and the state those operate on is created by \code{runFresh}
+and never returned. A client cannot hold a reference to the session's array,
+because it never receives one, and no operation returns one. Under that
+restriction, the authority that the fractions account for and the exclusivity
+the runtime needs no longer diverge through the client: the \emph{types} give
+the write its exclusivity --- a reader has no write, and a write exists only
+outside a read phase --- and the fractions account for something else, which is
+\emph{sharing}: how a fork splits authority, why a join waits for both branches,
+and why every interleaving agrees with the sequential denotation.
+
+That is a cleaner story than the one \cref{sec:perm} tells, and it also makes the
+remaining gap precise. Sealing removes the client as a source of aliases. It does
+not remove the library's own temporaries, it does not touch the compiler, and it
+does not touch the runtime. Those are the subjects of \cref{sec:sealed} and
+\cref{sec:evidence}.
+
+\begin{remark}[why \code{parallel} is notional]\label{rem:parallel}
+A real concurrent backend would need more than permissions. On this toolchain,
+an array captured by a \code{Task.spawn} closure answers \code{false} to the
+exclusivity test for good, even after the task has been joined: it is marked as
+shared between threads, and the next write returns a copy. Getting the array
+back to a single owner is work the permission discipline does not do. The
+structured executor is therefore sequential, and the fork/join is a semantics
+statement rather than a claim about tasks.
+\end{remark}
+
+\section{Any state type: laws as proof fields}\label{sec:lawful}
+
+\Cref{sec:object} leaves two obligations in prose: a read must not name the
+mutable state, and a write must not keep an old part of it alive. This section
+turns the logical content of the first into proof fields, so that the theorems
+of the model hold of any instance that proves them, and states exactly how much
+of the second remains.
+
+\subsection{A language in which a reference can be written down}
+
+The first obstacle is that the obligation is inexpressible: ``a read must not
+return a reference to the state'' is a sentence about values, but the values a
+read returns are of arbitrary type, and the type does not say whether a
+reference is inside.
+
+The remedy is to fix a language for read results, small enough that a reference
+is a syntactic object in it.
+
+\begin{definition}[values and detachment]\label{def:value}
+The \code{Value} universe has a constructor for each shape a read may return ---
+a unit, a natural, an unsigned word, a boolean, an optional, a sum, a pair ---
+and one more, $\code{.loc}\ \ell$, which names a location. \code{NoRef ℓ v}
+holds of a value $v$ that contains no $\code{.loc}\ \ell$ anywhere inside it,
+however deeply nested: it descends through \code{some}, \code{inl}, \code{inr}
+and \code{pair}, so a location hidden beneath a compound observation is caught.
+\end{definition}
+
+\subsection{The class}
+
+\begin{definition}[lawful state variable]\label{def:lawful}
+A state variable is an instance of a class with a state type $\sigma$, an
+initializer type, read and write operation types, and: the type of value a read
+yields; \code{initial}; a predicate \code{Valid} naming the states the variable
+may be in; \code{observe}, a pure function of an operation and a state;
+\code{replace}, which performs an exclusive logical replacement and reports
+whether it took effect; and \code{encodeRead}, which translates a read result
+into a \code{Value}. Membership is by proof of four laws.
+\[
+\begin{array}{rll}
+\text{(L1)} & \code{initial\_valid} & \forall i,\ \code{Valid}\ (\code{initial}\ i) \\
+\text{(L2)} & \code{replace\_valid} & \forall w\ s,\ \code{Valid}\ s \to \code{Valid}\ (\code{replace}\ w\ s).1 \\
+\text{(L3)} & \code{encodeRead\_injective} & \forall o\ x\ y,\ \code{encodeRead}\ o\ x = \code{encodeRead}\ o\ y \to x = y \\
+\text{(L4)} & \code{observe\_detached} & \forall \ell\ o\ s,\ \code{Valid}\ s \to \code{NoRef}\ \ell\ (\code{encodeRead}\ o\ (\code{observe}\ o\ s))
+\end{array}
+\]
+\end{definition}
+
+Each law closes a specific hole in the generic theory.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item \emph{L1} is what makes a fresh session admissible. The generic theorems
+assume a well-formed configuration, and a well-formed configuration includes
+\code{Valid s}. For a fixed-capacity buffer it fails for an initializer of the
+wrong capacity; the development carries that counterexample.
+\item \emph{L2} makes reachability an induction: with L1, every state reachable
+from a fresh session is admissible, and so is every heap cell after a write. It
+fails for a write that grows a fixed-capacity buffer.
+\item \emph{L3} is there to keep L4 from being vacuous. Without it, encoding
+every result as the unit would satisfy L4 trivially and say nothing. No generic
+theorem uses L3 directly.
+\item \emph{L4} is the detachment the write discipline needs: a read of an
+admissible state names no protected location.
+\end{itemize}
+
+Being lawful is not inherited. An existing object instance is not automatically
+a lawful state variable, and none of the historical instances is claimed as one.
+Membership is a proof, and the proofs are in the check library.
+
+\subsection{The model, and what it buys}
+
+A second model accompanies the class: command trees for readers and programs
+with their binds; a small-step relation over configurations; a denotation; a
+replay function, which is the one noncomputable definition in the theory, since
+comparing two operations is a logical side condition; a well-formedness
+predicate for reading threads with a share for each leaf; and a safety predicate
+for command trees.
+
+Stated once for every lawful instance, this model gives the same properties the
+structured interface gave for one array: share conservation, exclusion, join
+discipline, write preservation, trace replay and schedule independence. On top
+of it sits a single-root heap, in which \code{At} relates a location to the
+state it holds, \code{ReadAt} and \code{WriteAt} describe a read and a write step
+against it, reads leave it unchanged, a write changes only its own cell, and a
+read--write--read sequence is a snapshot: the first read keeps the value it took
+from the \emph{old} state, and the second is the written one.
+
+The array is an instance, and two bridge theorems state that the instance's
+denotation is the structured executor's: the lifted trees are the trees the
+interface already exposes, and the runner's equation composes the model's own
+equation with the program bridge. Thus the general theory does not replace the
+structured interface; it explains why that interface's theorems hold.
+
+\begin{example}[the laws are not vacuous]\label{ex:nonvacuous}
+Each law has a countermodel, and each is a theorem that a specific instance's
+obligation is false, paired with the affirmative control of an instance that
+satisfies it. A read that returns $\code{.loc}\ \ell$ fails L4; a write that
+leaves the admissible states fails L2; an encoding that forgets what it was
+given fails L3. The development proves each.
+\end{example}
+
+\subsection{What the laws do not say}
+
+The laws constrain the \emph{encoding} and not the object graph, and the
+development carries a witness to that gap.
+
+\begin{example}[a lawful instance whose read is the state]\label{ex:leak}
+Take an array of machine words. Encode it as a nested pair of words, and the
+encoding is injective and contains no $\code{.loc}$ anywhere, so L3 and L4 hold;
+take \code{Valid} to be trivial and \code{replace} to be the array write, and L1
+and L2 hold. All four laws hold. Yet take the read to be the identity, and the
+read of the state returns the protected array itself.
+
+The instance is legal, and it is exactly what L4's proof obligation cannot catch:
+Lean's logic sees values, and an alias and a copy of an array are equal values.
+\Code{NoRef} is a statement about the encoding, so an author who chooses both the
+encoding and the read can choose them consistently and still hand back the state.
+\end{example}
+
+\Cref{ex:leak} is the reason the second half of this paper exists. A discipline
+that lets the instance author decide what a read means has an escape hatch, and
+the only way to close it is to take the decision away. There are two ways to take
+it away, and they differ in how the author's type is related to a type the
+library knows: by a bijection, in \cref{sec:levitation}, or by an equality, in
+\cref{sec:sealed}.
+
+\section{Any shape: a description universe}\label{sec:levitation}
+
+The lawful-state-variable class is general over types but not over shapes: each
+instance proves its own laws, and an author who wants a new state type must
+discharge them all. This section removes that per-shape work with the pattern of
+levitation \cite{chapman2010levitation}: describe the shapes in a universe,
+interpret a description as a type, and prove the laws once for the whole
+universe.
+
+\subsection{The universe and its interpretation}
+
+\begin{definition}[descriptions]\label{def:desc}
+A description is a unit, a natural, or a sum of two descriptions:
+$\mathsf{Desc} ::= \mathtt{.unit} \mid \mathtt{.nat} \mid \mathtt{.sum}\ d\ d$.
+The type a description denotes is
+$\mathsf{El}\ \mathtt{.unit} = \mathbf{1}$,
+$\mathsf{El}\ \mathtt{.nat} = \mathbb{N}$, and
+$\mathsf{El}\ (\mathtt{.sum}\ d_1\ d_2) = \mathsf{El}\ d_1 + \mathsf{El}\ d_2$.
+The definition of \code{El} is an abbreviation rather than a definition, so for
+a client it is reducible: a description of a slot has $\mathsf{El}$ equal to
+$\mathbf{1} + \mathbb{N}$ definitionally, and a literal injection can be given at
+such a type without an ascription.
+\end{definition}
+
+The universe is deliberately non-recursive. Its types are built from the unit,
+the natural and the sum alone, so a proof over it is a finite case analysis
+rather than a fixpoint. Recursion is the obvious next extension and is not
+attempted here.
+
+\begin{definition}[one instance]\label{def:universeinstance}
+\code{encodeEl} encodes an element of \emph{any} description as a \code{Value},
+and the facts the class needs of it hold of every description:
+\code{encodeEl} is injective, and it names no location. Both are proved once, by
+a structural induction on the description with one case per constructor, rather
+than once per description.
+
+Because two descriptions can denote definitionally equal types, the description
+indexes a wrapper: \code{Described d} is a type whose instance argument is the
+description. Then
+\[
+\code{describedStateVar}\ d : \mathsf{LawfulStateVar}\ (\code{Described}\ d)\ (\mathsf{El}\ d)\ \mathbf{1}\ (\mathsf{El}\ d)
+\]
+is a single instance serving every description, and its four laws are proved
+once, at the description rather than at the type.
+\end{definition}
+
+\subsection{A user's type, by transport}
+
+One instance for the universe is not yet an instance for a type a user wrote.
+The second half of the pattern carries the instance across a bijection.
+
+\begin{definition}[transport]\label{def:transport}
+Let $\tau$ be any type with functions
+$\mathit{toEl} : \tau \to \mathsf{El}\ d$ and
+$\mathit{ofEl} : \mathsf{El}\ d \to \tau$ that are inverse in both directions.
+Then \code{transport} yields a lawful instance at $\tau$ whose operations are the
+universe instance's conjugated by the isomorphism, and whose every law field is
+the universe's law after an inverse law cancels the conjugation.
+\end{definition}
+
+\begin{example}[the slot, by transport]\label{ex:slot}
+A slot is a genuine inductive type --- empty, or holding a natural payload ---
+described by a unit summed with a natural. Its instance is one line:
+\begin{lstlisting}[numbers=none,xleftmargin=0pt,frame=none,aboveskip=2pt,belowskip=2pt]
+transport slotDesc Slot encode decode decode_encode encode_decode
+\end{lstlisting}
+Every operation is the universe instance's conjugated by \code{encode} and
+\code{decode}, and every law is the universe's, so nothing specific to the slot's
+description is proved. The theorems of the generic model then apply at it: a read
+after a write returns the written value; a snapshot survives, with the old value
+still held by the pre-write heap and the cell holding the new one; and a single
+root cell changes shape, $\mathit{empty} \to \mathit{full}\ n \to
+\mathit{empty}$.
+
+A second datatype costs only its isomorphism. The development checks a transport
+for the booleans at the description $\mathtt{.sum}\ \mathtt{.unit}\
+\mathtt{.unit}$, which the slot does not use, so the transport is not exercised
+only by its one client.
+\end{example}
+
+This is the pattern in miniature, and it is worth naming the three roles, because
+the remaining sections scale it. There is a \emph{model} --- the description
+universe and its interpretation. There is a \emph{bijection} between the model
+and the user's type. And there is a \emph{transfer}: observations and updates are
+stated in the model and proved once there, then carried to the user's type along
+the bijection, so that the operation the user calls runs on the user's own type
+while the reason it is correct lives in the model.
+
+\subsection{Where the bijection is not enough}
+
+A transport makes a user's type lawful, but it leaves the shape of the read and
+the write in the user's hands: the author supplies \code{encode}, \code{decode}
+and the two inverse laws, and can still choose a read that names the state, as in
+\cref{ex:leak}. What transport adds over a hand-written instance is that the laws
+are not re-proved; it does not add a guarantee about what a read returns.
+
+To get that, the relation between the author's type and the library's type has to
+be tighter than a bijection. A bijection gives operations that are the model's
+\emph{up to} conversion, and the conversion is the author's; an equality gives
+operations that \emph{are} the model's, with the conversions erasing. Which is
+what the next section builds, and the price is that the library must decide what
+a read and a write mean, and therefore must have a universe in which they can be
+defined for every shape at once.
+
+\section{Owning the sense of the state}\label{sec:sealed}
+
+This section gives the library the entire meaning of the state. It has three
+parts: two universes, one for what a read may return and one for what a state
+may be; a calculus of paths over the second, with reads that end in the first and
+writes that take an element out before updating it; and a class whose instances
+supply nothing but the layout and an equality.
+
+\subsection{Two universes, and the asymmetry between them}
+
+\begin{definition}[observations and layouts]\label{def:layouts}
+The observation universe is closed: a unit, a natural, an unsigned word, a
+boolean, a sum, an optional, a pair. No array, no structure of the state and no
+reference appears in it. The layout universe has three constructors: a stored
+observation, a binary product of layouts, and an array of a layout. The
+interpretation of a layout is the Lean type a program holds: a pair, or an
+\code{Array} of the interpretations of its element layout.
+\end{definition}
+
+The asymmetry is the point. A layout may contain an array; an observation may
+not. The type an array of structures denotes is a pair of machine words
+$\times$ \code{Array} of those, and the type a read may return is built from
+atoms. Consequently a read cannot return a piece of the state, because no
+observation denotes one.
+
+\subsection{Paths, and a whole-array read that cannot be written down}
+
+\begin{definition}[path and observation path]\label{def:path}
+A path into a layout is an address: the whole layout, a descent into the left or
+right component of a product, or a descent into an index of an array. The
+product steps exist only under a product and the array step only under an array,
+so the type of a path is indexed by the layout it walks. A function computed from
+the path gives the layout at its end. An \emph{observation path} is a path
+together with the proof that its end is a stored observation.
+\end{definition}
+
+The proof field in \cref{def:path} is what makes the interface's guarantee
+structural rather than a rule. It is an equality
+$\mathsf{At}\ p = \mathtt{.leaf}\ o$, and at an array or a product end
+that equality has no solution, so no observation path exists there. A
+whole-array read therefore cannot be \emph{written down}, let alone performed,
+and the development states both sides of the same fact: a theorem that
+$\mathsf{At}\ \mathtt{.here} \ne \mathtt{.leaf}\ o$ at an array root, and a
+check that the elaborator rejects a use of the path that would have needed such
+an equality.
+
+The one path step whose validity depends on a particular state is the array
+index, so the calculus asks separately whether a path addresses anything. That
+predicate is a pure traversal: it reads the elements along the path and never
+copies an array. Asking first is what lets the update itself be total, and what
+lets a failed write return the state it was given.
+
+\subsection{Reads, and the encoding the library owns}
+
+An observation path and a state yield the library's encoding of the observation
+at the path's end, or \code{none} when the path addresses nothing. The traversal
+that obtains the focus is private, so the raw focus is obtained and encoded in
+one step, and no function returns a state or a subtree.
+
+The encoding has one clause per observation code, and no clause produces a
+location. From the clauses alone the development proves, for every code, that an
+encoded observation is injective and names no location, by an induction over the
+observation universe. The consequence is the read guarantee: a successful read
+names no $\code{.loc}$, so it cannot hand back a mutable part of the state. This
+is the fact that \cref{ex:leak} said an author could choose away; here no author
+chooses it, because the encoding is the library's.
+
+\subsection{Writes: a specification, an implementation, and a bridge}
+
+A write needs the state with the addressed part removed. That is the one-hole
+context of the path, which for this layout universe is its derivative in
+McBride's sense \cite{huet1997zipper,mcbride2001derivative}: at a leaf the hole
+is the whole value; at a product one component keeps the hole and the other is
+held whole; at an array the selected element is taken out and the array is held
+with a placeholder, together with the index that puts it back.
+
+\begin{definition}[the zipper as specification]\label{def:zipper}
+\code{open} takes a state apart into a context and a focus, or reports the
+original state for an index that addresses nothing at any depth; \code{plug}
+puts a focus back. Both are private, so a client cannot obtain a raw focus.
+\end{definition}
+
+The zipper is the \emph{specification}. The \emph{implementation} is a
+structurally recursive update with one clause per path constructor, and the
+theorem that relates them is the bridge: on a state the private \code{open} takes
+apart, the recursion is the context \code{open} reported, plugged with the focus
+it reported. Everything else about writes follows from that bridge: reading back
+what was written, a failed write leaving the state alone, and a write at a path
+disjoint from a read path not changing what that read returns. Disjointness here
+excludes the equal paths and every ancestor/descendant pair, including two paths
+through the same array index, rather than merely paths whose final fields differ.
+
+Two properties of the implementation are not about the zipper at all, and both
+are decisions taken because of the compiler.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item The new focus is threaded through the recursion as a \emph{value} --- the
+focus of the path --- rather than as a function of the old state, so the write
+path allocates no closure.
+\item The recursion returns the state alone, not a state paired with the write's
+report. This is what lets the compiler's reuse pass rewrite a product cell rather
+than allocate a fresh one; with a pair return, the pass matched the transient
+pair instead of the stored cell, and the address changed. The paper returns to
+this in \cref{sec:evidence}, because it was found by measuring addresses and not
+by reading the source or the emitted C.
+\end{itemize}
+
+\subsection{The array case is a take-out}
+
+A write below an array index cannot simply read the element and write it back:
+the array would still hold the element, so a write inside it would copy the
+element. The element must be \emph{taken out}.
+
+\begin{definition}[take-out]\label{def:takeout}
+The array case exchanges the selected element for a placeholder, leaving a
+sibling array that keeps its size and every other slot, and hands the element
+back as the sole owner of it. The exchange and its inverse are private, like the
+zipper: they hand back the raw element that an update below the slot works on.
+\end{definition}
+
+The array's exclusivity is not the element's. A take-out replaces one slot, and
+another slot --- or a caller's own reference --- may still point at the same
+element, so a write inside the element would copy it. The implementation
+therefore runs \emph{two} exclusivity checks, and both are the difference between
+a mutation and a copy: one on the array, before the take-out, because a shared
+array is copied whole; and one on the extracted element, before the recursion
+below it runs, because a shared element is what a write inside it would copy.
+Each check names its site in the report.
+
+Two remarks on the checks are worth making here, because they are the places
+where the discipline meets the compiler.
+
+First, a pair is a second reference. The exchange returns the sibling array and
+the element together; while that pair is live, the element has two references,
+and checking it then fires on an element that is in fact uniquely owned. The
+implementation destructures the pair before anything is checked or recursed
+into, so the check sees one reference. That is a fact about the emitted code, and
+it was found by a harness case failing.
+
+Second, the checks are the object interface's check from \cref{sec:object},
+arrived at from the other direction: there, an instance supplied a check so that
+a copy would be loud; here, the library's own recursion installs the two checks
+its own writes need.
+
+\subsection{The sealed class}
+
+\begin{definition}[sealed state variable]\label{def:sealed}
+An instance of \code{SealedStateVar} supplies two things: the layout its type is,
+and a proof $\code{rep} : \sigma = \mathsf{State}\ \mathit{layout}$. It has no
+field for a read, a write or an encoding, so it cannot supply one. The library
+defines the operations once, from the equality: a read is the layout's read at
+the transported state, and a write is the layout's write with the state cast in
+and the state it returns cast out.
+\end{definition}
+
+From the equality the library also derives a lawful state variable for the sealed
+type, by transporting its adapter along \code{rep}. The derived instance's read
+result type and its encoding are the library's by \code{rfl}: an instance has no
+field in which to put a different one, and the development proves the two
+equations rather than assuming them. The read, snapshot, frame and
+failure theorems are then restated for every sealed instance, each inherited by
+transport rather than proved per instance.
+
+The comparison with \cref{ex:leak} is the point of the class. The lawful
+state-variable class still admits the array instance whose read is the state;
+the sealed class has no field to put that read in. And the guarantee is
+structural: a sealed read returns an encoding built from observations, which has
+no location branch, so it cannot hand back a mutable part of the state.
+
+\begin{example}[what the checks pin from outside]\label{ex:probes}
+The property that stands in for a proof of non-escape is that the raw routes
+cannot be written. From a module outside the library, the development pins, by
+checks whose elaboration must fail with a pinned message: that an instance adding
+an \code{observe} is rejected, that an instance adding an \code{encodeRead} is
+rejected, that \code{rep} cannot name a layout the type is not, that the
+\code{LawfulStateVar} fields \code{observe} and \code{encodeRead} are not names a
+sealed client can even write, and that the private pieces of the path calculus
+--- the context, its two directions, and the take-out and its inverse --- are not
+reachable. Beside them are the affirmative controls: the class's fields are
+readable, the read and the write run on both shipped instances, and the two
+cast round trips hold.
+
+Five rejections are pinned around the path calculus alone --- the context, the
+open, the plug, the take-out and its inverse --- which is how the raw-focus
+boundary is observed from outside the module rather than asserted.
+\end{example}
+
+The reader who wants the load-bearing detail can compare the two classes
+directly. A sealed instance's \code{rep} must be an equality and not an
+isomorphism, which is a real restriction and is stated as one: for a structure a
+user declares, the only relation to a layout's state type is an isomorphism, and
+the elaborator will not accept an equality. Such a type needs a layout that
+\emph{names} it, which the current universe does not have, or a conversion on
+writes whose cost has not been measured. Arrays, nested arrays, pairs and the
+observation universe's leaves are usable, because the layout interpretation
+denotes them definitionally; a user structure is not.
+
+\section{Evidence, and the correspondence chain}\label{sec:evidence}
+
+Everything so far is a design with a proof obligation attached. This section
+states how the obligation is discharged in practice, where the evidence stops,
+and what has to be assumed beyond it.
+
+\subsection{What the harness measures}
+
+The run-time claims are established by an executable that observes addresses.
+For each case it records the address of the object before and after the
+operation; a copy allocates a new object, so an unchanged address is evidence of
+an update in place. The cases that ship are the following.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item \emph{Unique writes.} The structured interface's write, and a structured
+program whose read phase returns a closure over its observations, each keep their
+array's address. For the layout calculus, four path writes --- a left field, a
+right field, the last element and an out-of-bounds index --- keep the buffer's
+address, keep the address of the product cell at the written index, and keep the
+sibling struct's address; the out-of-bounds case also returns the state
+unchanged.
+\item \emph{Nested writes.} A write to a leaf of an inner array keeps the inner
+array's own address, which is the measurement that the take-out and the
+element's check are doing their work.
+\item \emph{Controls that must copy.} A live second reference to the array, a
+live second reference to the focused inner array, a compile-time array literal,
+and a shared object in the counter example. Each asserts that the \emph{address
+changes}.
+\item \emph{Checked children.} Each unique case is run again in a child process
+with the in-place check armed, and must exit zero having reported that the check
+was enabled. The shared cases are run the same way and must \emph{terminate} the
+process, naming the site. The armed control that must terminate is the
+counter's.
+\end{itemize}
+
+The last group is what turns the check from an assertion into an instrument. A
+unique case that exits zero with the check armed establishes that the check was
+in the write path and had nothing to report; a shared case that terminates
+establishes that the check fires when it should. Without the second, the first
+would be consistent with a check that never runs.
+
+Two of the harness cases exist because an earlier version passed a reading of the
+source and failed at run time.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item The take-out returns a pair. While that pair is live the element has two
+references, so the element's check fired on a uniquely owned element and the
+whole write copied. The fix is to destructure the pair before checking or
+recursing; the emitted code then releases the pair and checks the focus with one
+reference.
+\item With the update returning a state paired with its report, the reuse pass
+rewrote the transient pair rather than the stored cell, so the stored struct was
+fresh and copied --- even though the emitted C contained the exclusivity test and
+the in-place field write. The fix is the state-only recursion of
+\cref{sec:sealed}. The address changed while the source and the C both looked
+right, which is the reason the instrument is an address assertion.
+\end{enumerate}
+
+\subsection{The shape rules}
+
+The measurements reduce to five rules that decide whether an update takes place,
+and it is worth writing them down, because four of them constrain whoever writes
+the update rather than the client.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item The object was allocated at run time. A compile-time constant has count $0$
+and is never exclusive, which is why the session's array is created by the
+runner rather than by the caller.
+\item Its count is $1$ at the mutation: no alias live across the call, no
+projection of it taken and held, and no second use of the same value in the same
+expression.
+\item A whole-value rebuild recycles the incoming cell when that cell is
+exclusive, but the pass matches on shape, so when more than one same-shaped
+constructor appears in the expression the cell can go to the wrong one.
+\item A write nested inside a structure needs every node on the path to be
+exclusive at the moment of the write. A take-out makes the node owned; a
+borrowed accessor does not.
+\item The write is a fixed-size element write. A store cannot grow an array.
+\end{enumerate}
+
+Two of the five are settled by the \emph{surface} rather than by care: the write
+installs an observation, so no client value --- and hence no client alias --- can
+be written into the state, and there is no growth operation. That is the sense in
+which the interface makes the losing shapes unwritable where types can say so.
+The other three are obligations on the library's own update paths, discharged by
+the shape of the recursion and checked by the harness.
+
+It is also worth saying what a normal update looks like here, because the shape
+that copies is not the shape a write takes. A write is ``check, then write'',
+and the check returns a boolean and retains nothing, so the state's uses are
+sequential and the last is a move: the public write compiles to a bounds check
+and then the fused update, with no increment of the state at all. The copying
+shape --- write and read one value at once --- cannot be expressed through the
+interface, because a client has commands and not a state.
+
+\subsection{What is diagnostic}
+
+The in-place check is diagnostic and nothing more. It is the identity in the
+logic, so no specification or proof depends on it. It reads its switch once at
+process start, so a write costs a call, a load and a branch. In a run where the
+switch is off it neither proves nor reports anything; and in any run its verdict
+rests on the runtime's exclusivity primitive, which is part of the trusted base.
+The check's purpose is to make a copy loud when someone is looking for one. The
+address assertions, not the check, are what establish that an update took place.
+
+\subsection{The chain}
+
+The gap between the discipline and the compiled program is spanned by a chain of
+statements. Each link is either proved here, a property of the exported surface,
+measured on this toolchain, or assumed. Naming them individually is the point:
+a single sentence such as ``the discipline gives in-place update'' would hide
+four distinct assumptions.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}p{0.05\textwidth}p{0.60\textwidth}p{0.29\textwidth}@{}}
+\toprule
+Link & Content & Status \\
+\midrule
+1 & The pure language's denotation of a program is its result & proved (\cref{sec:lambda}) \\
+2 & A store with count $1$ is equivalent to the copy; with count $\ge 2$ it is not & proved (\cref{thm:store}) \\
+3 & Every write site reaches its precondition, so $\held = 1$ there & proved (\cref{sec:perm}) \\
+4 & $\held = 1$ at a write means no read share is outstanding & proved (the ledger and the primitives) \\
+5 & No client value names the session's state or a mutable part of it & structural (\cref{sec:notional,sec:sealed}) \\
+6 & The library's own temporaries add no reference at a mutation & measured, per shape (\cref{sec:evidence}) \\
+7 & The compiler's counts follow the uses of the term, and its insertions implement them & assumed \\
+8 & The runtime's exclusivity test is $\rc = 1$, and the store primitive stores in place exactly when it holds & assumed \\
+9 & A compiled write updates in place on the shapes covered & measured (\cref{sec:evidence}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\Cref{thm:store} is what makes links 3 to 5 worth having at all. What they give
+is a source program whose every write site is reached with the object
+unshared by the interface --- which is link 5's content --- and with no reader
+outstanding, which is links 3 and 4. Links 7 and 8 are what carry that to the
+machine, and they are assumptions here rather than theorems: link 7 is the
+counting discipline documented by Ullrich and de Moura
+\cite{ullrich2019counting} and refined by Perceus \cite{reinking2021perceus}, and
+link 8 is the runtime's contract. Link 6 is neither: it is a property of the
+library's own code, and it is where the paper's measurement effort went, because
+it is the only link under our control.
+
+\begin{corollary}[discipline adequacy, conditional]\label{cor:adequacy}
+Assume links 6, 7 and 8. Let $p$ be a program accepted by \code{exec} on a state
+that is uniquely owned when \code{exec} is called. Then every store site in
+$p$'s compiled code is reached with the object's count one, and by
+\cref{cor:unobs} every effect those stores perform is unobservable to a pure
+client.
+\end{corollary}
+
+\begin{remark}[what would make link 7 unconditional]\label{rem:link7}
+Link 7 could be replaced by a proof against a counted calculus, with the
+sealing assumptions as hypotheses: that the object never escapes, and that every
+read result is built from the observation universe. That turns ``count one at a
+write'' for a class of programs from measured into proved \emph{in the model},
+with the correspondence to compiled executions still assumed link by link. It is
+a different result from a measurement, and it should be labelled as one. The
+development here does not attempt it; the vendored counter model of
+\cref{app:listings} is the vocabulary such a proof would be stated in, not the
+proof.
+\end{remark}
+
+\subsection{Non-claims}
+
+A list of what is not claimed is part of the result.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+\item No theorem here certifies that a compiled write updates in place, and none
+certifies anything about Lean's object graph. The in-place evidence is a
+measurement on named cases of one toolchain, and the emitted code is a
+description of that toolchain rather than a specification.
+\item The detachment laws are about the modelled encoding. \Code{NoRef} says that
+an encoded read names no location; the sealed class removes the author's choice
+of that encoding but does not prove that the library's encoding matches the
+runtime's references.
+\item Sealing establishes non-escape through the exported operations. It says
+nothing about \code{unsafe} code, foreign functions, or values a client obtained
+outside the interface.
+\item The fork/join is notional. The executor is sequential, and a concurrent
+backend would still face the thread-shared marking of \cref{rem:parallel}.
+\item A missed in-place update costs time and never correctness. Lean is pure,
+so every performance claim here is a claim about allocation.
+\item The counter-level facts inherited from the vendored model inherit that
+model's trust character, down to the generated certificates some of its proofs
+carry; the development prints, rather than assumes, which principles each of its
+own theorems rests on.
+\end{itemize}
+
+\section{Related work}\label{sec:related}
+
+\paragraph{Fractional permissions and separation logic.}
+Permissions as shares of an object are Boyland's
+\cite{boyland2003checking}, in the tradition of separation logic
+\cite{ohearn2001local,reynolds2002separation}. Iris \cite{jung2015iris} and its
+proof-mode descendants \cite{krebbers2017essence}, VeriFast
+\cite{jacobs2011verifast} and Viper \cite{muller2016viper} reason this way about
+real memory. Our use of fractions is deliberately modest: no heap assertion
+language, no concurrent resource algebra, and no reasoning about interference
+between threads. What is borrowed is the arithmetic of shares and the
+observation that a write needs the whole. What is new is where the fractions
+live: in the type of a program, in a ledger the compiler erases, in a host
+language with no linear types.
+
+\paragraph{Permissions with real mutation in a proof assistant.}
+F$^{\star}$'s Steel \cite{fromherz2021steel} applies fractional permissions to arrays
+and extracts to C with real mutation, which makes it the closest existing system
+to the first half of this paper. Verus \cite{lattuada2023verus} combines Rust's
+own linear types with ghost permissions. Both are verification frameworks: the
+program is proved against a specification that mentions the heap. Ours is a
+discipline, not a logic: there is no specification of the object's contents, and
+the only property proved is the one the writer needs --- authority, detachment,
+snapshots, frames. A reader who wants to state what a program computes would
+reach for a Hoare logic; the development's program type is the degenerate case
+in which the specification is the permission.
+
+\paragraph{Hoare logic for state monads.}
+The program type is a Hoare state monad in the style of Swierstra
+\cite{swierstra2009hoare}, who gives a Hoare logic for the state monad with
+preconditions and postconditions as type indices, and of Hoare Type Theory and
+Ynot \cite{nanevski2008htt,nanevski2008ynot}. Our monad is a value of that shape
+with one addition: because the host language has no linear values, the
+precondition is a predicate on a ghost ledger rather than a separation-logic
+assertion, and the seal is a private capability rather than a linear hypothesis.
+The monadic presentation itself is standard \cite{wadler1992monads}.
+
+\paragraph{Reference counting and in-place update.}
+Lean's runtime is the reference-counting discipline of Ullrich and de Moura
+\cite{ullrich2019counting}, with the reuse pass of Perceus
+\cite{reinking2021perceus}, and Lean's own machine-checked model of the count
+arithmetic is the source of the counter vocabulary in \cref{app:listings}. Koka's
+FP${}^2$ \cite{lorenzen2023fp2} is the closest prior art on the other axis: it
+statically checks that a function runs \emph{fully} in place. The comparison is
+instructive. FP${}^2$ checks the property the compiler needs, by counting, for
+arbitrary recursive datatypes, and its check does not model sharing among
+readers. Ours models sharing, by construction, and gets one reference at the
+write by sealing the state away from clients; it is restricted to a layout
+universe of shapes the library can describe. The two are complementary: a
+counting discipline answers ``does this function reuse everything'', and a
+permission discipline answers ``is this object unshared at this write''.
+
+\paragraph{Uniqueness and linearity in the host language.}
+Clean's uniqueness types \cite{barensen1993uniqueness}, Linear Haskell
+\cite{bernardy2018linear} and Rust's ownership discipline
+\cite{jung2018rustbelt,matsakis2014rust} are the source-language answers to the
+same problem: make the count-one condition a typing condition. Lean has no such
+answer, which is what makes the interface-based discipline here necessary rather
+than merely optional. A reader who has used Rust's borrows will recognise the
+shape of what is proved --- a write needs exclusive access, reads may share ---
+and will also recognise the difference: Rust's discipline is enforced by the
+type checker, ours by a ledger and a sealed interface, and ours therefore has to
+say where its enforcement stops.
+
+\paragraph{Unobservable state.}
+The pattern of a locally effectful computation observed only through a pure
+result is Launchbury and Peyton Jones's \cite{launchbury1995state}: the state
+monad's thread is threaded and then hidden, so the effect cannot be observed. Our
+situation is different in the mechanism and the same in the spirit. There, the
+effect is invisible because the state is not shared; here, the effect is
+invisible because the compiler chooses to perform it exactly when no other
+reference exists, and the discipline's job is to make that choice reliable.
+Reynolds's syntactic control of interference \cite{reynolds1978sci} is the
+ancestor of the idea that a program's names, rather than its values, are what
+should be controlled; a token that is a name for a ledger entry and not a
+permission is a late echo of it.
+
+\paragraph{Levitation and derivatives.}
+The description universe is levitation \cite{chapman2010levitation}: describe,
+interpret, and prove once. The one-hole context of a path is the derivative of a
+data type \cite{mcbride2001derivative}, with the zipper of Huet
+\cite{huet1997zipper} as the intuition. Our universe is non-recursive and much
+smaller than levitation's; what is carried over is the organisation --- the
+description is data the library computes with, and the library, not the author,
+writes the operations.
+
+\paragraph{Ghost state and erasure.}
+The ledger is ghost state, in the same sense as Dafny's ghost declarations
+\cite{leino2010dafny} and F$^{\star}$'s ghost effect \cite{swamy2016fstar}, and the
+discipline depends on the compiler erasing arguments by type
+\cite{gilbert2019proofirrelevance}. The measurements of what remains at run time
+--- that a field-less structure compiles to a constant scalar, that arity
+reduction removes literal arguments, that a symbolic argument survives as an
+unused borrowed parameter --- are properties of this toolchain's erasure, and
+they are the reason the discipline is free rather than merely cheap.
+
+\paragraph{Trusted compilation.}
+The last links of \cref{sec:evidence}'s chain are the compiler and the runtime,
+which is the position any verified-by-measurement argument must take. CompCert
+\cite{leroy2009compcert} is the standard reference for what taking that chain
+seriously looks like; the development here takes the weaker option of naming the
+assumptions and measuring what it can.
+
+\section{Conclusion}\label{sec:conclusion}
+
+A pure language can update in place because the update cannot be observed. The
+condition is that the updated object has one reference, and that condition is a
+fact about the compiled code rather than about the meaning of the program, so
+getting it where one wants it is a discipline rather than an inherent property
+of the source language.
+
+This paper has followed that discipline from its premise to its generalisation.
+The premise was made precise in a small counted calculus, where the store rule
+at count one is proved equivalent to the copy and the store rule at higher counts
+is proved not to be. The discipline was given as fractional permissions in an
+erased ghost ledger, behind a program type that no client can build and that one
+entry point can run, which makes a write's authority a proof obligation and
+costs nothing at run time. It was then lifted three times: to any object, by
+letting the object carry its own check; to any state type, by turning the logical
+part of the object's rules into proof fields and stating the model's theorems
+once; and to any shape, by describing shapes in a universe and transporting the
+universe's one instance along a bijection to the author's type. Finally, the
+route by which an author could still hand back the state was closed, by a class
+in which the library owns the reading, the writing and the encoding, and by a
+path calculus in which a whole-array read cannot even be written down.
+
+Two things are, we think, the parts worth keeping. The first is the shape of the
+result. Nothing here is a new type system and nothing here changes Lean. The
+discipline's enforcement is spread over four mechanisms, each doing what it is
+good at: proofs for the accounting, private constructors and a capability for
+sealing, an equality between a type and a described layout for the meaning of a
+read, and a check that is the identity in the logic for making a copy loud at run
+time. The second is the honest accounting. The paper's chain of evidence has
+nine links, of which five are proved or structural, two are measured, and two
+are assumed; knowing which are which is most of the work of trusting any of it.
+
+The obvious extensions are the ones the design already points at: a recursive
+description universe, so that lists and trees are describable and not only
+arrays and products; layouts that \emph{name} a user's structure, so that the
+equality the sealed class needs can be given for declared types rather than only
+for types the layout interpretation denotes definitionally; per-path permissions,
+so that two writers can hold disjoint parts of one object; and a mutable cell
+behind the sealed interface, which is what a real state variable would want and
+which the current development approximates with a logical heap. A concurrent
+backend is the largest of them, and \cref{rem:parallel} is the note on why it is
+a runtime problem as much as a permission problem.
+
+\appendix
+\section{Quoted declarations}\label{app:listings}
+
+The listings below are read from the library by \code{\textbackslash
+lstinputlisting} with an explicit line range, so the paper quotes the source and
+not a transcription of it. Each is preceded by a \code{\%!check:} directive
+naming a fragment that the quoted range must contain; \code{check-listings.py}
+fails if a range has drifted. This checks that the paper is quoting what it
+claims to quote, and not that the Lean compiles: the library is built separately.
+
+\newcommand{\listingcaption}[3]{\par\medskip\noindent\textbf{#1} \emph{(#2, lines #3)}}
+
+\lstset{numbers=none}
+
+%!check: def held (l : Ledger) : Rat := 1 - (l.map Prod.snd).sum
+\listingcaption{The ledger and the held fraction}{Scidonia/FracPerm/Ledger.lean}{16--22}
+\lstinputlisting[linerange=16-22]{../Scidonia/FracPerm/Ledger.lean}
+
+%!check: held (l.erase (n, q)) = held l + q
+\listingcaption{Returning a read gives back exactly its fraction}{Scidonia/FracPerm/Ledger.lean}{32--37}
+\lstinputlisting[linerange=32-37]{../Scidonia/FracPerm/Ledger.lean}
+
+%!check: check_eq : ∀ site o s, check site o s = s
+\listingcaption{The object interface}{Scidonia/FracPerm/Hoare.lean}{107--132}
+\lstinputlisting[linerange=107-132]{../Scidonia/FracPerm/Hoare.lean}
+
+%!check: private run : Cap → (s : σ) → (∃ l, P l s) →
+\listingcaption{The program type}{Scidonia/FracPerm/Hoare.lean}{178--184}
+\lstinputlisting[linerange=178-184]{../Scidonia/FracPerm/Hoare.lean}
+
+%!check: def write [FracObject σ ReadOp WriteOp] (o : WriteOp) :
+\listingcaption{The primitives and their specifications}{Scidonia/FracPerm/Hoare.lean}{229--266}
+\lstinputlisting[linerange=229-266]{../Scidonia/FracPerm/Hoare.lean}
+
+%!check: observe_detached : ∀ (ℓ : Loc) (o : ReadOp) (s : σ),
+\listingcaption{The lawful state variable}{Scidonia/FracPerm/StateVar/Class.lean}{59--91}
+\lstinputlisting[linerange=59-91]{../Scidonia/FracPerm/StateVar/Class.lean}
+
+%!check: def slotDesc : Desc := .sum .unit .nat
+\listingcaption{The description universe}{Scidonia/FracPerm/StateVar/Description.lean}{24--46}
+\lstinputlisting[linerange=24-46]{../Scidonia/FracPerm/StateVar/Description.lean}
+
+%!check: rep : σ = State layout
+\listingcaption{The sealed class}{Scidonia/FracPerm/StateVar/Sealed.lean}{52--60}
+\lstinputlisting[linerange=52-60]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+
+%!check: fun s => Layout5.read? p (toState s)
+\listingcaption{The library's read of a sealed state}{Scidonia/FracPerm/StateVar/Sealed.lean}{66--74}
+\lstinputlisting[linerange=66-74]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+
+%!check: (ofState r.1, r.2)
+\listingcaption{The library's write of a sealed state}{Scidonia/FracPerm/StateVar/Sealed.lean}{83--90}
+\lstinputlisting[linerange=83-90]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+
+%!check: inductive ObsDesc where
+\listingcaption{The observation universe}{Scidonia/FracPerm/StateVar/Layout5.lean}{91--119}
+\lstinputlisting[linerange=91-119]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: abbrev State : Layout → Type
+\listingcaption{The layout universe and its interpretation}{Scidonia/FracPerm/StateVar/Layout5.lean}{122--138}
+\lstinputlisting[linerange=122-138]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: abbrev At {d : Layout} : Path d → Layout
+\listingcaption{Typed paths and the layout at their end}{Scidonia/FracPerm/StateVar/Layout5.lean}{147--166}
+\lstinputlisting[linerange=147-166]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: leaf : At path = .leaf obs
+\listingcaption{The observable path}{Scidonia/FracPerm/StateVar/Layout5.lean}{169--177}
+\lstinputlisting[linerange=169-177]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: def Disjoint {d : Layout} (p q : Path d) : Prop :=
+\listingcaption{Disjointness of paths}{Scidonia/FracPerm/StateVar/Layout5.lean}{203--208}
+\lstinputlisting[linerange=203-208]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: private def takeOut (s : Array α) (i : Nat) (h : i < s.size) (d : α) : Array α × α
+\listingcaption{The take-out}{Scidonia/FracPerm/StateVar/Layout5.lean}{298--308}
+\lstinputlisting[linerange=298-308]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: def encodeObs : (o : ObsDesc) → ObsEl o → Value
+\listingcaption{The library's encoding of an observation}{Scidonia/FracPerm/StateVar/Layout5.lean}{457--471}
+\lstinputlisting[linerange=457-471]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: private inductive Context : (d : Layout) → Path d → Type where
+\listingcaption{The one-hole context}{Scidonia/FracPerm/StateVar/Layout5.lean}{539--555}
+\lstinputlisting[linerange=539-555]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: def read? {d : Layout} (p : ObsPath d) (s : State d) : Option Value
+\listingcaption{The library's read}{Scidonia/FracPerm/StateVar/Layout5.lean}{679--684}
+\lstinputlisting[linerange=679-684]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: private def setAt : {d : Layout} → (p : Path d) → State (At p) → State d → State d
+\listingcaption{The fused update}{Scidonia/FracPerm/StateVar/Layout5.lean}{710--729}
+\lstinputlisting[linerange=710-729]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: (setAt p.path (cast (congrArg State p.leaf.symm) x) s, true)
+\listingcaption{The public write}{Scidonia/FracPerm/StateVar/Layout5.lean}{772--784}
+\lstinputlisting[linerange=772-784]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+%!check: def IsExclusive (rc : Int32) : Prop := isSt rc ∧ rc = 1
+\listingcaption{What a write tests}{Scidonia/FracPerm/StateVar/RefCount.lean}{713--728}
+\lstinputlisting[linerange=713-728]{../Scidonia/FracPerm/StateVar/RefCount.lean}
+
+\begin{thebibliography}{99}\small
+
+\bibitem{barensen1993uniqueness}
+E.~Barendsen and S.~Smetsers.
+\newblock Conventional and uniqueness typing in graph rewrite systems.
+\newblock In \emph{FSTTCS}, 1993.
+
+\bibitem{bernardy2018linear}
+J.-P.~Bernardy, M.~Boespflug, R.~R.~Newton, S.~Peyton Jones, and A.~Spiwack.
+\newblock Linear Haskell: practical linearity in a higher-order polymorphic
+language.
+\newblock \emph{POPL}, 2018.
+
+\bibitem{boyland2003checking}
+J.~Boyland.
+\newblock Checking interference with fractional permissions.
+\newblock In \emph{Static Analysis (SAS)}, LNCS 2694, pages 55--72, 2003.
+\newblock \doi{10.1007/3-540-44898-5\_4}.
+
+\bibitem{chapman2010levitation}
+J.~Chapman, P.-E.~Dagand, C.~McBride, and P.~Morris.
+\newblock The gentle art of levitation.
+\newblock In \emph{ICFP}, pages 3--14, 2010.
+\newblock \doi{10.1145/1863543.1863547}.
+
+\bibitem{fromherz2021steel}
+A.~Fromherz, A.~Rastogi, N.~Swamy, S.~Gibson, G.~Mart\'inez, D.~Merigoux, and
+T.~Ramananandro.
+\newblock Steel: proof-oriented programming in a dependently typed concurrent
+separation logic.
+\newblock In \emph{ICFP}, 2021.
+\newblock \doi{10.1145/3473590}.
+
+\bibitem{gilbert2019proofirrelevance}
+G.~Gilbert, J.~Cockx, M.~Sozeau, and N.~Tabareau.
+\newblock Definitional proof-irrelevance without K.
+\newblock \emph{POPL}, 2019.
+
+\bibitem{huet1997zipper}
+G.~Huet.
+\newblock The zipper.
+\newblock \emph{Journal of Functional Programming}, 7(5):549--554, 1997.
+
+\bibitem{jacobs2011verifast}
+B.~Jacobs, J.~Smans, P.~Philippaerts, F.~Vogels, W.~Penninckx, and
+F.~Piessens.
+\newblock VeriFast: a powerful, sound, predictable, fast verifier for C and
+Java.
+\newblock In \emph{NASA Formal Methods}, 2011.
+
+\bibitem{jung2015iris}
+R.~Jung, D.~Swasey, F.~Sieczkowski, K.~Svendsen, A.~Turon, L.~Birkedal, and
+D.~Dreyer.
+\newblock Iris: monoids and invariants as an orthogonal basis for concurrent
+reasoning.
+\newblock \emph{POPL}, 2015.
+
+\bibitem{jung2018rustbelt}
+R.~Jung, J.-H.~Jourdan, R.~Krebbers, and D.~Dreyer.
+\newblock RustBelt: securing the foundations of the Rust programming language.
+\newblock \emph{POPL}, 2018.
+
+\bibitem{krebbers2017essence}
+R.~Krebbers, A.~Timany, and L.~Birkedal.
+\newblock The essence of higher-order concurrent separation logic.
+\newblock In \emph{ESOP}, 2017.
+
+\bibitem{lattuada2023verus}
+A.~Lattuada, T.~Hance, C.~Cho, M.~Brun, I.~Subasinghe, Y.~Zhou, J.~Howell,
+B.~Parno, and C.~Hawblitzel.
+\newblock Verus: verifying Rust programs using linear ghost types.
+\newblock \emph{OOPSLA}, 2023.
+\newblock \doi{10.1145/3586037}.
+
+\bibitem{launchbury1995state}
+J.~Launchbury and S.~Peyton Jones.
+\newblock State in Haskell.
+\newblock \emph{Lisp and Symbolic Computation}, 8(4):293--341, 1995.
+
+\bibitem{lean4rcmodel}
+Lean FRO.
+\newblock \code{tests/elab/rc\_model.lean}, Lean~4, tag \code{v4.35.0-rc3}.
+\newblock A machine-checked model of \code{lean\_inc\_ref\_n} and
+\code{lean\_dec\_ref}, vendored into \code{Scidonia/FracPerm/StateVar/RefCount.lean}.
+
+\bibitem{leino2010dafny}
+K.~R.~M.~Leino.
+\newblock Dafny: an automatic program verifier for functional correctness.
+\newblock In \emph{LPAR}, 2010.
+
+\bibitem{leroy2009compcert}
+X.~Leroy.
+\newblock Formal verification of a realistic compiler.
+\newblock \emph{Communications of the ACM}, 52(7):107--115, 2009.
+
+\bibitem{lorenzen2023fp2}
+A.~Lorenzen, D.~Leijen, and W.~Swierstra.
+\newblock FP${}^2$: fully in-place functional programming.
+\newblock \emph{PACMPL}, 7(ICFP), 2023.
+\newblock \doi{10.1145/3607840}.
+
+\bibitem{matsakis2014rust}
+N.~D.~Matsakis and F.~S.~Klock.
+\newblock The Rust language.
+\newblock \emph{ACM SIGAda Ada Letters}, 34(3), 2014.
+
+\bibitem{mcbride2001derivative}
+C.~McBride.
+\newblock The derivative of a regular type is its type of one-hole contexts.
+\newblock Extended abstract, 2001.
+
+\bibitem{muller2016viper}
+P.~M\"uller, M.~Schwerhoff, and A.~J.~Summers.
+\newblock Viper: a verification infrastructure for permission-based reasoning.
+\newblock In \emph{VMCAI}, 2016.
+
+\bibitem{nanevski2008htt}
+A.~Nanevski, G.~Morrisett, and L.~Birkedal.
+\newblock Hoare type theory, polymorphism and separation.
+\newblock \emph{Journal of Functional Programming}, 18(5--6), 2008.
+
+\bibitem{nanevski2008ynot}
+A.~Nanevski, G.~Morrisett, A.~Shinnar, P.~Govereau, and L.~Birkedal.
+\newblock Ynot: dependent types for imperative programs.
+\newblock In \emph{ICFP}, 2008.
+
+\bibitem{ohearn2001local}
+P.~W.~O'Hearn, J.~C.~Reynolds, and H.~Yang.
+\newblock Local reasoning about programs that alter data structures.
+\newblock In \emph{Computer Science Logic (CSL)}, 2001.
+
+\bibitem{reinking2021perceus}
+A.~Reinking, N.~Xie, L.~de~Moura, and D.~Leijen.
+\newblock Perceus: garbage free reference counting with reuse.
+\newblock In \emph{PLDI}, 2021.
+\newblock \doi{10.1145/3453483.3454032}.
+
+\bibitem{reynolds1978sci}
+J.~C.~Reynolds.
+\newblock Syntactic control of interference.
+\newblock In \emph{POPL}, 1978.
+
+\bibitem{reynolds2002separation}
+J.~C.~Reynolds.
+\newblock Separation logic: a logic for shared mutable data structures.
+\newblock In \emph{LICS}, 2002.
+
+\bibitem{swamy2016fstar}
+N.~Swamy, C.~Hri\c{t}cu, C.~Keller, A.~Rastogi, A.~Delignat-Lavaud, S.~Forest,
+K.~Bhargavan, C.~Fournet, P.-Y.~Strub, M.~Kohlweiss, J.-K.~Zinzindohou\'e, and
+S.~Zanella-B\'eguelin.
+\newblock Dependent types and multi-monadic effects in F$^{\star}$.
+\newblock In \emph{POPL}, 2016.
+
+\bibitem{swierstra2009hoare}
+W.~Swierstra.
+\newblock A Hoare logic for the state monad.
+\newblock In \emph{Theorem Proving in Higher Order Logics (TPHOLs)}, 2009.
+
+\bibitem{ullrich2019counting}
+S.~Ullrich and L.~de~Moura.
+\newblock Counting immutable beans: reference counting optimized for purely
+functional programming.
+\newblock In \emph{Implementation and Application of Functional Languages
+(IFL)}, 2019.
+\newblock \doi{10.1145/3412932.3412935}.
+
+\bibitem{wadler1992monads}
+P.~Wadler.
+\newblock The essence of functional programming.
+\newblock In \emph{POPL}, 1992.
+
+\end{thebibliography}
+
+\end{document}
