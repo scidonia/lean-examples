@@ -21,3 +21,5 @@ target a source term becomes.
 import Scidonia.RC.Syntax
 import Scidonia.RC.Pure
 import Scidonia.RC.Lower
+import Scidonia.RC.Target
+import Scidonia.RC.Ownership

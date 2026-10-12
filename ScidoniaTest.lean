@@ -12,3 +12,4 @@ import ScidoniaTest.RCHeap
 import ScidoniaTest.IRShape
 import ScidoniaTest.Run
 import ScidoniaTest.RC
+import ScidoniaTest.Target
