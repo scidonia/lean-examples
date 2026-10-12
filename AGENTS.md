@@ -182,6 +182,13 @@ The compile-time checks live in the check library:
   it where it exists (the bounds walk, the structured reader). A failed
   requirement fails the elaboration, so `lake build ScidoniaTest` is the gate; a
   detector weakened to match nothing fails the build rather than passing quietly.
+- `ScidoniaTest/Run.lean` checks the run model from outside: evaluated steps and
+  path resolutions on short heaps and programs, each with a pinned control beside
+  it — including a step a check turns away, which does not run; the countermodel
+  and its affirmative counterpart at the *same* heap and path, the pair's handle
+  held giving a count of two and a copy and the same update keeping its location
+  once it is dropped; the per-step and per-run theorems applied at concrete
+  sequences; and asserted `#print axioms` lists.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -840,6 +847,32 @@ no theorem here certifies a compiled write, and the compiler's lowering of
 `setLeaf` and `set` into this shape is stated as a trusted link rather than
 proved.
 
+`StateVar/Run.lean` is the per-run statement. A program is the sequence of steps
+a run performs — a read at a path, which returns a value and leaves the heap and
+the handle list alone, and a write at a path — and the write step *is* the
+executor's schema, defined rather than asserted about: at each array step the cell
+at hand is checked, the element is taken out (which is where a handle on the
+extracted reference appears), that handle is dropped **before** the focus check,
+the extracted focus is checked, the path below is walked in the heap the take-out
+left, and the element is put back; at the end of the path the addressed cell's
+slots are updated. A step a check turns away does not run at all, so a run is the
+sequence of the steps that ran. `Accept` is the invariant a run starts in and
+every step preserves: the heap is well formed and live, its counts are the
+aliasing counts, and the handles are the runner's own on the session's root
+followed by the references the issued read results hold — which name none, because
+the sealed observation universe has no location in it, so this is the interface's
+own non-escape law rather than a strengthening of it. The per-step theorem
+`writeStep_spec` is a structural induction on the path, for an arbitrary depth and
+with no fuel, and the per-run theorem `every_write_step_keeps_its_address` is an
+induction over the run: for any write in the program of an accepted run, the
+address the step resolved to holds the written slots afterwards, which is the
+destructive branch, since the copying branch would land them at a fresh location.
+The countermodel is the trap: the same schema with the pair's handle still held
+writes at a cell of count two and copies, while the same update keeps its location
+once the handle is dropped first. What it does not cover: a write whose check
+fails is not a step of any run, and the addressed cell's count after a whole step
+is not among the conclusions.
+
 `ScidoniaTest/IRShape.lean` is how that link is checked rather than trusted
 alone. It reads the post-reference-counting IR the pinned toolchain emitted for
 this build — `IR.findEnvDecl` returns a body for a declaration of this library
@@ -1021,6 +1054,7 @@ assertions that ship live in the `inplace` harness.
 | `Scidonia/FracPerm/StateVar/RefCount.lean` | The reference count as a write sees it: the model of `lean_inc_ref_n`/`lean_dec_ref` vendored from Lean 4, `IsExclusive`/`IsUnshared`, and the counter-level facts the write discipline rests on |
 | `Scidonia/FracPerm/StateVar/Footprint.lean` | The count of a reference in a presentation of the heap: `Ref`, `Node`, `Presentation`, `occurrences`/`refCount`/`Exclusive`, the take-out pair and aliasing facts, `Presentation.setSlots_occurrences`, the composition with `NoRef`, and `RuntimeAgrees` stated as a hypothesis |
 | `Scidonia/FracPerm/StateVar/RCHeap.lean` | The counted heap the lowering works over: `Cell`, `CHeap`, `Counted`/`WF`/`Live`, the allocation, increment, non-final decrement, final release and its cascade, and the update whose branch is the heap's own count |
+| `Scidonia/FracPerm/StateVar/Run.lean` | The per-run statement: the step sequence a run performs, the executor's write schema as a definition, the acceptance invariant, the per-step and per-run destructive-write theorems, and the un-dropped-pair countermodel |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -1034,6 +1068,7 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaTest/Footprint.lean` | The counted presentation's controls — evaluated counts with a pinned control beside each, the aliased-cell and second-handle countermodels with an affirmative counterpart at the same presentation, the composition with detachment, and the reverse runtime link pinned by the message `#check` emits |
 | `ScidoniaTest/RCHeap.lean` | The counted heap's controls — evaluated counts and both branches' locations, the duplicate-key and zero-count countermodels with affirmative counterparts at the same heap, and asserted axiom lists |
 | `ScidoniaTest/IRShape.lean` | The check over the compiler's own output: the post-reference-counting IR of the write paths read with `IR.findEnvDecl`, the shape and operand relations required of it on one executing path, and the borrowed-get control |
+| `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
