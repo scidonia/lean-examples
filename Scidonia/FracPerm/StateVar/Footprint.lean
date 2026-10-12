@@ -370,7 +370,7 @@ theorem handlesOf_count_eq_zero_of_detached {ℓ : Loc} {vs : List Value}
         (noRef_iff_refs_count ℓ v).mp (h v (by simp)),
         ih (fun w hw => h w (by simp [hw]))]
 
-/-! ## The composition: a detached run holds the root's one handle
+/-! ## The composition: a detached run's modelled handle list holds the root once
 
 The two hypotheses the theorem below takes are the two readings the module note
 names: that the presentation is the live heap, so no cell's slots name the root,
