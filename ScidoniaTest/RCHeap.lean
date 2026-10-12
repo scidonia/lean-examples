@@ -726,10 +726,18 @@ theorem release_chain_live : CHeap.Live (release chain [0] 0).1 :=
 theorem release_chain_freed : CHeap.count (release chain [0] 0).1 0 = 0 :=
   (release_live_and_freed chain_wf).2
 
+/-- The release's own cascade has stopped rather than run out: further steps leave
+the heap it returns as it is, at the heap that still lists a cell as well as at the
+empty one. -/
+theorem release_stable :
+    CHeap.cascadeSteps 4 (release shared [0, 1] 0).1 = (release shared [0, 1] 0).1 ∧
+      CHeap.cascadeSteps 4 (release chain [0] 0).1 = (release chain [0] 0).1 := by
+  refine ⟨by decide, by decide⟩
+
 /-
 The release's results as evaluated checks: the two heaps are empty, the occurrence
-the release drops was in the chain's slots before it ran, and the detector passes
-at the heaps it leaves.
+the release drops was in the chain's slots before it ran, the detector passes at the
+heaps it leaves, and further cascade steps leave the surviving heap as it is.
 -/
 #guard decide (release chain [0] 0 = ([], []))
 #guard decide (release leafHeap [1] 1 = ([], []))
@@ -737,6 +745,8 @@ at the heaps it leaves.
 #guard swept (release chain [0] 0).1
 #guard swept (release leafHeap [1] 1).1
 #guard swept (release shared [0, 1] 0).1
+#guard decide (CHeap.cascadeSteps 4 (release shared [0, 1] 0).1
+  = [(1, { slots := [], count := 1 })])
 
 /--
 error: Expression
@@ -803,6 +813,12 @@ info: 'Scidonia.FracPerm.StateVar.RCHeap.counted_cascade' depends on axioms: [pr
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms counted_cascade
+
+/--
+info: 'Scidonia.FracPerm.StateVar.RCHeap.CHeap.cascade_stable' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms CHeap.cascade_stable
 
 /--
 info: 'Scidonia.FracPerm.StateVar.RCHeap.counted_release' depends on axioms: [propext, Quot.sound]

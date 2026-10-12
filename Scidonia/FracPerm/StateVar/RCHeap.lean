@@ -85,11 +85,17 @@ count of zero, so a reference the released cell named is dropped by this same
 operation and the cell it names is freed when its own count reaches zero. The
 repetition is `CHeap.cascadeSteps`, a recursion on the number of steps that a
 concrete heap's cascade is a value of, run for as many steps as the heap has
-cells — enough, because a step that deallocates removes one. The order in which
-the cascade deallocates is the heap's own list order; what is modelled is the heap
-it leaves, in which no listed cell carries a count of zero and every count is the
-occurrences and handles that remain. A release therefore leaves no orphaned
-occurrence: a reference a freed cell named is dropped with it.
+cells — `CHeap.cascade c` is `CHeap.cascadeSteps c.length c`. What is proved of
+that budget is that it suffices and that it is not a cutoff: a step that
+deallocates removes one cell (`CHeap.length_dealloc_lt`), so no counted-zero cell
+is left within as many steps as the heap has cells (`CHeap.live_cascadeSteps`), and
+the heap the run returns is a fixpoint of its own step
+(`CHeap.cascade_stable`). What is not proved is that the result is independent of
+the order in which the deallocations are taken: the step deallocates the first
+counted-zero cell the heap lists, and the theorems are about what that run leaves —
+no listed cell with a count of zero, every count the occurrences and handles that
+remain — and not about a heap some other order would leave. A release therefore
+leaves no orphaned occurrence: a reference a freed cell named is dropped with it.
 
 The two branches of `update` are the model of the lowering's
 `isExclusiveUnsafe` / `lean_array_uset` decision, and the model's decision is the
@@ -1385,8 +1391,16 @@ def CHeap.cascadeSteps : Nat → CHeap → CHeap
       | none => c
 
 /-- The drop cascade: the deallocation repeated for as many steps as the heap has
-cells, which is enough — a step that deallocates removes one cell, so a heap of `n`
-cells reaches one with no counted-zero cell within `n` steps.
+cells — `CHeap.cascadeSteps c.length c`.
+
+The budget is not a cutoff. `CHeap.length_dealloc_lt` is why it is enough: a step
+that deallocates removes one cell, so a heap of `n` cells has no counted-zero cell
+left within `n` steps, which is `CHeap.live_cascadeSteps`. And the run has stopped
+rather than run out: the heap `cascade` returns is a fixpoint of its own step —
+`CHeap.cascade_stable`, from `CHeap.live_cascade` — so no number of further steps
+changes it. The two step equations are `CHeap.cascadeSteps_eq_none`, a heap with no
+counted-zero cell is left as it is, and `CHeap.cascadeSteps_succ_some`, a step that
+finds one deallocates it.
 
 This is the second half of the runtime's cold path. The released cell's
 deallocation (`CHeap.dealloc`) lowered the counts of the cells its slots named by
@@ -1535,6 +1549,16 @@ deallocation removes a reference rather than adding one. -/
 theorem CHeap.count_cascade_of_not_mem {c : CHeap} {x : Ref} (hx : x ∉ CHeap.refs c) :
     CHeap.count (CHeap.cascade c) x = 0 :=
   CHeap.count_cascadeSteps_of_not_mem c.length hx
+
+/-- The cascade is a fixpoint of its own step: any number of further steps leaves
+the heap it returned as it is. The step budget is therefore a bound the run has
+run to, not a cutoff it stopped at — the heap `cascade` returns carries no
+counted-zero cell, which is `CHeap.live_cascade`. -/
+theorem CHeap.cascade_stable (n : Nat) (c : CHeap) :
+    CHeap.cascadeSteps n (CHeap.cascade c) = CHeap.cascade c := by
+  induction n with
+  | zero => rfl
+  | succ n _ => exact CHeap.cascadeSteps_eq_none (CHeap.live_cascade c)
 
 /-! ## The operations on a count
 
