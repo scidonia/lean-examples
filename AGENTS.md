@@ -189,6 +189,17 @@ The compile-time checks live in the check library:
   held giving a count of two and a copy and the same update keeping its location
   once it is dropped; the per-step and per-run theorems applied at concrete
   sequences; and asserted `#print axioms` lists.
+- `ScidoniaTest/RC.lean` checks the calculus and the lowering from outside:
+  evaluated steps and evaluated translations on small terms with a pinned control
+  beside every guard, including the capture pair — a closed term reading its
+  definition-time value beside an open term that demonstrably captures — the
+  non-value-argument case, a term needing a `dup` and one needing a `drop`, and
+  asserted `#print axioms` lists.
+- `ScidoniaTest/Target.lean` checks the target runtime from outside: evaluated runs
+  on small counted heaps with a control beside each, the owned store keeping its
+  location beside the shared store copying at the *same* heap and term, each of the
+  target's evaluation contexts exercised with a negative control, the refusal of the
+  mis-tagged multiplicity pair, and asserted `#print axioms` lists.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -905,7 +916,89 @@ shows to be sufficient. And a `run_cmd` whose file retains an earlier elaboratio
 error may still be elaborated and print a plausible report, so a green report
 from a run that also reported an earlier error is void, and a check whose printed
 report is its evidence shows that it can fail by being perturbed and observed to
-throw.
+throw. And a term type that carries a list of its own subterms is a **nested
+inductive**, on which this toolchain's `induction` will not work ("does not support
+the type … because it is a nested inductive type") and `deriving DecidableEq` will
+not either ("None of the deriving handlers for class `DecidableEq` applied") — so a
+syntax that proofs must induct over is written flat, with scalars and subterms as
+direct fields, as `Scidonia/RC/Syntax.lean`'s `Expr` is.
+
+## The pure calculus, its reference-counted image, and the lowering between them
+
+`Scidonia/RC/` formalises the lowering the repository's claim rests on, in the shape
+the literature gives it: λ¹ from Reinking, Xie, de Moura and Leijen, *Perceus:
+Garbage Free Reference Counting with Reuse* (PLDI 2021) — a pure source calculus, a
+reference-counted one, and the strategy between them.
+
+`Syntax.lean` holds the one term type both use: the source constructs, `dup` and
+`drop` (which only derivations produce), nodes, and `store` — the write, at a slot
+index. It is **flat**, with no list of subterms, because a nested inductive cannot
+be inducted on here (see the toolchain facts above). `Pure` is the fragment with no
+`dup`/`drop`, the source language; `uses` and `Closed` are its free-variable
+account.
+
+`Pure.lean` is the source's semantics: the paper's strict reduction with evaluation
+contexts, over *substitution*, and its discipline is **closedness**. Substitution
+here is naive and capture-free exactly on closed terms — a term inserted for a
+variable has no free variable for a binder to capture — and that is a theorem
+(`uses_subst_of_closed`, with `step_preserves_closed` carrying the discipline
+through the reduction), not a claim. An open term reduces by the same rules and can
+capture; the module says so and exhibits the case. `step_deterministic`,
+`value_canonical` and `step_iff_ectx` are the standard facts.
+
+`Lower.lean` is the lowering **strategy**: a syntax-directed derivation from a
+borrowed and an owned environment to a target term, `dup` inserted where an owned
+variable is used more than once and `drop` where it is unused, proving **totality**
+(`lower_total`) and **determinism** (`lower_deterministic`). The splits are
+canonical *functions* rather than existentials, which is what makes determinism
+true: with an arbitrary split of the environment between two subterms the same
+`dup` could be placed on either side and the targets would differ. The relation is
+therefore the graph of the canonical strategy — a syntax-directed specialisation of
+Figures 5 and 8, not the paper's declarative relation over arbitrary splits — and
+the module says so.
+
+`Target.lean` is the target's runtime: a configuration of heap, run handles,
+environment, the term's own multiplicity account and the term, with λ¹'s own
+evaluation contexts (its heap semantics is context-based) over this repository's
+counted heap. `store` is `RCHeap.update` at the subject's cell with one slot set,
+so its branch is the heap's own count, and `dup`/`drop` are the count operations.
+One limit is stated: a node construction standing alone as a whole program has no
+step, the term language having no location form for its result.
+
+`Ownership.lean` is the account the claim needs. `Couple` says the heap is well
+formed, its counts are `Counted`'s at the run's handles together with the term's
+own references, and each multiplicity pair names **exactly** the reference its
+environment binding has (`Bound`, not the weaker "some binding" — the weak form
+admits a mis-tagged pair and makes the store theorems arithmetic). `Owns` is
+**term-indexed**: it validates the account against the current expression, and a
+store step's premise reads the subject's occurrence out of it. `couple_step` carries
+the invariant through every step, contexts included. Then the pair that is the
+honest form of the claim inside the calculus:
+
+* `store_owned_is_destructive` — a store whose subject the term holds once, with no
+  heap slot and no run handle naming that cell, is at a count of one, so
+  `RCHeap.update` takes its destructive branch and the cell keeps its location. Two
+  of its hypotheses are **not derivable in the module** and are named: no slot
+  naming the cell and no run handle naming it are what the discipline's take-out
+  provides — `Run.writeStep`'s take-out empties the slot, and the pair's handle is
+  dropped before the focus check (`RCHeap.takeout_dropped_count_one`).
+* `store_shared_copies` — a store whose subject the account counts above one, or
+  whose cell a heap slot also names, is at a count other than one, so the written
+  slots land at a fresh location and the old cell keeps its slots and loses a
+  reference.
+
+In λRC a store is destructive **exactly when its operand is owned at multiplicity
+one**, and a subject another reference also names copies. So "every write in an
+accepted program is destructive" reduces to "in the lowered term every store's
+subject is owned" — a surface-side statement, which is not built here.
+
+What is *not* claimed: no theorem relates the two calculi semantically — that the
+target's reduction preserves the source's, or that it is garbage free — so the
+lowering is shown to be a total deterministic strategy and not a correct one; and
+nothing here is about compiled code. The runtime's own decision is
+`lean_is_exclusive` inside `lean_array_uset`, the compiler's lowering of this
+repository's write paths into this shape is checked by `ScidoniaTest/IRShape.lean`
+and otherwise trusted, and the `Ref`s are names in a list, not addresses.
 
 ## The in-place check in the generated C
 
@@ -1055,6 +1148,12 @@ assertions that ship live in the `inplace` harness.
 | `Scidonia/FracPerm/StateVar/Footprint.lean` | The count of a reference in a presentation of the heap: `Ref`, `Node`, `Presentation`, `occurrences`/`refCount`/`Exclusive`, the take-out pair and aliasing facts, `Presentation.setSlots_occurrences`, the composition with `NoRef`, and `RuntimeAgrees` stated as a hypothesis |
 | `Scidonia/FracPerm/StateVar/RCHeap.lean` | The counted heap the lowering works over: `Cell`, `CHeap`, `Counted`/`WF`/`Live`, the allocation, increment, non-final decrement, final release and its cascade, and the update whose branch is the heap's own count |
 | `Scidonia/FracPerm/StateVar/Run.lean` | The per-run statement: the step sequence a run performs, the executor's write schema as a definition, the acceptance invariant, the per-step and per-run destructive-write theorems, and the un-dropped-pair countermodel |
+| `Scidonia/RC/` | The formalisation of the lowering: a pure calculus, a reference-counted one, the strategy between them, and the target runtime with its ownership account |
+| `Scidonia/RC/Syntax.lean` | The one flat term type both calculi use — the source constructs, `dup`/`drop`, nodes and the write — with `Pure`, `uses` and `Closed` |
+| `Scidonia/RC/Pure.lean` | The source semantics: strict reduction with evaluation contexts over substitution, its closedness discipline, determinism and canonicity |
+| `Scidonia/RC/Lower.lean` | The lowering strategy: the syntax-directed derivation with its canonical splits, and its totality and determinism |
+| `Scidonia/RC/Target.lean` | The target runtime: configurations over the counted heap, λ¹'s evaluation contexts, and `store` as `RCHeap.update` |
+| `Scidonia/RC/Ownership.lean` | The coupling invariant, the term-indexed ownership relation, and the two store theorems |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -1069,6 +1168,8 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaTest/RCHeap.lean` | The counted heap's controls — evaluated counts and both branches' locations, the duplicate-key and zero-count countermodels with affirmative counterparts at the same heap, and asserted axiom lists |
 | `ScidoniaTest/IRShape.lean` | The check over the compiler's own output: the post-reference-counting IR of the write paths read with `IR.findEnvDecl`, the shape and operand relations required of it on one executing path, and the borrowed-get control |
 | `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
+| `ScidoniaTest/RC.lean` | The calculus's controls — evaluated steps and translations with a control beside each, the capture pair, and asserted axiom lists |
+| `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
