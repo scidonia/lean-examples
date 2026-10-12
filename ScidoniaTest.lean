@@ -7,3 +7,4 @@ import ScidoniaTest.Slot
 import ScidoniaTest.Model5
 import ScidoniaTest.Sealed
 import ScidoniaTest.Count
+import ScidoniaTest.Footprint
