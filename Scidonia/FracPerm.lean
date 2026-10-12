@@ -20,3 +20,4 @@ import Scidonia.FracPerm.StateVar.Sealed
 import Scidonia.FracPerm.StateVar.RefCount
 import Scidonia.FracPerm.StateVar.Footprint
 import Scidonia.FracPerm.StateVar.RCHeap
+import Scidonia.FracPerm.StateVar.Run
