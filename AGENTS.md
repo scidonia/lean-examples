@@ -144,6 +144,26 @@ The compile-time checks live in the check library:
   repository's own facts are asserted rather than printed — each `#guard_msgs`
   pins the list `#print axioms` emits, so any other axiom fails the build — and
   the file's own proofs use `grind`, `simp` and `decide`, which add none.
+- `ScidoniaTest/Footprint.lean` checks `Scidonia.FracPerm.StateVar.Footprint`
+  from outside, in the same style. Its behavioural checks are `#guard`s of
+  evaluated counts on small presentations — a chain of cells read from one
+  handle, a store whose two slots name one cell, a store plus a second handle, a
+  store that names no cell, and one cell's slots cut — each with a control
+  beside it: a false equation of the same shape whose message is pinned, so a
+  guard is shown to fire rather than to pass whatever it is given. Its negative
+  controls are theorems about specific presentations — the aliased cell and the
+  second-handle chain are not exclusive — and each stands beside an affirmative
+  control at the *same* presentation, the root the one handle names, so the
+  negative is about the reference and not about the presentation being rejected
+  everywhere. Its affirmative structural controls apply the single-handle, pair
+  and one-cell-write theorems at those presentations and read both sides of the
+  discipline theorem off one call. Its composition checks apply the
+  detached-issues theorem at a store and a detached value list, and its
+  countermodel gives the same shape a value that names the root. `#print axioms`
+  is asserted for representative theorems, and the runtime link's reverse
+  direction is pinned by the message `#check` emits, so a statement under that
+  name that changes fails the build. The runtime link itself is never
+  constructed: the checks take it as a hypothesis.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -716,6 +736,64 @@ kept where the vendoring forces it:
   classification above, and the same probe is owed by any check that depends on
   what a tactic trusts.
 
+## The count of a reference in a presentation
+
+`Scidonia/FracPerm/StateVar/Heap.lean` models one root cell as `Loc → Option σ`
+with an opaque state `σ`. It has no vocabulary in which two handles, or two
+slots, can name the same object, so it cannot say what a reference count is.
+`StateVar/Footprint.lean` adds that vocabulary. A *presentation* lists the live
+cells, each an observation leaf of the closed universe — which names no further
+reference — or a cell whose *slots* are references; a reference is counted once
+per occurrence, so a slot list naming one cell twice contributes it twice.
+
+The count is a definition, not an assumption. `Presentation.occurrences` counts
+one reference's occurrences among the live cells' slots, and `refCount p handles
+r` is that count plus its occurrences among the handles held outside the store —
+the runner's own handle, a caller's binding, a live temporary. `Exclusive p
+handles r` is `refCount p handles r = 1`. The facts the write test rests on
+follow from the definition: `refCount_single_handle`, that one handle to a
+reference no slot names is one live reference; `refCount_pair_of_no_slot` and the
+unconditional `not_exclusive_pair`, the take-out pair, whose two handles are two
+references whatever the store names; the aliasing pair
+`not_exclusive_of_two_occurrences` and `not_exclusive_of_slot_and_handle`; and
+`pair_needs_the_drop`, which states the two sides of the discipline theorem at
+one presentation. Writing one cell's slots is the elementary step the counts are
+read after: `Presentation.setSlots_occurrences` moves the count of a reference by
+exactly the changed cell's contribution and leaves every other cell's
+contribution alone.
+
+The counted layer composes with what the interface has already proved. The
+class's `observe_detached` says a primitive observation of a valid state encodes
+without a reference to the root it read, and `StateVar/Heap.lean` carries that
+law through a read of the model's root as `read_at_detached`. `Value.refs` is the
+references an encoded value names and `noRef_iff_refs_count` reads `NoRef` as
+that list's count being zero, so `readAt_result_holds_no_handle` is the
+interface's law at the counted layer and `handlesOf_count_eq_zero_of_detached`
+says a run whose every issued read result is detached holds no handle on the
+root. `refCount_one_of_detached_issues` is the composition: no slot naming the
+root and no issued value naming it leaves the runner's own one handle, so the
+count is one. `not_exclusive_of_issued_loc` is the same shape with a value that
+names the root, whose count is two.
+
+Two readings are hypotheses, not theorems, and the module says so. The first is
+that the presentation *is* the live heap — that the cells listed are exactly the
+live cells and no live reference is left out; nothing here constructs such a
+presentation from a program. The second is `RuntimeAgrees`, that a model state of
+one live reference means the count the runtime holds passes
+`RefCount.IsExclusive`. It appears only as a hypothesis of the theorems that use
+it, no instance of it is constructed in the module or in its checks, and no
+bridge from it to the runtime is derived. What the surrounding work does not say
+is unchanged: no theorem certifies that a compiled write updates in place, that a
+copy happens when it does not, or anything about Lean's object graph, its
+allocation, or the compiler's reset/reuse pass. The `Ref`s are `Nat` names into a
+list, not addresses, and the counts are logical counts of occurrences, not
+machine words. Relating the presentation to a layout's `State d`, so that the
+schema's `setLeaf` and take-out have count theorems, is the remaining step of
+`FracPerm_Linearity_Proposal.md` §4 S5; the correspondence links of that step
+stay outside this module.
+
+`ScidoniaTest/Footprint.lean` is where a client's view of it is checked.
+
 ## The in-place check in the generated C
 
 `HSt.write` runs the object's `check` on the operation and the state before
@@ -861,6 +939,7 @@ assertions that ship live in the `inplace` harness.
 | `Scidonia/FracPerm/StateVar/Layout5.lean` | Model 5: the observation universe and layouts, paths, the zipper, `read?`/`setLeaf`, and the lawful adapter |
 | `Scidonia/FracPerm/StateVar/Sealed.lean` | `SealedStateVar`: a layout state's type as the whole interface, with the read and the write defined by the library and the derived lawful instance |
 | `Scidonia/FracPerm/StateVar/RefCount.lean` | The reference count as a write sees it: the model of `lean_inc_ref_n`/`lean_dec_ref` vendored from Lean 4, `IsExclusive`/`IsUnshared`, and the counter-level facts the write discipline rests on |
+| `Scidonia/FracPerm/StateVar/Footprint.lean` | The count of a reference in a presentation of the heap: `Ref`, `Node`, `Presentation`, `occurrences`/`refCount`/`Exclusive`, the take-out pair and aliasing facts, `Presentation.setSlots_occurrences`, the composition with `NoRef`, and `RuntimeAgrees` stated as a hypothesis |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -871,6 +950,7 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaTest/Model5.lean` | Model 5's reads, zipper laws, frames and snapshots, the whole-array rejection, and the old class's countermodel |
 | `ScidoniaTest/Sealed.lean` | `SealedStateVar`'s reads, writes and theorems at its instances, the rejection of an `observe`/`encodeRead`/mismatched-`rep` instance, and the countermodel comparison |
 | `ScidoniaTest/Count.lean` | The count module's controls — the two tests on counts that tell them apart, the hazard pair `1 → 2 → 1`, and the take-out at the counts a one-reference cell hands out — and `#print axioms` on the representative theorems |
+| `ScidoniaTest/Footprint.lean` | The counted presentation's controls — evaluated counts with a pinned control beside each, the aliased-cell and second-handle countermodels with an affirmative counterpart at the same presentation, the composition with detachment, and the reverse runtime link pinned by the message `#check` emits |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
