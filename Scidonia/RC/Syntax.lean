@@ -18,11 +18,15 @@ lands:
 * Abstraction is a node of its own (`lam`). The paper's source rule that reduces
   an application is `(λx. e) v ⟶ e[x := v]`, so a term has to be able to write
   the abstraction.
-* The pattern match scrutinises a *variable* (`matchC`), as the resource
-  derivation of the paper writes it, and its one arm carries the constructor tag
-  it answers to, the variables its binders are named by, and its body. The
-  binders receive the fields of the matched node.
-* `store` is this repository's write: slot `i` of the node a variable names is
+* The pattern match scrutinises a *term* (`matchC`), as the paper's
+  `case e { C x̄ → e′ }` writes it, and its one arm carries the constructor tag it
+  answers to, the variables its binders are named by, and its body. The reduction
+  of `Scidonia.RC.Pure` demands the subject be a node — the subject is a value
+  position of the A-normal form — and the binders receive its fields. The subject
+  is a term rather than a name because the reduction is a substitution semantics:
+  a subject that is a name is resolved by the substitution of the binding that
+  introduces it, which requires the syntax to hold a term there.
+* `store` is this repository's write: slot `i` of the node the subject has is
   replaced by a value. It is the construct the whole claim lives in — whether
   that replacement lands in the node or in a copy of it is decided by the
   reference count of the node, which the target calculus and its semantics carry
@@ -60,8 +64,8 @@ Constructors are tags (`Ctor`), and a node's slots are their fields; nothing her
 says what a tag is, and no arity is enforced, so a tag may be written at more
 than one of the three forms in one term. A variable is a natural number, and
 binders are not required to be distinct: a later binder of a name shadows an
-earlier one, as the environment semantics of `Scidonia.RC.Pure` reads it, and the
-usage counts of `Scidonia.RC.Lower` read it the same way. An arm's binders are a
+earlier one, as the substitution of `Scidonia.RC.Pure` reads it, and the usage
+counts of `Scidonia.RC.Lower` read it the same way. An arm's binders are a
 list of names rather than a list of subterms, which is what keeps the match flat.
 
 Nothing here is a theorem about a program: the module fixes a language, its
@@ -89,13 +93,13 @@ abbrev Ctor := Nat
 | `lam x body` | `λx. body` | the abstraction binding `x` in `body` |
 | `app f a` | `f a` | application |
 | `bind x e₁ e₂` | `val x = e₁; e₂` | evaluate `e₁`, bind it to `x`, then run `e₂` |
-| `matchC x c ys body` | `match x { C ȳ → e }` | scrutinise the node `x` names against the arm for the tag `c` |
+| `matchC s c ys body` | `case s { C ȳ → e }` | scrutinise `s` against the arm for the tag `c` |
 | `dup x e` | `dup x; e` | a further owned occurrence of `x`, then `e` |
 | `drop x e` | `drop x; e` | release the owned occurrence of `x`, then `e` |
 | `con0 c` | `C` | the nullary node `c` |
 | `con1 c a` | `C a` | the unary node `c` with field `a` |
 | `con2 c a b` | `C a b` | the binary node `c` with fields `a` and `b` |
-| `store x i v` | — | slot `i` of the node `x` names is set to `v` |
+| `store s i v` | — | slot `i` of the node `s` is set to `v` |
 
 An arm binds the variables of `ys` to the fields of the matched node, in order.
 The match takes the arm whose tag is the node's; there is one arm, which is what
@@ -109,9 +113,9 @@ inductive Expr where
   | app (f a : Expr)
   /-- The binding `val x = e₁; e₂`: evaluate `e₁`, bind it to `x`, then run `e₂`. -/
   | bind (x : Var) (e₁ e₂ : Expr)
-  /-- The match `match x { c ȳ → body }`, scrutinising the node the variable `x`
-  names against the arm for the tag `c` and binding the node's fields to `ys`. -/
-  | matchC (x : Var) (c : Ctor) (ys : List Var) (body : Expr)
+  /-- The match `match s { c ȳ → body }`, scrutinising the term `s` against the
+  arm for the tag `c` and binding the matched node's fields to `ys`. -/
+  | matchC (s : Expr) (c : Ctor) (ys : List Var) (body : Expr)
   /-- `dup x; e`: a further owned occurrence of `x`, then `e`. Written only by a
   lowering: the source fragment `Pure` excludes it. -/
   | dup (x : Var) (e : Expr)
@@ -124,8 +128,8 @@ inductive Expr where
   | con1 (c : Ctor) (a : Expr)
   /-- The binary node `c` with fields `a` and `b`. -/
   | con2 (c : Ctor) (a b : Expr)
-  /-- The write: slot `i` of the node the variable `x` names is set to `v`. -/
-  | store (x : Var) (i : Nat) (v : Expr)
+  /-- The write: slot `i` of the node `s` is set to `v`. -/
+  | store (s : Expr) (i : Nat) (v : Expr)
   deriving DecidableEq, Repr
 
 /-- The source fragment λPure: the terms that mention no `dup` and no `drop`
@@ -139,17 +143,17 @@ inductive Pure : Expr → Prop where
   | app {f a : Expr} (hf : Pure f) (ha : Pure a) : Pure (.app f a)
   /-- A binding is pure exactly when its two subterms are. -/
   | bind {x : Var} {e₁ e₂ : Expr} (h₁ : Pure e₁) (h₂ : Pure e₂) : Pure (.bind x e₁ e₂)
-  /-- A match is pure exactly when its arm's body is. -/
-  | matchC {x : Var} {c : Ctor} {ys : List Var} {body : Expr} (h : Pure body) :
-      Pure (.matchC x c ys body)
+  /-- A match is pure exactly when its subject and its arm's body are. -/
+  | matchC {s : Expr} {c : Ctor} {ys : List Var} {body : Expr} (hs : Pure s)
+      (h : Pure body) : Pure (.matchC s c ys body)
   /-- A nullary node is pure. -/
   | con0 (c : Ctor) : Pure (.con0 c)
   /-- A unary node is pure exactly when its field is. -/
   | con1 {c : Ctor} {a : Expr} (h : Pure a) : Pure (.con1 c a)
   /-- A binary node is pure exactly when its two fields are. -/
   | con2 {c : Ctor} {a b : Expr} (h₁ : Pure a) (h₂ : Pure b) : Pure (.con2 c a b)
-  /-- A write is pure exactly when its value is. -/
-  | store {x : Var} {i : Nat} {v : Expr} (h : Pure v) : Pure (.store x i v)
+  /-- A write is pure exactly when its subject and its value are. -/
+  | store {s : Expr} {i : Nat} {v : Expr} (hs : Pure s) (h : Pure v) : Pure (.store s i v)
 
 /-- Whether a term is a term of the source fragment: no `dup` and no `drop`
 anywhere. The recursion is structural on the term, so the kernel reduces it at a
@@ -159,13 +163,13 @@ def pureB : Expr → Bool
   | .lam _ body => pureB body
   | .app f a => pureB f && pureB a
   | .bind _ e₁ e₂ => pureB e₁ && pureB e₂
-  | .matchC _ _ _ body => pureB body
+  | .matchC s _ _ body => pureB s && pureB body
   | .dup _ _ => false
   | .drop _ _ => false
   | .con0 _ => true
   | .con1 _ a => pureB a
   | .con2 _ a b => pureB a && pureB b
-  | .store _ _ v => pureB v
+  | .store s _ v => pureB s && pureB v
 
 /-- The decidable test of purity agrees with `Pure`, so a term's purity is
 decided by evaluating `pureB` at it. -/
@@ -190,9 +194,14 @@ theorem pureB_iff : ∀ (e : Expr), pureB e = true ↔ Pure e
         (fun h => by
           cases h with
           | bind h₁ h₂ => rw [pureB, Bool.and_eq_true]; exact ⟨(pureB_iff e₁).mpr h₁, (pureB_iff e₂).mpr h₂⟩)
-  | .matchC x c ys body =>
-      Iff.intro (fun h => Pure.matchC ((pureB_iff body).mp h))
-        (fun h => by cases h with | matchC h => exact (pureB_iff body).mpr h)
+  | .matchC s c ys body =>
+      Iff.intro
+        (fun h => by
+          rw [pureB, Bool.and_eq_true] at h
+          exact Pure.matchC ((pureB_iff s).mp h.1) ((pureB_iff body).mp h.2))
+        (fun h => by
+          cases h with
+          | matchC hs h => rw [pureB, Bool.and_eq_true]; exact ⟨(pureB_iff s).mpr hs, (pureB_iff body).mpr h⟩)
   | .dup x e => Iff.intro (fun h => by simp [pureB] at h) (fun h => by cases h)
   | .drop x e => Iff.intro (fun h => by simp [pureB] at h) (fun h => by cases h)
   | .con0 c => Iff.intro (fun _ => Pure.con0 c) (fun _ => rfl)
@@ -207,9 +216,14 @@ theorem pureB_iff : ∀ (e : Expr), pureB e = true ↔ Pure e
         (fun h => by
           cases h with
           | con2 h₁ h₂ => rw [pureB, Bool.and_eq_true]; exact ⟨(pureB_iff a).mpr h₁, (pureB_iff b).mpr h₂⟩)
-  | .store x i v =>
-      Iff.intro (fun h => Pure.store ((pureB_iff v).mp h))
-        (fun h => by cases h with | store h => exact (pureB_iff v).mpr h)
+  | .store s i v =>
+      Iff.intro
+        (fun h => by
+          rw [pureB, Bool.and_eq_true] at h
+          exact Pure.store ((pureB_iff s).mp h.1) ((pureB_iff v).mp h.2))
+        (fun h => by
+          cases h with
+          | store hs h => rw [pureB, Bool.and_eq_true]; exact ⟨(pureB_iff s).mpr hs, (pureB_iff v).mpr h⟩)
 
 /-- Purity is decidable at a concrete term, because `pureB` is a boolean
 recursion. -/
@@ -231,11 +245,12 @@ theorem pure_bind_iff (x : Var) (e₁ e₂ : Expr) :
   Iff.intro (fun h => by cases h with | bind h₁ h₂ => exact ⟨h₁, h₂⟩)
     (fun h => Pure.bind h.1 h.2)
 
-/-- A match is pure exactly when its arm's body is: its binders are names, and a
-name is not a term. -/
-theorem pure_matchC_iff (x : Var) (c : Ctor) (ys : List Var) (body : Expr) :
-    Pure (.matchC x c ys body) ↔ Pure body :=
-  Iff.intro (fun h => by cases h with | matchC h => exact h) (fun h => Pure.matchC h)
+/-- A match is pure exactly when its subject and its arm's body are: its binders
+are names, and a name is not a term. -/
+theorem pure_matchC_iff (s : Expr) (c : Ctor) (ys : List Var) (body : Expr) :
+    Pure (.matchC s c ys body) ↔ Pure s ∧ Pure body :=
+  Iff.intro (fun h => by cases h with | matchC hs h => exact ⟨hs, h⟩)
+    (fun h => Pure.matchC h.1 h.2)
 
 /-- A unary node is pure exactly when its field is. -/
 theorem pure_con1_iff (c : Ctor) (a : Expr) : Pure (.con1 c a) ↔ Pure a :=
@@ -246,10 +261,11 @@ theorem pure_con2_iff (c : Ctor) (a b : Expr) : Pure (.con2 c a b) ↔ Pure a �
   Iff.intro (fun h => by cases h with | con2 h₁ h₂ => exact ⟨h₁, h₂⟩)
     (fun h => Pure.con2 h.1 h.2)
 
-/-- A write is pure exactly when its value is: its target is a variable and its
-slot index is a number, and neither is a term. -/
-theorem pure_store_iff (x : Var) (i : Nat) (v : Expr) : Pure (.store x i v) ↔ Pure v :=
-  Iff.intro (fun h => by cases h with | store h => exact h) (fun h => Pure.store h)
+/-- A write is pure exactly when its subject and its value are: its slot index is
+a number, and a number is not a term. -/
+theorem pure_store_iff (s : Expr) (i : Nat) (v : Expr) : Pure (.store s i v) ↔ Pure s ∧ Pure v :=
+  Iff.intro (fun h => by cases h with | store hs h => exact ⟨hs, h⟩)
+    (fun h => Pure.store h.1 h.2)
 
 /-- A nullary node is pure. -/
 theorem pure_con0 (c : Ctor) : Pure (.con0 c) := Pure.con0 c

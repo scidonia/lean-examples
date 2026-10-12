@@ -4,10 +4,11 @@ The reference-counted slice: the calculus λPure, its reference-counted image
 
 `Scidonia.RC.Syntax` carries the one syntax the two calculi share and the
 predicate that picks the source fragment out of it; `Scidonia.RC.Pure` carries
-the source calculus's own reduction, its determinism and the purity the fragment
-is named for; `Scidonia.RC.Lower` carries the lowering's relation, the
-syntax-directed strategy that realises it, and the totality and determinism that
-make the strategy a function of the environments.
+the source calculus's own reduction as a substitution semantics, its determinism
+and the purity the fragment is named for; `Scidonia.RC.Lower` carries the graph
+of the canonical syntax-directed strategy — the specialisation of the paper's
+lowering this slice realises — and the totality and determinism that make the
+strategy a function of the environments.
 
 The slice's role in this repository is the write. A node's slot is replaced by a
 value, and whether that replacement lands in the node or in a copy of it is

@@ -1,10 +1,10 @@
 /-
 The lowering from the source calculus λPure to the reference-counted target λRC:
-the relation `Lower` of Reinking, Xie, de Moura and Leijen, *Perceus: Garbage
-Free Reference Counting with Reuse* (PLDI 2021) Figures 5 and 8, the
-syntax-directed strategy that realises it, and the two facts that make the
-strategy a function of the environments: it is total on the source fragment, and
-it answers at most one target.
+the graph of a canonical, syntax-directed strategy — a specialisation of, and
+inspired by, Reinking, Xie, de Moura and Leijen, *Perceus: Garbage Free Reference
+Counting with Reuse* (PLDI 2021) Figures 5 and 8 — and the two facts that make
+the strategy a function of the environments: it is total on the source fragment,
+and it answers at most one target.
 
 The judgement is `Δ | Γ ⊢ e ⇝ e′`. `Δ` is the *borrowed* environment — the
 occurrences the enclosing context owns and lends, which the term may use any
@@ -15,6 +15,18 @@ puts them there: `dup x; e` for a use the owned environment does not supply, and
 `drop x; e` for an owned occurrence the term does not use. A source term writes
 neither, which is what `Pure` in `Scidonia.RC.Syntax` says, so `Lower` has a rule
 for every construct of the source and none for a `dup` or a `drop` node.
+
+**What `Lower` is, and what it is not.** `Lower` is the graph of the strategy
+below: one constructor per construct, each rule's splits written with the
+functions the next paragraphs define rather than by an existential, and
+`lowerB_sound`/`lowerB_complete` proving that `Lower Δ Γ e e′` holds exactly when
+`lowerB Δ Γ e` answers `e′`. It is therefore *not* the paper's declarative
+relation of Figures 5 and 8 over arbitrary environment splits: it is that
+relation's canonical, syntax-directed account, the one a strategy realises. The
+determinism below is a property of *this* relation, and an ownership or
+consumption statement about its outputs is a statement about *this* strategy's
+outputs and not about every Figure 5 derivation; the unrestricted relation, if a
+later module needs it, is not this one.
 
 **The environments.** Both are lists of variable occurrences (`Occs`), read as
 multisets: what matters is how many occurrences of a name a list holds, and the
@@ -43,14 +55,16 @@ are the two instructions of Figures 5 and 8 in their usual positions.
 
 ## What is proved
 
-* `lowerB_sound` and `lowerB_complete`: the strategy's graph is the relation, so
+* `lowerB_sound` and `lowerB_complete`: the relation is the strategy's graph, so
   `Lower Δ Γ e e′` holds exactly when `lowerB Δ Γ e` answers `e′`.
 * `lowerB_total`: the strategy answers for every term of the source fragment
-  under every environment that fits it — which is why `Lower` is total.
-* `lower_total`: every pure expression has a lowering from the environments that
-  fit it (`Fits`: every variable the term uses is owned or borrowed somewhere).
+  under every environment that fits it — which is why this relation is total.
+* `lower_total`: every pure expression has a lowering of this strategy from the
+  environments that fit it (`Fits`: every variable the term uses is owned or
+  borrowed somewhere).
 * `lower_deterministic`: any two lowerings of one expression from the same
-  borrowed and owned environments produce the same target.
+  borrowed and owned environments produce the same target — a property of this
+  strategy's relation, whose rules write their splits with the functions below.
 
 ## What is modelled, and what is not
 
@@ -84,26 +98,28 @@ abbrev Occs := List Var
 
 The free occurrences of a variable in a term, as a list read for its
 multiplicities. A binder removes its name's occurrences from its scope, which is
-the shadowing `Scidonia.RC.Syntax` leaves in the syntax and
-`Scidonia.RC.Pure`'s environment reads the same way. -/
+the shadowing `Scidonia.RC.Syntax` leaves in the syntax and the substitution of
+`Scidonia.RC.Pure` reads the same way. -/
 
 /-- The free occurrences of a variable, as a multiset in list form. A binder's
 name is removed from the whole of its scope, so a later binder of the same name
-shadows an earlier one for the usage as well. A `dup` or a `drop` node uses its
-name once besides the occurrences of its body; neither is source syntax, and the
+shadows an earlier one for the usage as well. A match's subject and its arm's
+binders are occurrences of the term like any other, the subject outside the
+binders' scope and the body under them; a `dup` or a `drop` node uses its name
+once besides the occurrences of its body, and neither is source syntax, so the
 usage is total on the syntax only because the recursion has to be. -/
 def uses : Expr → List Var
   | .var x => [x]
   | .lam x body => (uses body).filter (fun y => y ≠ x)
   | .app f a => uses f ++ uses a
   | .bind x e₁ e₂ => uses e₁ ++ (uses e₂).filter (fun y => y ≠ x)
-  | .matchC x _ ys body => x :: (uses body).filter (fun y => y ∉ ys)
+  | .matchC s _ ys body => uses s ++ (uses body).filter (fun y => y ∉ ys)
   | .dup x e => x :: uses e
   | .drop x e => x :: uses e
   | .con0 _ => []
   | .con1 _ a => uses a
   | .con2 _ a b => uses a ++ uses b
-  | .store x _ v => x :: uses v
+  | .store s _ v => uses s ++ uses v
 
 /-! ## The environments a subterm is handed
 
@@ -159,7 +175,10 @@ def wrap (Γ : Occs) (u : List Var) (e : Expr) : Expr :=
 
 /-- The environments that fit a term: every variable the term uses is owned or
 borrowed. This is the hypothesis the totality theorem carries, and the condition
-under which no variable of the term is left unbound by the lowering. -/
+under which no variable of the term is left unbound by the lowering. A variable
+is checked for membership only: `Fits [] [0] (app (.var 0) (.var 0))` holds with
+one owned occurrence and two uses, and it is the prologue's `dup` that supplies
+the second use. -/
 def Fits (Δ Γ : Occs) (e : Expr) : Prop := ∀ x ∈ uses e, x ∈ Γ ∨ x ∈ Δ
 
 /-! ## The strategy
@@ -192,12 +211,14 @@ def lowerB (Δ Γ : Occs) : Expr → Option Expr
           match lowerB (forget Δ x) (bindEnv Γ x (uses e₂)) e₂ with
           | none => none
           | some e₂' => some (wrap Γ (uses (.bind x e₁ e₂)) (.bind x e₁' e₂'))
-  | .matchC x c ys body =>
-      if x ∈ Γ ∨ x ∈ Δ then
-        match lowerB (forgetAll Δ ys) (armEnv Γ ys (uses body)) body with
-        | none => none
-        | some body' => some (wrap Γ (uses (.matchC x c ys body)) (.matchC x c ys body'))
-      else none
+  | .matchC s c ys body =>
+      match lowerB Δ (claimEnv Γ (uses s)) s with
+      | none => none
+      | some s' =>
+          match lowerB (forgetAll Δ ys) (armEnv Γ ys (uses body)) body with
+          | none => none
+          | some body' =>
+              some (wrap Γ (uses (.matchC s c ys body)) (.matchC s' c ys body'))
   | .dup _ _ => none
   | .drop _ _ => none
   | .con0 c => some (wrap Γ [] (.con0 c))
@@ -212,12 +233,13 @@ def lowerB (Δ Γ : Occs) : Expr → Option Expr
           match lowerB Δ (claimEnv Γ (uses b)) b with
           | none => none
           | some b' => some (wrap Γ (uses (.con2 c a b)) (.con2 c a' b'))
-  | .store x i v =>
-      if x ∈ Γ ∨ x ∈ Δ then
-        match lowerB Δ (claimEnv Γ (uses v)) v with
-        | none => none
-        | some v' => some (wrap Γ (uses (.store x i v)) (.store x i v'))
-      else none
+  | .store s i v =>
+      match lowerB Δ (claimEnv Γ (uses s)) s with
+      | none => none
+      | some s' =>
+          match lowerB Δ (claimEnv Γ (uses v)) v with
+          | none => none
+          | some v' => some (wrap Γ (uses (.store s i v)) (.store s' i v'))
 
 /-! ## The relation
 
@@ -225,8 +247,12 @@ def lowerB (Δ Γ : Occs) : Expr → Option Expr
 the functions above so that a rule's conclusion is the whole of what the relation
 says about a construct. -/
 
-/-- The lowering relation `Δ | Γ ⊢ e ⇝ e′`: the source term `e` lowers to the
-target `e′` under the borrowed occurrences `Δ` and the owned occurrences `Γ`. -/
+/-- The lowering relation `Δ | Γ ⊢ e ⇝ e′` of the canonical strategy: the source
+term `e` becomes the target `e′` under the borrowed occurrences `Δ` and the owned
+occurrences `Γ`. The constructors are the strategy's rules, so a derivation is
+the strategy's one answer for the term and the environments — the relation is
+this strategy's *graph* and not the paper's declarative relation over arbitrary
+environment splits. -/
 inductive Lower : Occs → Occs → Expr → Expr → Prop where
   /-- A variable an environment supplies lowers to itself; the prologue releases
   the owned occurrences of its name the use does not take. -/
@@ -245,13 +271,13 @@ inductive Lower : Occs → Occs → Expr → Expr → Prop where
   | bind {Δ Γ x e₁ e₂ e₁' e₂'} (h₁ : Lower Δ (claimEnv Γ (uses e₁)) e₁ e₁')
       (h₂ : Lower (forget Δ x) (bindEnv Γ x (uses e₂)) e₂ e₂') :
       Lower Δ Γ (.bind x e₁ e₂) (wrap Γ (uses (.bind x e₁ e₂)) (.bind x e₁' e₂'))
-  /-- A match lowers to a match whose arm binds the matched node's fields: one
-  owned occurrence per binder, beside the occurrences the body's other names
-  claim. -/
-  | matchC {Δ Γ x c ys body body'} (hx : x ∈ Γ ∨ x ∈ Δ)
+  /-- A match lowers to a match: the subject under the occurrences it claims, and
+  the arm under one owned occurrence per binder, beside the occurrences the
+  body's other names claim. -/
+  | matchC {Δ Γ s c ys body s' body'} (hs : Lower Δ (claimEnv Γ (uses s)) s s')
       (h : Lower (forgetAll Δ ys) (armEnv Γ ys (uses body)) body body') :
-      Lower Δ Γ (.matchC x c ys body)
-        (wrap Γ (uses (.matchC x c ys body)) (.matchC x c ys body'))
+      Lower Δ Γ (.matchC s c ys body)
+        (wrap Γ (uses (.matchC s c ys body)) (.matchC s' c ys body'))
   /-- A nullary node lowers to itself. -/
   | con0 {Δ Γ c} : Lower Δ Γ (.con0 c) (wrap Γ [] (.con0 c))
   /-- A unary node lowers to a unary node whose field is lowered. -/
@@ -262,10 +288,12 @@ inductive Lower : Occs → Occs → Expr → Expr → Prop where
   | con2 {Δ Γ c a b a' b'} (h₁ : Lower Δ (claimEnv Γ (uses a)) a a')
       (h₂ : Lower Δ (claimEnv Γ (uses b)) b b') :
       Lower Δ Γ (.con2 c a b) (wrap Γ (uses (.con2 c a b)) (.con2 c a' b'))
-  /-- A write lowers to a write: its value is lowered, its target variable is the
-  occurrence the prologue handles. -/
-  | store {Δ Γ x i v v'} (hx : x ∈ Γ ∨ x ∈ Δ) (h : Lower Δ (claimEnv Γ (uses v)) v v') :
-      Lower Δ Γ (.store x i v) (wrap Γ (uses (.store x i v)) (.store x i v'))
+  /-- A write lowers to a write: its subject and its value are each lowered under
+  the occurrences they claim, and the prologue's differential is what tells a
+  subject or a value used more than once apart from one used once. -/
+  | store {Δ Γ s i v s' v'} (hs : Lower Δ (claimEnv Γ (uses s)) s s')
+      (h : Lower Δ (claimEnv Γ (uses v)) v v') :
+      Lower Δ Γ (.store s i v) (wrap Γ (uses (.store s i v)) (.store s' i v'))
 
 /-! ## The strategy is the relation -/
 
@@ -306,16 +334,16 @@ theorem lowerB_sound : ∀ (e : Expr) (Δ Γ : Occs) (e' : Expr),
               simp [lowerB, h₁, h₂] at h
               rw [← h]
               exact Lower.bind (lowerB_sound e₁ _ _ e₁' h₁) (lowerB_sound e₂ _ _ e₂' h₂)
-  | .matchC x c ys body, Δ, Γ, e', h => by
-      by_cases hx : x ∈ Γ ∨ x ∈ Δ
-      · simp only [lowerB, hx] at h
-        cases hb : lowerB (forgetAll Δ ys) (armEnv Γ ys (uses body)) body with
-        | none => simp [hb] at h
-        | some body' =>
-            simp [hb] at h
-            rw [← h]
-            exact Lower.matchC hx (lowerB_sound body _ _ body' hb)
-      · simp [lowerB, hx] at h
+  | .matchC s c ys body, Δ, Γ, e', h => by
+      cases hs : lowerB Δ (claimEnv Γ (uses s)) s with
+      | none => simp [lowerB, hs] at h
+      | some s' =>
+          cases hb : lowerB (forgetAll Δ ys) (armEnv Γ ys (uses body)) body with
+          | none => simp [lowerB, hs, hb] at h
+          | some body' =>
+              simp [lowerB, hs, hb] at h
+              rw [← h]
+              exact Lower.matchC (lowerB_sound s _ _ s' hs) (lowerB_sound body _ _ body' hb)
   | .dup x ex, Δ, Γ, e', h => by simp [lowerB] at h
   | .drop x ex, Δ, Γ, e', h => by simp [lowerB] at h
   | .con0 c, Δ, Γ, e', h => by
@@ -339,16 +367,16 @@ theorem lowerB_sound : ∀ (e : Expr) (Δ Γ : Occs) (e' : Expr),
               simp [lowerB, ha, hb] at h
               rw [← h]
               exact Lower.con2 (lowerB_sound a _ _ a' ha) (lowerB_sound b _ _ b' hb)
-  | .store x i v, Δ, Γ, e', h => by
-      by_cases hx : x ∈ Γ ∨ x ∈ Δ
-      · simp only [lowerB, hx] at h
-        cases hv : lowerB Δ (claimEnv Γ (uses v)) v with
-        | none => simp [hv] at h
-        | some v' =>
-            simp [hv] at h
-            rw [← h]
-            exact Lower.store hx (lowerB_sound v _ _ v' hv)
-      · simp [lowerB, hx] at h
+  | .store s i v, Δ, Γ, e', h => by
+      cases hs : lowerB Δ (claimEnv Γ (uses s)) s with
+      | none => simp [lowerB, hs] at h
+      | some s' =>
+          cases hv : lowerB Δ (claimEnv Γ (uses v)) v with
+          | none => simp [lowerB, hs, hv] at h
+          | some v' =>
+              simp [lowerB, hs, hv] at h
+              rw [← h]
+              exact Lower.store (lowerB_sound s _ _ s' hs) (lowerB_sound v _ _ v' hv)
 
 /-- A term the relation lowers is a term the strategy answers. -/
 theorem lowerB_complete : ∀ {Δ Γ : Occs} {e e' : Expr}, Lower Δ Γ e e' →
@@ -366,9 +394,10 @@ theorem lowerB_complete : ∀ {Δ Γ : Occs} {e e' : Expr}, Lower Δ Γ e e' →
       have hb₁ := lowerB_complete h₁
       have hb₂ := lowerB_complete h₂
       simp [lowerB, hb₁, hb₂]
-  | _, _, _, _, .matchC hx h => by
-      have hb := lowerB_complete h
-      simp [lowerB, hx, hb]
+  | _, _, _, _, .matchC hs h => by
+      have hb₁ := lowerB_complete hs
+      have hb₂ := lowerB_complete h
+      simp [lowerB, hb₁, hb₂]
   | _, _, _, _, .con0 => by
       simp [lowerB]
   | _, _, _, _, .con1 h => by
@@ -378,15 +407,19 @@ theorem lowerB_complete : ∀ {Δ Γ : Occs} {e e' : Expr}, Lower Δ Γ e e' →
       have hb₁ := lowerB_complete h₁
       have hb₂ := lowerB_complete h₂
       simp [lowerB, hb₁, hb₂]
-  | _, _, _, _, .store hx h => by
-      have hb := lowerB_complete h
-      simp [lowerB, hx, hb]
+  | _, _, _, _, .store hs h => by
+      have hb₁ := lowerB_complete hs
+      have hb₂ := lowerB_complete h
+      simp [lowerB, hb₁, hb₂]
 
 /-! ## Totality and determinism -/
 
 /-- The strategy answers every term of the source fragment under every
-environment that fits it: no variable the term uses is left unbound, and the
-occurrences a variable is handed cover its uses. -/
+environment that fits it. `Fits` checks membership and not multiplicity — one
+owned occurrence of a name the term uses twice satisfies it, and the strategy
+supplies the second use with a `dup` — so what the hypothesis gives is that no
+variable of the term is left unbound; the prologue's differential, and not the
+hypothesis, is what covers a name used more often than its occurrences. -/
 theorem lowerB_total : ∀ (e : Expr), Pure e → ∀ (Δ Γ : Occs), Fits Δ Γ e →
     ∃ e', lowerB Δ Γ e = some e'
   | .var x, _, Δ, Γ, hfit => by
@@ -437,20 +470,25 @@ theorem lowerB_total : ∀ (e : Expr), Pure e → ∀ (Δ Γ : Occs), Fits Δ Γ
       obtain ⟨e₁', h₁⟩ := lowerB_total e₁ hp₁ _ _ hfit₁
       obtain ⟨e₂', h₂⟩ := lowerB_total e₂ hp₂ _ _ hfit₂
       exact ⟨wrap Γ (uses (.bind x e₁ e₂)) (.bind x e₁' e₂'), by simp [lowerB, h₁, h₂]⟩
-  | .matchC x c ys body, hp, Δ, Γ, hfit => by
-      have hpbody : Pure body := (pure_matchC_iff x c ys body).mp hp
-      have hx : x ∈ Γ ∨ x ∈ Δ := hfit x (by simp [uses])
+  | .matchC s c ys body, hp, Δ, Γ, hfit => by
+      obtain ⟨hps, hpbody⟩ := (pure_matchC_iff s c ys body).mp hp
+      have hfit₀ : Fits Δ (claimEnv Γ (uses s)) s := by
+        intro y hy
+        rcases hfit y (by simp [uses, hy]) with hyΓ | hyΔ
+        · exact Or.inl (by simp [claimEnv, hy, hyΓ])
+        · exact Or.inr hyΔ
       have hfit' : Fits (forgetAll Δ ys) (armEnv Γ ys (uses body)) body := by
         intro y hy
         by_cases hyys : y ∈ ys
         · exact Or.inl (by simp [armEnv, hyys])
-        · have hy' : y ∈ uses (.matchC x c ys body) := by simp [uses, hy, hyys]
+        · have hy' : y ∈ uses (.matchC s c ys body) := by simp [uses, hy, hyys]
           rcases hfit y hy' with hyΓ | hyΔ
           · exact Or.inl (by simp [armEnv, hy, hyΓ, hyys])
           · exact Or.inr (by simp [forgetAll, hyΔ, hyys])
+      obtain ⟨s', hs'⟩ := lowerB_total s hps _ _ hfit₀
       obtain ⟨body', hb⟩ := lowerB_total body hpbody _ _ hfit'
-      exact ⟨wrap Γ (uses (.matchC x c ys body)) (.matchC x c ys body'),
-        by simp [lowerB, hx, hb]⟩
+      exact ⟨wrap Γ (uses (.matchC s c ys body)) (.matchC s' c ys body'),
+        by simp [lowerB, hs', hb]⟩
   | .dup x ex, hp, _, _, _ => by exact absurd hp (not_pure_dup x ex)
   | .drop x ex, hp, _, _, _ => by exact absurd hp (not_pure_drop x ex)
   | .con0 c, _, Δ, Γ, _ => ⟨wrap Γ [] (.con0 c), by simp [lowerB]⟩
@@ -478,25 +516,35 @@ theorem lowerB_total : ∀ (e : Expr), Pure e → ∀ (Δ Γ : Occs), Fits Δ Γ
       obtain ⟨a', ha⟩ := lowerB_total a hp₁ _ _ hfit₁
       obtain ⟨b', hb⟩ := lowerB_total b hp₂ _ _ hfit₂
       exact ⟨wrap Γ (uses (.con2 c a b)) (.con2 c a' b'), by simp [lowerB, ha, hb]⟩
-  | .store x i v, hp, Δ, Γ, hfit => by
-      have hpv : Pure v := (pure_store_iff x i v).mp hp
-      have hx : x ∈ Γ ∨ x ∈ Δ := hfit x (by simp [uses])
-      have hfit₁ : Fits Δ (claimEnv Γ (uses v)) v := by
+  | .store s i v, hp, Δ, Γ, hfit => by
+      obtain ⟨hps, hpv⟩ := (pure_store_iff s i v).mp hp
+      have hfit₁ : Fits Δ (claimEnv Γ (uses s)) s := by
         intro y hy
         rcases hfit y (by simp [uses, hy]) with hyΓ | hyΔ
         · exact Or.inl (by simp [claimEnv, hy, hyΓ])
         · exact Or.inr hyΔ
-      obtain ⟨v', hv⟩ := lowerB_total v hpv _ _ hfit₁
-      exact ⟨wrap Γ (uses (.store x i v)) (.store x i v'), by simp [lowerB, hx, hv]⟩
+      have hfit₂ : Fits Δ (claimEnv Γ (uses v)) v := by
+        intro y hy
+        rcases hfit y (by simp [uses, hy]) with hyΓ | hyΔ
+        · exact Or.inl (by simp [claimEnv, hy, hyΓ])
+        · exact Or.inr hyΔ
+      obtain ⟨s', hs'⟩ := lowerB_total s hps _ _ hfit₁
+      obtain ⟨v', hv⟩ := lowerB_total v hpv _ _ hfit₂
+      exact ⟨wrap Γ (uses (.store s i v)) (.store s' i v'), by simp [lowerB, hs', hv]⟩
 
-/-- Every pure expression has a lowering from the environments that fit it. -/
+/-- Every pure expression has a lowering of the canonical strategy from the
+environments that fit it: the strategy's answer is a derivation of this
+relation. -/
 theorem lower_total {Δ Γ : Occs} {e : Expr} (hp : Pure e) (hfit : Fits Δ Γ e) :
     ∃ e', Lower Δ Γ e e' := by
   obtain ⟨e', he'⟩ := lowerB_total e hp Δ Γ hfit
   exact ⟨e', lowerB_sound e Δ Γ e' he'⟩
 
 /-- Any two lowerings of one expression from the same borrowed and owned
-environments produce the same target. -/
+environments produce the same target. This is a property of the canonical
+strategy's relation: its rules write their splits with the functions above, so a
+derivation is the strategy's output, and the paper's declarative relation over
+arbitrary splits carries no such claim here. -/
 theorem lower_deterministic {Δ Γ : Occs} {e e₁ e₂ : Expr} (h₁ : Lower Δ Γ e e₁)
     (h₂ : Lower Δ Γ e e₂) : e₁ = e₂ := by
   have hb₁ := lowerB_complete h₁
