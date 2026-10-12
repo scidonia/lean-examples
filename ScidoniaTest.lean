@@ -9,3 +9,4 @@ import ScidoniaTest.Sealed
 import ScidoniaTest.Count
 import ScidoniaTest.Footprint
 import ScidoniaTest.RCHeap
+import ScidoniaTest.IRShape
