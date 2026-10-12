@@ -39,8 +39,8 @@ kinds:
   never constructed here or in the module under check, and the theorems below take
   it as an argument — the model's count at an exclusive state reaches the
   runtime's test through it. Its other direction has no non-vacuous concrete
-  instance, so it is pinned as a statement rather than exercised. The axiom lists
-  are then asserted: each representative theorem's
+  instance, so its statement is pinned by the output of `#check` rather than
+  exercised. The axiom lists are then asserted: each representative theorem's
   `#print axioms` output is pinned to the standard kernel principles, so a proof
   that acquires any other axiom fails the build rather than printing a longer
   list for a reader to notice.
@@ -513,8 +513,29 @@ an exclusive state forces the runtime's test to pass and refutes the premise tha
 it fails, while a state that is not exclusive is what the conclusion states and
 the hypothesis has nothing to say about it. What the theorem constrains is the
 signature — the link's two directions read against each other at every state at
-once — and that is what pinning it here observes.
+once — and that is what the check below pins.
+
+A bare `#check` would not exercise that constraint: it reports that the name
+elaborates and prints whatever statement the name currently has, so a theorem of
+a different statement under the same name would still build. The message the
+command emits is therefore pinned instead. `#guard_msgs` compares the whole of
+it, so what is required is this statement and no other: the binders in order,
+each with the name it is written under and its type, the `RuntimeAgrees`
+hypothesis and the failed runtime test between them, and the conclusion at the
+model layer. An argument reordered, dropped or retyped under the same name, a
+binder renamed, or a name that no longer resolves, fails the build.
+
+The statement pinned is the one the theorem is stated with, and the comparison
+is loose in whitespace only, so the line breaks the printer happens to choose
+are not part of it. Binder names are part of it, so a rename of a hypothesis —
+which leaves the statement itself unchanged — fails the build too; the price of
+reading the statement off the emitted message rather than restating it.
 -/
+/--
+info: Scidonia.FracPerm.StateVar.Footprint.runtime_not_exclusive_excludes_model (h : Presentation) (handles : List Ref)
+  (r : Ref) (rc : Int32) (hag : RuntimeAgrees h handles r rc) (hrc : ¬RefCount.IsExclusive rc) : ¬Exclusive h handles r
+-/
+#guard_msgs (whitespace := lax) in
 #check Scidonia.FracPerm.StateVar.Footprint.runtime_not_exclusive_excludes_model
 
 /-! ## Axioms of representative theorems
