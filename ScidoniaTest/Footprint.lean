@@ -2,8 +2,9 @@
 Compile-time checks for `Scidonia.FracPerm.StateVar.Footprint`.
 
 The module is a counted presentation of the heap: what the count of a reference
-*is*, defined from aliasing, and the facts that make the out-of-place cases
-exactly the cells whose count is not one. It has no pre-fix behaviour to observe
+*is*, defined from aliasing, and the facts behind the model's classification of a
+cell as out-of-place exactly when its count is not one. It has no pre-fix
+behaviour to observe
 — it is a proof module — so the checks here meet its definitions and theorems
 from outside, on presentations a client of the module can build. They are of six
 kinds:
@@ -34,10 +35,12 @@ kinds:
 * **Affirmative structural controls**: the single-handle, take-out-pair and
   one-cell-write theorems applied at those presentations, and the two statements
   of `pair_needs_the_drop` read off one call.
-* **The runtime link**, used as what it is: `RuntimeAgrees` is inhabited at a
-  state the model calls exclusive, the model's count reaches the runtime's test
-  through it, and a runtime count that fails the test carries back to the model's
-  side. The axiom lists are then asserted: each representative theorem's
+* **The runtime link**, used as what it is: `RuntimeAgrees` stays a hypothesis,
+  never constructed here or in the module under check, and the theorems below take
+  it as an argument — the model's count at an exclusive state reaches the
+  runtime's test through it, and a runtime count that fails the test carries back
+  to the model's side. The axiom lists are then asserted: each representative
+  theorem's
   `#print axioms` output is pinned to the standard kernel principles, so a proof
   that acquires any other axiom fails the build rather than printing a longer
   list for a reader to notice.
@@ -457,22 +460,26 @@ did not evaluate to `true`
 /-! ## The runtime link, used as a hypothesis
 
 `RuntimeAgrees` is the link from this model to the runtime's own test and is not
-proved anywhere. The checks below use it where it is the hypothesis: inhabited at
-a state the model calls exclusive, so the model's count reaches
-`RefCount.IsExclusive`; and, at the pair, a runtime count that fails the test
-carries back to the model's side. -/
+proved anywhere: no instance of it is constructed in this module or in the library
+module it checks. The checks below take it as a hypothesis — the model's count at
+an exclusive state reaches `RefCount.IsExclusive` through it, and, at the pair, a
+runtime count that fails the test carries back to the model's side. The runtime
+predicate's own values at one and at two stand beside them, as the values any such
+link is read at. -/
 
-/-- The runtime's exclusive count itself: one reference, single-threaded. This is
-the affirmative control for the conclusion of `runtime_agrees_exclusive` — without
-it, the link could not be inhabited at any state. -/
+/-- The runtime's exclusive count itself: one reference, single-threaded. It is
+the runtime predicate's own value at one, which is where the conclusion of
+`runtime_agrees_exclusive` is stated; any link from the model to it is the
+`RuntimeAgrees` hypothesis of that theorem, not this value. -/
 theorem runtime_count_one_exclusive : Scidonia.FracPerm.StateVar.RefCount.IsExclusive (1 : Int32) := by
   simp only [Scidonia.FracPerm.StateVar.RefCount.IsExclusive,
     Scidonia.FracPerm.StateVar.RefCount.isSt, decide_eq_true_eq]
   grind
 
 /-- The count of two as the runtime reads and tests it: its own `refCount` reads
-the count as two, and the count is not exclusive. It is the count a pair of live
-references stands for. -/
+the count as two, and the count is not exclusive. It is the runtime predicate's
+own value at two; whether a model pair of handles corresponds to it is what a
+`RuntimeAgrees` hypothesis would state, not something this value shows. -/
 theorem runtime_count_two :
     Scidonia.FracPerm.StateVar.RefCount.refCount (2 : Int32) = 2 ∧
       ¬ Scidonia.FracPerm.StateVar.RefCount.IsExclusive (2 : Int32) := by
@@ -484,30 +491,26 @@ theorem runtime_count_two :
       Scidonia.FracPerm.StateVar.RefCount.isSt, decide_eq_true_eq]
     grind
 
-/-- The link inhabited at a state the model calls exclusive: at the chain's root
-under one handle, a runtime count of one satisfies "exclusive model state implies
-the runtime's test passes". This is the link as a hypothesis — it is fed in, not
-derived — and it says nothing about what a compiled object's count would be. -/
-theorem chain_runtime_link : RuntimeAgrees chainHeap [0] 0 (1 : Int32) :=
-  fun _ => runtime_count_one_exclusive
-
 /-- The model's count reaching the runtime's test through the link, at the
-chain's root: the model says exclusive, the link says that means
-`RefCount.IsExclusive`, and the runtime's predicate holds of the count of one. -/
-theorem chain_runtime_exclusive : Scidonia.FracPerm.StateVar.RefCount.IsExclusive (1 : Int32) :=
-  runtime_agrees_exclusive chainHeap [0] 0 1 chain_root_exclusive chain_runtime_link
+chain's root: the model says exclusive, and the link — an argument of this
+theorem, not an instance constructed anywhere — carries that to
+`RefCount.IsExclusive` at whatever counter it describes. -/
+theorem chain_runtime_exclusive (rc : Int32) (hag : RuntimeAgrees chainHeap [0] 0 rc) :
+    Scidonia.FracPerm.StateVar.RefCount.IsExclusive rc :=
+  runtime_agrees_exclusive chainHeap [0] 0 rc chain_root_exclusive hag
 
-/-- The link in the other direction, at the pair: a runtime count of two fails the
-runtime's test, so a state the runtime count describes as not exclusive cannot be
-exclusive in the model either.
+/-- The link in the other direction, at the pair: while the link holds and a
+runtime count fails the runtime's test, the aliased store's cell is not exclusive
+in the model either.
 
-The `RuntimeAgrees` instance here has a false premise — the aliased store is not
-exclusive, as `twoParent_not_exclusive` says — which is why it is inhabited; it is
-still the link the theorem takes as a hypothesis, and no part of this proves that
-a compiled object's count is the modelled one. -/
-theorem twoParent_runtime_excludes_exclusive : ¬ Exclusive twoParentHeap [] 1 :=
-  runtime_not_exclusive_excludes_model twoParentHeap [] 1 2
-    (fun hx => absurd hx twoParent_not_exclusive) runtime_count_two.2
+Both premises are hypotheses of this theorem and neither is constructed here: the
+link arrives as an argument, and the count that fails the test is one the
+runtime's own predicate refuses, as `runtime_count_two` reads it at two. -/
+theorem twoParent_runtime_excludes_exclusive (rc : Int32)
+    (hag : RuntimeAgrees twoParentHeap [] 1 rc)
+    (hrc : ¬ Scidonia.FracPerm.StateVar.RefCount.IsExclusive rc) :
+    ¬ Exclusive twoParentHeap [] 1 :=
+  runtime_not_exclusive_excludes_model twoParentHeap [] 1 rc hag hrc
 
 /-! ## Axioms of representative theorems
 

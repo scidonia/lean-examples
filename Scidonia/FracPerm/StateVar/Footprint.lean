@@ -13,10 +13,11 @@ name it; exclusivity is that count being one.
 
 The count is a **definition** here, not an assumption. `refCount` is defined over
 a presentation and a list of outside handles, and `Exclusive` is the equation
-`refCount = 1`. The facts the write discipline rests on follow from it: one
+`refCount = 1`. The facts the model's write test rests on follow from it: one
 handle to a root no slot names has count one; a second handle to the same cell
-has count two; a second slot naming the same cell has count at least two. The
-out-of-place cases are exactly the cells whose count is not one.
+has count two; a second slot naming the same cell has count at least two. A cell
+whose count is not one is what this model classifies as an out-of-place cell, and
+the model's `Exclusive` test fails at it.
 
 Two readings are **hypotheses**, not theorems:
 
@@ -27,9 +28,10 @@ Two readings are **hypotheses**, not theorems:
   cell would still satisfy every theorem below.
 * `RuntimeAgrees`: that a model state of one live reference means the count the
   runtime holds passes `RefCount.IsExclusive`. It appears as a hypothesis of the
-  theorems that use it and is never proved; `RefCount` is the counter-level
-  vocabulary of the runtime's own test, and no bridge from one to the other is
-  derived here.
+  theorems that use it and is never proved: no instance of it is constructed in
+  this module or in the checks that accompany it, which take it only as a
+  hypothesis. `RefCount` is the counter-level vocabulary of the runtime's own
+  test, and no bridge from one to the other is derived here.
 
 The counted layer **composes** with the interface's proved detachment. The
 state-variable class proves that a primitive observation of a valid state encodes
@@ -195,8 +197,7 @@ supplies. -/
 /-- With no slot naming `r`, one handle to it is one live reference.
 
 `h.occurrences r = 0` is the store's side — no live cell's slots name `r` — and
-the handle list is `[r]` itself, so the count is exactly one. This says nothing
-about whether a compiled write would keep the object single-owner. -/
+the handle list is `[r]` itself, so the count is exactly one. -/
 theorem refCount_single_handle (h : Presentation) (r : Ref) (h0 : h.occurrences r = 0) :
     refCount h [r] r = 1 := by
   unfold refCount
@@ -204,7 +205,8 @@ theorem refCount_single_handle (h : Presentation) (r : Ref) (h0 : h.occurrences 
   simp
 
 /-- The same count stated as exclusivity: one handle to an unnamed root is
-exclusive, so a write holding exactly that handle tests true. -/
+exclusive, so the model's write test holds for a write that holds exactly that
+handle. -/
 theorem exclusive_single_handle (h : Presentation) (r : Ref) (h0 : h.occurrences r = 0) :
     Exclusive h [r] r :=
   refCount_single_handle h r h0
@@ -229,8 +231,9 @@ theorem exclusive_of_handles_eq (h : Presentation) (handles : List Ref) (r : Ref
 /-! ## The extra reference: the take-out pair is not exclusive
 
 The second fact. Two handles to the same `r` are two live references, so the
-count is two and no write may store in place: this is the modelled take-out pair,
-and while the pair is live a write below the element would copy. -/
+count is two and the model's `Exclusive` test fails at the cell they name: this
+is the modelled take-out pair, and while the pair is live the model classifies
+that cell as out-of-place. -/
 
 /-- Two handles to `r`, and no slot naming it, are two live references.
 
@@ -375,13 +378,12 @@ this module defines. -/
 /-- A run whose every issued read result is detached from the root has no handle
 on the root but the runner's own, so the root's count is one.
 
-This is a statement about the model, not about a compiled program. The two
-hypotheses are the two readings the module note names: `hstore` reads the
-presentation as the live heap, so no cell's slots name `r`, and `hdetached` reads
-the value list as the run's issued read results, so none of them names `r` — and
-the interface is what supplies the second reading, since `read_at_detached`
-carries its detachment law through a read. Nothing here says a machine's count,
-an in-place write, or an object graph. -/
+This is a statement about the model. The two hypotheses are the two readings the
+module note names: `hstore` reads the presentation as the live heap, so no cell's
+slots name `r`, and `hdetached` reads the value list as the run's issued read
+results, so none of them names `r` — and the interface is what supplies the
+second reading, since `read_at_detached` carries its detachment law through a
+read. -/
 theorem refCount_one_of_detached_issues (p : Presentation) (vs : List Value)
     (r : Ref)
     (hstore : p.occurrences r = 0) (hdetached : ∀ v ∈ vs, NoRef r v) :
@@ -477,8 +479,7 @@ of `r` by exactly the changed cell's contribution:
 
 The right-hand side is the two halves of the statement: the first term is the
 changed cell's new contribution, the second is every other cell's contribution,
-unchanged. Nothing here says that the write happens in place; it says which
-counts the presentation has afterwards. -/
+unchanged. -/
 theorem Presentation.setSlots_occurrences (h₁ h₂ : Presentation) (n : Node) (c : Ref) (ks : List Ref)
     (r : Ref) (h₁c : ∀ e ∈ h₁, e.1 ≠ c) (h₂c : ∀ e ∈ h₂, e.1 ≠ c) :
     (Presentation.setSlots (h₁ ++ (c, n) :: h₂) c ks).occurrences r
@@ -493,10 +494,11 @@ theorem Presentation.setSlots_occurrences (h₁ h₂ : Presentation) (n : Node) 
 two live references and the single handle is one: `refCount h [r, r] r = 2` and
 `refCount h [r] r = 1`, together.
 
-This is the out-of-place case and the case a write admits, at the same
-presentation: a write that meets the pair must copy, and the pair's extra
-reference — the one it took out — has to be dropped before the same cell is
-exclusive again. -/
+At one presentation these are the two sides of the model's write test: the pair's
+count of two is a cell the model classifies as out-of-place, where `Exclusive`
+fails, and the single handle's count of one is a cell where it holds. The pair's
+extra reference — the one it holds while an element is out of the array — is what
+has to be dropped before the cell counts one again. -/
 theorem pair_needs_the_drop (h : Presentation) (r : Ref) (h0 : h.occurrences r = 0) :
     refCount h [r, r] r = 2 ∧ refCount h [r] r = 1 :=
   ⟨refCount_pair_of_no_slot h r h0, refCount_single_handle h r h0⟩
@@ -506,7 +508,8 @@ theorem pair_needs_the_drop (h : Presentation) (r : Ref) (h0 : h.occurrences r =
 The runtime's own test is `RefCount.IsExclusive` on the `Int32` count the object
 carries. Relating the modelled count to it is a correspondence the model does not
 prove, so it is stated as a hypothesis of the theorems that need it — here rather
-than silently in a paper step. -/
+than silently in a paper step — and no instance of it is constructed in this
+module. -/
 
 /-- The runtime agreement hypothesis: if the model says one live reference then
 the count the runtime holds passes `lean_is_exclusive`. Nothing here proves it;
@@ -520,8 +523,8 @@ that passes the runtime's test: the hypothesis `RuntimeAgrees` at the state a
 write holds, with the conclusion at the counter `rc` the object carries.
 
 The theorem is an implication through the link and proves nothing about either
-side alone; in particular it does not show that a compiled object's count is the
-modelled count. -/
+side alone: what it carries is the hypothesis, from the model's `Exclusive` test
+to the runtime's predicate at the counter `rc`. -/
 theorem runtime_agrees_exclusive (h : Presentation) (handles : List Ref) (r : Ref) (rc : Int32)
     (hx : Exclusive h handles r) (hag : RuntimeAgrees h handles r rc) :
     RefCount.IsExclusive rc :=
