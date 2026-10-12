@@ -11,3 +11,4 @@ import ScidoniaTest.Footprint
 import ScidoniaTest.RCHeap
 import ScidoniaTest.IRShape
 import ScidoniaTest.Run
+import ScidoniaTest.RC

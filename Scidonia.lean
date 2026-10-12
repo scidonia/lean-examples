@@ -3,3 +3,4 @@
 import Scidonia.Basic
 import Scidonia.Cyclic
 import Scidonia.FracPerm
+import Scidonia.RC
