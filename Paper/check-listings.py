@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Check that every quoted frame in the paper still quotes what it claims.
+"""Check that every frame in the paper still quotes what it claims.
 
-Two kinds of frame, both read from the library by line range:
+Three kinds of check, all against the library:
 
   %!check: <fragment>
-  \\lstinputlisting[linerange=<lo>-<hi>]{<file>}
-      the range must contain <fragment>;
+  \\codeframe[linerange=<lo>-<hi>]{<file>}
+      the quoted range must contain <fragment>, so a range that still has the
+      right shape but has moved off its declaration fails;
 
   \\lawframe{<file>}{<lo>-<hi>}{<name>}
-      the range must contain the declaration of <name> -- a line at which
-      `theorem`/`def`/... followed by that name begins.
+      the range must contain the declaration of <name>;
 
-A line range drifts silently when the file above it changes, so every frame is
-checked against the named source.  This checks the paper's quotations, not that
-the Lean compiles: the library is built separately.
+  frames/<key>.lean
+      the generated frame must be exactly the range with its comments removed,
+      by leanstrip.py, recomputed here.  This is what makes a frame's content
+      checked rather than asserted: the generator writes the file, and this
+      recomputes it.
 
 Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
 Exit status 0 when every frame checks out, 1 otherwise.
@@ -23,12 +25,18 @@ import re
 import sys
 from pathlib import Path
 
+import leanstrip
+
 CHECK = re.compile(r"^\s*%\s*!check:\s*(?P<frag>.*\S)\s*$")
-LISTING = re.compile(
+FRAME = re.compile(
     r"\\codeframe\[linerange=(?P<lo>\d+)-(?P<hi>\d+)\]\{(?P<path>[^}]*)\}"
 )
 LAWFRAME = re.compile(
     r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
+)
+LOOKUP = re.compile(
+    r"\\expandafter\\def\\csname cf@(?P<path>.*)@(?P<lo>\d+)-(?P<hi>\d+)"
+    r"\\endcsname\{(?P<key>[^}]*)\}"
 )
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
@@ -52,7 +60,7 @@ def read_source(path: Path, limit: int, context: str):
 
 
 def check_fragments(tex: Path, problems: list[str]) -> int:
-    """Verify each %!check: directive against the listing that follows it."""
+    """Verify each %!check: directive against the frame that follows it."""
     lines = tex.read_text(encoding="utf-8").splitlines()
     pending, checked = None, 0
     for number, line in enumerate(lines, start=1):
@@ -60,7 +68,7 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
         if match:
             pending = (number, match.group("frag"))
             continue
-        match = LISTING.search(line)
+        match = FRAME.search(line)
         if not match:
             continue
         if pending is None:
@@ -78,7 +86,7 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
                 f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
                 f"    {fragment}")
     if pending is not None:
-        problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no listing")
+        problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no frame")
     return checked
 
 
@@ -105,6 +113,63 @@ def check_lawframes(tex: Path, problems: list[str]) -> int:
     return checked
 
 
+def load_lookup(here: Path, problems: list[str]) -> dict:
+    """The generated table: (path, lo, hi) -> the frame's key."""
+    table = {}
+    try:
+        text = (here / "frames/lookup.tex").read_text(encoding="utf-8")
+    except OSError as error:
+        problems.append(f"cannot read frames/lookup.tex: {error}\n"
+                        f"    run python3 gen-frames.py")
+        return table
+    for match in LOOKUP.finditer(text):
+        table[(match.group("path"), int(match.group("lo")), int(match.group("hi")))] = \
+            match.group("key")
+    return table
+
+
+def check_frames(here: Path, tex: Path, table: dict, problems: list[str]) -> int:
+    """Verify every generated frame against the range it was generated from."""
+    text = tex.read_text(encoding="utf-8")
+    wanted = [(m.group("path"), int(m.group("lo")), int(m.group("hi")), m.start())
+              for m in FRAME.finditer(text)]
+    wanted += [("../" + m.group("path"), int(m.group("lo")), int(m.group("hi")), m.start())
+               for m in LAWFRAME.finditer(text)]
+    checked = 0
+    for path, lo, hi, at in wanted:
+        where = f"{tex.name}:{text.count(chr(10), 0, at) + 1}"
+        key = table.get((path, lo, hi))
+        if key is None:
+            problems.append(f"{where}: no generated frame for {path}:{lo}-{hi}\n"
+                            f"    run python3 gen-frames.py")
+            continue
+        try:
+            frame = (here / "frames" / f"{key}.lean").read_text(encoding="utf-8")
+        except OSError as error:
+            problems.append(f"{where}: cannot read frames/{key}.lean: {error}")
+            continue
+        source = (here / path).resolve()
+        lines = read_source(source, hi, where)
+        if lines is None:
+            continue
+        want = leanstrip.frame_body(lines, lo, hi)
+        got = frame.rstrip("\n")
+        if want != got:
+            problem = (f"{where}: frames/{key}.lean is not comments-stripped "
+                       f"{path}:{lo}-{hi}")
+            for a, b in zip(want.splitlines(), got.splitlines()):
+                if a != b:
+                    problem += f"\n    source: {a!r}\n    frame:  {b!r}"
+                    break
+            else:
+                problem += f"\n    {len(want.splitlines())} lines expected, "\
+                           f"{len(got.splitlines())} held"
+            problems.append(problem)
+            continue
+        checked += 1
+    return checked
+
+
 def main(argv: list[str]) -> int:
     here = Path(__file__).resolve().parent
     files = [Path(a) for a in argv[1:]] or sorted(here.glob("*.tex"))
@@ -112,17 +177,19 @@ def main(argv: list[str]) -> int:
         print("no .tex files to check", file=sys.stderr)
         return 1
     problems: list[str] = []
-    fragments = laws = 0
+    table = load_lookup(here, problems)
+    fragments = laws = frames = 0
     for tex in files:
         if not tex.is_file():
             print(f"no such file: {tex}", file=sys.stderr)
             return 1
         fragments += check_fragments(tex, problems)
         laws += check_lawframes(tex, problems)
+        frames += check_frames(here, tex, table, problems)
     for problem in problems:
         print(problem)
-    print(f"{fragments} quoted panels and {laws} law frames checked, "
-          f"{len(problems)} failed")
+    print(f"{fragments} quoted panels, {laws} law frames and {frames} generated "
+          f"frames checked, {len(problems)} failed")
     return 1 if problems else 0
 
 

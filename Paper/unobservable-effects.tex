@@ -3,11 +3,11 @@
 %
 % Build, from this directory. Highlighting is minted's, so the build needs
 % shell escape and Pygments on PATH:
+%   python3 gen-laws.py     # the law frames, after a change to the library
+%   python3 gen-frames.py   # the frames themselves: the quoted ranges, comment-free
 %   latexmk -pdf -shell-escape unobservable-effects.tex
-% Check that every quoted frame still quotes the library:
+% Check that every frame still quotes the library:
 %   python3 check-listings.py
-% Regenerate the law frames (Paper/laws.tex) after a change to the library:
-%   python3 gen-laws.py
 %
 % pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
 % in the quoted Lean is mapped to font commands by newunicodechar below. A
@@ -56,14 +56,33 @@
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage{minted}
-\usemintedstyle{friendly}
+% gruvbox-light: the most hues of the styles that stay legible on white paper.
+% The dark styles (one-dark, monokai, dracula, lovelace) paint identifiers in
+% near-white, which vanishes here; a dark editor look would need a dark
+% background, which \setminted{bgcolor=...} could give if it were wanted.
+\usemintedstyle{gruvbox-light}
 \setminted{fontsize=\footnotesize,frame=single,rulecolor=\color{black!30},
            framesep=4pt,breaklines=true,baselinestretch=1.0}
-% Every quoted frame is written \codeframe[linerange=lo-hi]{../path}: a line
-% range of a library file, highlighted by minted's Pygments Lean lexer. One
-% delimited argument keeps the call sites uniform across the appendix and the
-% law frames that gen-laws.py writes.
-\def\codeframe[linerange=#1-#2]#3{\inputminted[firstline=#1,lastline=#2]{lean}{#3}}
+% A quoted frame is written \codeframe[linerange=lo-hi]{../path}: a line range of
+% a library file. The frame itself is generated -- the range with its comments
+% removed, since a frame is code and not documentation -- into frames/<key>.lean
+% by gen-frames.py, and frames/lookup.tex maps the range to that file. A call
+% site therefore names the source it quotes and not the frame, and a range with
+% no generated frame is a build error rather than a silently missing box.
+%
+% A frame is one unbreakable box, so a frame that does not fit the space left on
+% a page moves to the next one instead of being split across two.
+\input{frames/lookup.tex}
+\def\codeframe[linerange=#1-#2]#3{%
+  \edef\cfkey{cf@#3@#1-#2}%
+  \ifcsname\cfkey\endcsname\else
+    \PackageError{paper}{no generated frame for #3:#1-#2}%
+      {Run python3 gen-frames.py in Paper/.}\fi
+  \edef\cffile{frames/\csname\cfkey\endcsname.lean}%
+  \par\smallskip\noindent
+  \begin{minipage}{\linewidth}%
+    \inputminted{lean}{\cffile}%
+  \end{minipage}\par}
 % A path is set with \path so that it may break at its slashes: a long title and
 % a long module path on one caption line would otherwise overrun the margin.
 \usepackage{url}\urlstyle{same}
@@ -691,6 +710,9 @@ release of its own to forget.
 \begin{example}[two readers and a write]\label{ex:two}
 A program that lends a third and two thirds to two readers, reads with each,
 returns both, and then writes:
+
+\par\medskip\noindent
+\begin{minipage}{\linewidth}
 \begin{minted}[frame=none,framesep=0pt]{lean}
 acquire 0 (1/3)  >>>= fun t1 =>
 acquire 1 (2/3)  >>>= fun t2 =>
@@ -699,6 +721,8 @@ release t1       >>>= fun _  =>
 release t2       >>>= fun _  =>
 write (0, 9)     >>>= fun _  => ret v
 \end{minted}
+\end{minipage}
+\par\medskip
 Each \code{acquire} is justified by the held fraction: of the whole, a third is
 lent and then two thirds, leaving nothing, which is exactly what the write
 requires. The program is accepted; a second \code{release t1} would not be.
@@ -1147,9 +1171,14 @@ the universe's law after an inverse law cancels the conjugation.
 \begin{example}[the slot, by transport]\label{ex:slot}
 A slot is a genuine inductive type --- empty, or holding a natural payload ---
 described by a unit summed with a natural. Its instance is one line:
+
+\par\medskip\noindent
+\begin{minipage}{\linewidth}
 \begin{minted}[frame=none,framesep=0pt]{lean}
 transport slotDesc Slot encode decode decode_encode encode_decode
 \end{minted}
+\end{minipage}
+\par\medskip
 Every operation is the universe instance's conjugated by \code{encode} and
 \code{decode}, and every law is the universe's, so nothing specific to the slot's
 description is proved. The theorems of the generic model then apply at it: a read
@@ -1792,19 +1821,26 @@ a runtime problem as much as a permission problem.
 \section{Quoted declarations}\label{app:listings}
 
 The appendix reproduces the definitions and the law statements the paper's
-claims rest on, read from the library by \code{\textbackslash codeframe} with an
-explicit line range, so it quotes the source and not a transcription of it, and
-highlighted by \code{minted}, which reads each file through Pygments' Lean
-lexer. The description, observation and layout universes are quoted where they
-are defined, in \cref{sec:levitation} and \cref{sec:sealed}; what follows is the
-rest of the types and the operations, 32 panels, and then 110 law statements,
-grouped as the prose groups them.
+claims rest on. A frame is a line range of the library with its comments
+removed --- a frame is code, not documentation --- so what is shown is the
+source's own lines rather than a transcription of them, and the range named
+beside it is the library's, comments included. The frames are generated by
+\code{gen-frames.py} and checked by \code{check-listings.py}, which recomputes
+each one from the library and fails when the two differ. The highlighting is
+\code{minted}'s, reading each frame through Pygments' Lean lexer.
 
-Two conventions are worth stating. A frame is a whole source line range, so a
-declaration short enough to fit on one line shows its proof on that line: the
-frame is the line, not a truncation of it. And a law frame quotes the
-\emph{statement} of a theorem, ending where the statement ends, so the proof
-that follows it is usually not shown.
+The description, observation and layout universes are quoted where they are
+defined, in \cref{sec:levitation} and \cref{sec:sealed}; what follows is the
+rest of the types and the operations, 32 panels, and then 110 law statements,
+grouped as the prose groups them. Each frame is one unbreakable box, so a frame
+that does not fit the space left on a page moves to the next page instead of
+being split across two.
+
+Two further conventions. A frame is a whole source line range, so a declaration
+short enough to fit on one line shows its proof on that line: the frame is the
+line, not a truncation of it. And a law frame quotes the \emph{statement} of a
+theorem, ending where the statement ends, so the proof that follows it is
+usually not shown.
 
 The library publishes 184 theorems under \code{Scidonia/}, of which the second
 half of this appendix reproduces 110, being the ones this paper states or uses;
