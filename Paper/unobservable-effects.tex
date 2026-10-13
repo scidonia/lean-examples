@@ -282,7 +282,7 @@ All of the code discussed here is Lean 4, on a pinned toolchain, in a library
 that builds and whose checks are theorems rather than test assertions. The
 paper quotes the library's declarations verbatim in \cref{app:listings}: 37
 panels for the types and the operations, and the statements of 110 of the
-library's 184 public theorems. Every frame is a line range into the library,
+library's 442 public theorems. Every frame is a line range into the library,
 re-checked by \code{check-listings.py}, so the appendix cannot drift from the
 source it quotes.
 
@@ -1606,8 +1606,8 @@ Link & Content & Status \\
 4 & $\held = 1$ at a write means no read share is outstanding & proved (the ledger and the primitives) \\
 5 & No client value names the session's state or a mutable part of it & structural (\cref{sec:notional,sec:sealed}) \\
 6 & The library's own temporaries add no reference at a mutation & measured, per shape (\cref{sec:evidence}) \\
-7 & The compiler's counts follow the uses of the term, and its insertions implement them & assumed \\
-8 & The runtime's exclusivity test is $\rc = 1$, and the store primitive stores in place exactly when it holds & assumed \\
+7 & The compiler's counts follow the uses of the term, and its lowering of a write implements them & assumed, narrowed by the counted model (\cref{rem:link7}) \\
+8 & The runtime's exclusivity test is $\rc = 1$ & assumed (\code{RuntimeAgrees}) \\
 9 & A compiled write updates in place on the shapes covered & measured (\cref{sec:evidence}) \\
 \bottomrule
 \end{tabular}
@@ -1617,12 +1617,14 @@ Link & Content & Status \\
 is a source program whose every write site is reached with the object
 unshared by the interface --- which is link 5's content --- and with no reader
 outstanding, which is links 3 and 4. Links 7 and 8 are what carry that to the
-machine, and they are assumptions here rather than theorems: link 7 is the
+machine, and both are assumptions here rather than theorems: link 7 is the
 counting discipline documented by Ullrich and de Moura
-\cite{ullrich2019counting} and refined by Perceus \cite{reinking2021perceus}, and
-link 8 is the runtime's contract. Link 6 is neither: it is a property of the
-library's own code, and it is where the paper's measurement effort went, because
-it is the only link under our control.
+\cite{ullrich2019counting} and refined by Perceus \cite{reinking2021perceus},
+narrowed by the counted model \cref{rem:link7} describes to the compiler's
+lowering of a write into that model; link 8 is the runtime's contract, which the
+counted model names \code{RuntimeAgrees}. Link 6 is neither: it is a property of
+the library's own code, and it is where the paper's measurement effort went,
+because it is the only link under our control.
 
 \begin{corollary}[discipline adequacy, conditional]\label{cor:adequacy}
 Assume links 6, 7 and 8. Let $p$ be a program accepted by \code{exec} on a state
@@ -1632,16 +1634,43 @@ $p$'s compiled code is reached with the object's count one, and by
 client.
 \end{corollary}
 
-\begin{remark}[what would make link 7 unconditional]\label{rem:link7}
+\begin{remark}[the counted model, and how far it carries link 7]\label{rem:link7}
 Link 7 could be replaced by a proof against a counted calculus, with the
 sealing assumptions as hypotheses: that the object never escapes, and that every
-read result is built from the observation universe. That turns ``count one at a
-write'' for a class of programs from measured into proved \emph{in the model},
-with the correspondence to compiled executions still assumed link by link. It is
-a different result from a measurement, and it should be labelled as one. The
-development here does not attempt it; the vendored counter model of
-\cref{app:listings} is the vocabulary such a proof would be stated in, not the
-proof.
+read result is built from the observation universe, which is what the interface
+proves. Part of that proof now exists, in modules this paper does not quote.
+
+\code{StateVar/Footprint.lean} makes the count a definition rather than an
+assumption. A \emph{presentation} lists the live cells, a reference is counted
+once per occurrence among their slots and among the handles held outside the
+store --- the runner's own handle, a caller's binding, a live temporary --- and
+\code{Exclusive} is that count being one. \code{StateVar/RCHeap.lean} moves the
+count into the state and proves the two branches of the update: at a count of one
+the write is destructive and the cell keeps its location, and otherwise the
+updated slots land where the heap did not list them while the old cell keeps its
+slots and loses a reference. Its take-out theorem is the counter-level form of
+the trap \cref{sec:evidence} reports: the pair's second handle makes the extracted
+element's count two, so a write below it copies, and dropping that handle first
+restores one, so the same write keeps the location. \code{StateVar/Run.lean} makes
+the statement about a run: the write step \emph{is} the executor's schema, defined
+rather than asserted about, and over a run that starts from the interface's own
+non-escape invariant, every write of the program keeps its address. The emitted
+code is then checked rather than only measured:
+\code{ScidoniaTest/IRShape.lean} reads the post-reference-counting IR this
+toolchain emitted and asserts the shape the measurement recorded, on one
+executing path.
+
+What this does not do is discharge link 7. The compiler's lowering of
+\code{setLeaf} and \code{set} into that shape is a trusted link and not a theorem;
+the correspondence from a model count of one to the runtime's count passing
+\code{IsExclusive} is a hypothesis, \code{RuntimeAgrees}, with no instance
+constructed and no bridge derived; and the IR check establishes that the value
+reaches the write owned, not whether the runtime mutates, because for an array
+element write the copy-or-mutate decision is not in the IR at all. Link 7 is
+therefore narrower than the table's \emph{assumed} suggests --- the modelled shape
+and the run over it are proved, and the emitted shape is checked --- while the two
+correspondence steps outside the model remain assumptions, and none of this is a
+statement about Lean's object graph.
 \end{remark}
 
 \subsection{Non-claims}
@@ -1842,10 +1871,11 @@ line, not a truncation of it. And a law frame quotes the \emph{statement} of a
 theorem, ending where the statement ends, so the proof that follows it is
 usually not shown.
 
-The library publishes 184 theorems under \code{Scidonia/}, of which the second
-half of this appendix reproduces 110, being the ones this paper states or uses;
-seventeen of the 184 are vendored from Lean's own model of the count, and the
-seven frames of the reference-count section are this repository's own facts.
+The library publishes 442 theorems under \code{Scidonia/}, of which this appendix
+reproduces 110: the ones the paper's claims rest on. Seventeen of the 442 are
+vendored from Lean's own model of the count, and the seven frames of the
+reference-count section are this repository's own facts; the counted model of
+\cref{rem:link7}, and the checks beside it, are not quoted here.
 Two checks run against the frames. Every panel carries a \code{\%!check:}
 directive naming a fragment the quoted range must contain, and every law frame
 names its declaration instead; \code{check-listings.py} fails when a range has
