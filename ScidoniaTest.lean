@@ -15,3 +15,4 @@ import ScidoniaTest.RC
 import ScidoniaTest.Target
 import ScidoniaTest.Discipline
 import ScidoniaTest.Typing
+import ScidoniaTest.Correspondence

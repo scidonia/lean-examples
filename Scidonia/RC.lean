@@ -25,3 +25,4 @@ import Scidonia.RC.Target
 import Scidonia.RC.Ownership
 import Scidonia.RC.Discipline
 import Scidonia.RC.Typing
+import Scidonia.RC.Correspondence

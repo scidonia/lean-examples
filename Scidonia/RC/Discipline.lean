@@ -6,9 +6,13 @@ on the environment under which the account's count at the subject's cell is one.
 `Scidonia.RC.Ownership` states what the target's write does at a subject the term
 owns once and what it does otherwise, but its two premises --- the term's own
 occurrence of the subject (`Owns`) and the account counting that occurrence once
---- are premises nothing in the development supplies. This module supplies them, as
-a *judgement* of the term against the account rather than as an identity between
-the account and a computation on the term's free variables.
+--- are premises a derivation has to supply. This module supplies them *at a store*,
+as a *judgement* of the term against the account rather than as an identity between
+the account and a computation on the term's free variables; the link from a
+*typing* to them is `Scidonia.RC.Correspondence`'s correspondence, and the two are
+routes of different kinds: this judgement is a target-side sufficient condition read
+against the target's relation, and the correspondence is read against the typing's
+environments.
 
 **Why a judgement, and not an identity.** The reading this module replaces fixes
 the account as the term's free occurrences read through the environment: `uses`

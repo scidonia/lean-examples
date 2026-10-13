@@ -992,6 +992,41 @@ one**, and a subject another reference also names copies. So "every write in an
 accepted program is destructive" reduces to "in the lowered term every store's
 subject is owned" — a surface-side statement, which is not built here.
 
+`Correspondence.lean` is the link from the typing to those two assumptions of the
+store theorems. The typing counts *names* at a store's environment and the store
+theorems count a *reference* in the term's own account, so the link is a
+correspondence `Corr ρ m Γ` between the target's environment `ρ`, the term's own
+account `m` and the typing's environment `Γ`: every pair of the account names the
+reference the environment binds its name to (`Bound`, which `Couple` already
+carries), the account's multiplicity at each name is the typing's count of that
+name, and the account's tags are injective on references (`RefInj`). `bridge` reads
+a store's own write clause — its subject owned exactly once — into the write
+theorem's two premises, `owns_of_correspondence` is the half of it that needs no
+injectivity, and `store_destructive_of_typed` composes the two with
+`store_owned_is_destructive`. The injectivity is the clause neither `Typed` nor
+`Couple` supplies, and the module exhibits the configuration that separates them:
+two names naming one reference, the store typed there, the account `Bound` and
+inside `Couple`, and the reference counted twice, so the count of one does not
+follow (`couple_does_not_give_count_one`); what would supply it is a distinctness
+or freshness condition on the environment the program starts from, or the same at
+the take-out of a nested write. `ScidoniaTest/Correspondence` reads the account a
+lowered run actually reaches, the correspondence and the composition applied there,
+and the affirmative side — the accounts the lowering's prologue and the source's own
+environment leave are injective, and the typing refuses the sibling term that would
+leave one name twice.
+
+`Discipline.lean`'s `Runs` and this correspondence are two routes and not one.
+`Runs` is a target-side sufficient condition *at a store*, which `runs_store_owned`
+reads the write's two hypotheses off, and it is not the link from a typing: the
+source of `ScidoniaTest/Target` is typed at `[]`, `[0, 1, 2]` and its canonical
+lowering is not judged, because `Runs.bindVal` demands the resumed write at every
+reference the binder could take and the instance at `r = 2` counts that reference
+three times — `source_typed` beside `lowered_not_runs`. The correspondence is read
+at the configuration the run does reach, where the judgement holds as well, and
+`ScidoniaTest/Correspondence` reads both there. `Typing.lean` is the source side the
+correspondence is stated against: the lowering's environment discipline read as a
+typing, with the write's clause strengthened to the subject's ownership.
+
 What is *not* claimed: no theorem relates the two calculi semantically — that the
 target's reduction preserves the source's, or that it is garbage free — so the
 lowering is shown to be a total deterministic strategy and not a correct one; and
