@@ -15,7 +15,8 @@ Four kinds of check, all against the library:
       the generated frame must be exactly the range with its comments removed,
       by leanstrip.py, recomputed here.  This is what makes a frame's content
       checked rather than asserted: the generator writes the file, and this
-      recomputes it.
+      recomputes it.  A range whose code strips to nothing is a failure rather
+      than an empty frame an empty file could match.
 
   counts.tex
       the generated counts must be exactly what gen-laws.py derives from the
@@ -25,6 +26,11 @@ Four kinds of check, all against the library:
 
 Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
 Exit status 0 when every frame and count checks out, 1 otherwise.
+
+A source that cannot be opened, and a range the source does not reach, are
+failures rather than skipped checks: both are reported and neither counts as a
+check performed, so the summary cannot report a panel as checked when nothing
+was read.
 """
 
 import importlib.util
@@ -130,15 +136,23 @@ def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def read_source(path: Path, limit: int, context: str):
-    """The lines of `path`, or None after reporting that it cannot be read."""
+def read_source(path: Path, limit: int, context: str,
+                problems: list[str]) -> list[str] | None:
+    """The lines of `path`, or None after recording that it cannot be read.
+
+    A source that cannot be opened and a range its file does not reach are both
+    failures rather than skipped checks: each is recorded in `problems`, which is
+    what the entrypoint fails on, and the caller counts the check only when this
+    returns lines.
+    """
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:
-        print(f"{context}: cannot read {path}: {error}")
+        problems.append(f"{context}: cannot read {path}: {error}")
         return None
     if limit > len(lines):
-        print(f"{context}: {path} has only {len(lines)} lines, range is ..{limit}")
+        problems.append(f"{context}: {path} has only {len(lines)} lines, "
+                        f"range is ..{limit}")
         return None
     return lines
 
@@ -150,6 +164,10 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
     for number, line in enumerate(lines, start=1):
         match = CHECK.match(line)
         if match:
+            if pending is not None:
+                problems.append(
+                    f"{tex.name}:{pending[0]}: %!check: with no frame between it "
+                    f"and the one at line {number}")
             pending = (number, match.group("frag"))
             continue
         match = FRAME.search(line)
@@ -159,12 +177,13 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
             problems.append(f"{tex.name}:{number}: frame without a %!check:")
             continue
         directive, fragment = pending
-        pending, checked = None, checked + 1
+        pending = None
         where = f"{tex.name}:{directive}"
         lo, hi = int(match.group("lo")), int(match.group("hi"))
-        body = read_source(tex.parent / match.group("path"), hi, where)
+        body = read_source(tex.parent / match.group("path"), hi, where, problems)
         if body is None:
             continue
+        checked += 1
         if normalise(fragment) not in normalise("\n".join(body[lo - 1:hi])):
             problems.append(
                 f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
@@ -212,7 +231,7 @@ def check_lawframes(tex: Path, problems: list[str]) -> int:
         name = match.group("name").replace("\\_", "_").replace("\\%", "%")
         lo, hi = int(match.group("lo")), int(match.group("hi"))
         module = match.group("path")
-        body = read_source(tex.parent / ".." / module, hi, where)
+        body = read_source(tex.parent / ".." / module, hi, where, problems)
         if body is None:
             continue
         decl = re.compile(rf"^(?:@\[[^\]]*\]\s*)?(?:{KINDS})\s+{re.escape(name)}(?![\w'])")
@@ -261,10 +280,13 @@ def check_frames(here: Path, tex: Path, table: dict, problems: list[str]) -> int
             problems.append(f"{where}: cannot read frames/{key}.lean: {error}")
             continue
         source = (here / path).resolve()
-        lines = read_source(source, hi, where)
+        lines = read_source(source, hi, where, problems)
         if lines is None:
             continue
         want = leanstrip.frame_body(lines, lo, hi)
+        if not want.strip():
+            problems.append(f"{where}: {path}:{lo}-{hi} quotes no code")
+            continue
         got = frame.rstrip("\n")
         if want != got:
             problem = (f"{where}: frames/{key}.lean is not comments-stripped "

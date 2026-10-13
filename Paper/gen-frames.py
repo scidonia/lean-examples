@@ -17,6 +17,10 @@ when the two differ, so a frame cannot drift from the library it quotes, and a
 frame's content is verified rather than asserted.
 
 Usage:  python3 gen-frames.py [--dry-run]
+
+A call whose source is missing or unreadable, a range its file does not reach,
+a frame that comes out empty and a nonnumeric frame argument are each reported
+and make the run fail, so a frame the paper asks for is never silently absent.
 """
 
 import hashlib
@@ -162,20 +166,30 @@ def main(argv):
 
     wanted, malformed = calls()
     table, report, empty = [], [], []
+    failed = bool(malformed)
     for where in malformed:
         report.append(f"MALFORMED FRAME CALL {where}")
     for path, lo, hi in wanted:
         module = (HERE / path).resolve()
         if not module.is_file():
             report.append(f"MISSING SOURCE {path}")
+            failed = True
             continue
-        lines = module.read_text(encoding="utf-8").splitlines()
+        try:
+            text = module.read_text(encoding="utf-8")
+        except OSError as error:
+            report.append(f"UNREADABLE SOURCE {path}: {error}")
+            failed = True
+            continue
+        lines = text.splitlines()
         if hi > len(lines):
             report.append(f"RANGE PAST END {path}:{lo}-{hi} ({len(lines)} lines)")
+            failed = True
             continue
         body = leanstrip.frame_body(lines, lo, hi)
         if not body.strip():
             empty.append(f"{path}:{lo}-{hi}")
+            failed = True
         key = key_of(path, lo, hi)
         if not dry:
             (out / f"{key}.lean").write_text(body + "\n", encoding="utf-8")
@@ -213,8 +227,7 @@ def main(argv):
         print("EMPTY FRAMES:", empty)
     if dry:
         print("(dry run: nothing written)")
-    return 1 if empty or malformed or any(
-        "MISSING" in r or "PAST" in r for r in report) else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

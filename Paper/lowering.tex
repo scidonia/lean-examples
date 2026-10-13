@@ -189,7 +189,7 @@ value that already exists, and no program can tell whether some other array
 happens to share a buffer with this one. The source language is pure, and the
 compiler is free to make it fast.
 
-The compiler is fast in a specific way. The runtime tests a cell's count before a
+The compiler is fast in a specific way: the runtime tests a cell's count before a
 write and takes one of two branches, into the cell's own buffer or into a fresh
 one, and that test and its branches are the runtime's documented behaviour rather
 than anything proved here. What this paper proves is the same pair for a counted
@@ -229,7 +229,8 @@ the same either way --- it is an optimisation of the run.
 
 \paragraph{The crux.} The condition a write would like to hold --- that the cell it
 writes is the program's own, named nowhere else --- is a fact about the
-\emph{compiled code} and not about the meaning of the program. A source term has
+\emph{compiled code} and not about the meaning of the program, and the link
+between the two is the trusted one of \cref{sec:trusted}. A source term has
 no way to state it: it is not a value, not a type, and not an equation. Getting it
 to hold where a programmer wants a write to land in place is therefore a
 \emph{discipline} on the source, and a discipline is what this paper builds after
@@ -567,7 +568,8 @@ them. \cref{sec:run} reads the same two facts off a write step of an accepted ru
 
 The pair of \cref{sec:pair-statement} counts a \emph{reference} in the term's own
 account. A compiler counting at a site counts the occurrences of a \emph{name} in
-the environment that site is compiled in. The two agree only because the target's
+the environment that site is compiled in, an account whose implementation link is
+trusted as stated in \cref{sec:trusted}. The two agree only because the target's
 accounts happen to be injective on references, and nothing in the source language
 says they are. What the source needs, and what this section builds, is a judgement
 that admits a write only where the environment gives its subject exactly one
@@ -1027,8 +1029,9 @@ theorem says the target computes what the source computes, or that it is garbage
 free. What is proved of the lowering is totality and determinism. The declarative
 relation of the literature is not the one formalised here: the strategy's splits
 are canonical, for determinism, so the results are properties of \emph{this}
-strategy, which is what a compiler implements. And nothing here is about a
-compiled program: the references are names in a list, not addresses.
+strategy, and that a compiler's lowering is this strategy is trusted rather than
+proved here (\cref{sec:trusted}). And nothing here is about a compiled program:
+the references are names in a list, not addresses.
 
 \section{Mechanisation, and related work}
 \label{sec:future}
