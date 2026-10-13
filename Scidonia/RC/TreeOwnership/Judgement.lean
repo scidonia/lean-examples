@@ -390,6 +390,12 @@ theorem HandleWF.handoff {d : Layout} {Γ : Var → Option (TreeTy d)} {x y : Va
   rw [hzx, removeTy_self] at hz
   exact absurd hz (by simp)
 
+/-- A context extended at a name with an observation holds that observation there:
+the lowering to the fragment's context reads it back. -/
+theorem obsEnv_extendTy_obs {d : Layout} (Γ : Var → Option (TreeTy d)) (y : Var) (o : ObsDesc) :
+    obsEnv (extendTy Γ y (.obs o)) y = some (.obs o) := by
+  simp [obsEnv, extendTy]
+
 /-! ## The account's rights -/
 
 /-- The account admits a write by the holder `w` at a node: the holder has the
@@ -785,18 +791,44 @@ def witnessEnv : VEnv :=
 
 /-- The reader's identifier names the left leaf's handle. -/
 theorem witness_ctx_left : witnessCtx leftName = some (.node witnessLeftTy) := by
-  simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-    rightName]
+  rw [witnessCtx, extendTy_of_ne (by decide : leftName ≠ rightName)]
+  rw [witnessLeftCtx, extendTy_self]
+
+/-- The witness's context holds nothing at a name it does not bind. -/
+theorem witnessCtx_out : witnessCtx outName = none := by
+  rw [witnessCtx, extendTy_of_ne (by decide : outName ≠ rightName)]
+  rw [witnessLeftCtx, extendTy_of_ne (by decide : outName ≠ leftName)]
+  rw [witnessRootCtx, extendTy_of_ne (by decide : outName ≠ rootName)]
+  rfl
+
+/-- The witness's environment at its root name: the struct node of its two leaves'
+observations. -/
+theorem witnessEnv_root :
+    witnessEnv rootName
+      = some (.con2 structTag (.con1 rootTag (.con0 7)) (.con1 rootTag (.con0 9))) := by
+  decide
+
+/-- The witness's environment at its left leaf's name: that leaf's observation. -/
+theorem witnessEnv_left : witnessEnv leftName = some (.con1 rootTag (.con0 7)) := by
+  decide
+
+/-- The witness's environment at its right leaf's name: that leaf's observation. -/
+theorem witnessEnv_right : witnessEnv rightName = some (.con1 rootTag (.con0 9)) := by
+  decide
+
+/-- The witness's environment holds nothing at a name it does not bind. -/
+theorem witnessEnv_out : witnessEnv outName = none := by
+  decide
 
 /-- The writer's identifier names the root's handle. -/
 theorem witness_ctx_root : witnessCtx rootName = some (.node witnessRootTy) := by
-  simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-    rightName]
+  rw [witnessCtx, extendTy_of_ne (by decide : rootName ≠ rightName)]
+  rw [witnessLeftCtx, extendTy_of_ne (by decide : rootName ≠ leftName)]
+  rw [witnessRootCtx, extendTy_self]
 
 /-- The writer's identifier names the right leaf's handle. -/
 theorem witness_ctx_right : witnessCtx rightName = some (.node witnessRightTy) := by
-  simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-    rightName]
+  rw [witnessCtx, extendTy_self]
 
 /-- The left leaf's ledger is the reader's loan, so the left leaf is a node the
 reader holds. -/
@@ -935,9 +967,8 @@ theorem witness_sibling_write_admitted :
   TreeOwn.write (x := rightName) (a := .con0 9) (w := writerId) (p := siblingRight)
     (o := .nat) (h := rfl) (v := .con0 9) (xel := 9) (hA := siblingAccount_valid)
     (hΓ := witnessCtx_handleWF)
-    (by simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-      rightName, witnessRightTy])
-    (by simp [witnessEnv, rootName, leftName, rightName])
+    witness_ctx_right
+    witnessEnv_right
     (Obs.nat 9) rfl witness_right_writeHolds
     (by rfl)
 
@@ -972,6 +1003,12 @@ theorem cellCtx_handleWF : HandleWF cellCtx :=
 
 /-- The one-node environment: the name holds the root node of 7. -/
 def cellEnv : VEnv := fun z => if z = cellName then some (.con1 rootTag (.con0 7)) else none
+
+/-- The one-node environment at its one name: the root node of 7. -/
+theorem cellEnv_cell : cellEnv cellName = some (.con1 rootTag (.con0 7)) := by decide
+
+/-- The one-node environment holds nothing at a name it does not bind. -/
+theorem cellEnv_next : cellEnv nextName = none := by decide
 
 /-- The one-node account: nothing is lent at the root, so it is held whole. -/
 def cellAccount : Account (.leaf .nat) := [(.here, [])]
@@ -1045,8 +1082,8 @@ theorem cell_handoff_admitted :
     TreeOwn.write (x := cellName) (a := .con0 5) (w := 0)
       (p := (Path.here : Path (.leaf .nat))) (o := .nat) (h := rfl) (v := .con0 7) (xel := 5)
       (hA := cellAccount_valid) (hΓ := cellCtx_handleWF)
-      (by simp [cellCtx, emptyCtx, extendTy, cellName, cellTy])
-      (by simp [cellEnv, cellName])
+      (by rw [cellCtx, extendTy_self]; rfl)
+      cellEnv_cell
       (Obs.nat 5) rfl cell_write_admitted (by rfl)
   have h₂ : TreeOwn (.leaf .nat) (extendTy (removeTy cellCtx cellName) nextName (.node cellTy))
       (VEnv.extend cellEnv nextName (.con1 rootTag (.con0 5))) cellAccount
@@ -1065,9 +1102,9 @@ theorem cell_handoff_admitted :
   exact TreeOwn.handoff (x := cellName) (y := nextName) (a := .con0 5)
     (e₂ := .store (.var nextName) 0 (.con0 6)) (n := cellTy)
     (hA := cellAccount_valid) (hΓ := cellCtx_handleWF)
-    (by simp [cellCtx, extendTy, cellName, cellTy]) h₁
-    (by simp [cellCtx, emptyCtx, extendTy, cellName, nextName])
-    (by simp [cellEnv, cellName, nextName, cellTy]) h₂
+    (by rw [cellCtx, extendTy_self]) h₁
+    (by rw [cellCtx, extendTy_of_ne (by decide : nextName ≠ cellName)]; rfl)
+    cellEnv_next h₂
 
 /-! ## The write handed two names of one subtree
 
@@ -1086,9 +1123,10 @@ detector the refusal below is read with. -/
 theorem aliasCtx_not_handleWF : ¬ HandleWF aliasCtx := by
   intro h
   have hx : aliasCtx cellName = some (.node cellTy) := by
-    simp [aliasCtx, cellCtx, emptyCtx, extendTy, cellName, aliasName]
+    rw [aliasCtx, extendTy_of_ne (by decide : cellName ≠ aliasName)]
+    rw [cellCtx, extendTy_self]
   have hy : aliasCtx aliasName = some (.node cellTy) := by
-    simp [aliasCtx, cellCtx, emptyCtx, extendTy, cellName, aliasName]
+    rw [aliasCtx, extendTy_self]
   exact (by decide : cellName ≠ aliasName) (h cellName aliasName cellTy cellTy hx hy rfl)
 
 /-- The write handed two names of one subtree is not derivable: the context that
@@ -1140,17 +1178,13 @@ theorem witness_leaf_read_admitted :
   TreeOwn.read (x := leftName) (y := outName) (body := .var outName) (w := readerId)
     (p := siblingLeft) (o := .nat) (h := rfl) (share := fun _ => 1 / 2)
     (v := .con0 7) (xel := 7) (hA := siblingAccount_valid) (hΓ := witnessCtx_handleWF)
-    (by simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-      rightName, witnessLeftTy])
-    (by simp [witnessEnv, rootName, leftName, rightName])
+    witness_ctx_left
+    witnessEnv_left
     rfl witnessLoan_read
     (by rfl)
-    (by simp [witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, extendTy, rootName, leftName,
-      rightName, outName])
-    (by simp [witnessEnv, rootName, leftName, rightName, outName])
-    (TreeOwn.obs (Obs.var outName
-      (by simp [obsEnv, extendTy, witnessCtx, witnessLeftCtx, witnessRootCtx, emptyCtx, rootName,
-        leftName, rightName, outName])
+    witnessCtx_out
+    witnessEnv_out
+    (TreeOwn.obs (Obs.var outName (obsEnv_extendTy_obs witnessCtx outName .nat)
       Fragment.nat) siblingAccount_valid
       (witnessCtx_handleWF.extendTy_obs))
 
