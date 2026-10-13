@@ -13,3 +13,4 @@ import ScidoniaTest.IRShape
 import ScidoniaTest.Run
 import ScidoniaTest.RC
 import ScidoniaTest.Target
+import ScidoniaTest.Discipline
