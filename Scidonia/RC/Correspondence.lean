@@ -299,12 +299,11 @@ theorem bridge {ρ : TEnv} {m : Multi} {Γ : Occs} {y : Var} {r : Ref} {i : Nat}
     (h : Corr ρ m Γ) (hlook : ρ.lookup y = some r) (hone : Γ.count y = 1) :
     Owns ρ m (.store (.var y) i v) ∧ (expand m).count r = 1 := by
   have hcy : countName m y = 1 := by rw [h.name y, hone]
-  obtain ⟨r', hmem⟩ := countName_one_pair hcy
-  have hmem' : (y, r) ∈ m := by
-    have hb := h.bound (y, r') hmem
-    have hrr : r' = r := Option.some.inj (hb.symm.trans hlook)
-    rw [← hrr]; exact hmem
-  exact ⟨Owns.store hlook hmem', count_expand_one h.inj hmem' hcy⟩
+  have howns := owns_of_correspondence (i := i) (v := v) h.bound (h.name y) hone hlook
+  refine ⟨howns, ?_⟩
+  obtain ⟨r', hlook', hmem⟩ := howns.store_occurrence
+  have hrr : r' = r := Option.some.inj (hlook'.symm.trans hlook)
+  exact count_expand_one h.inj (by rw [← hrr]; exact hmem) hcy
 
 /-! ## Two names at one reference
 
