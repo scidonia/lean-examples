@@ -1173,6 +1173,63 @@ https://scidonia.github.io/lean-examples/Slides/update.html. Its
 not checked panels: the Lean panels around them are compiled, and the address
 assertions that ship live in the `inplace` harness.
 
+## Paper
+
+`Paper/` holds the paper on this work:
+
+| Path | Contents |
+| --- | --- |
+| `unobservable-effects.tex` | The paper's source |
+| `unobservable-effects.pdf` | The built paper, committed so it reads without a TeX installation |
+| `frames/` | The frames, generated: one comment-free copy of a quoted range per file, plus `lookup.tex` mapping a range to its file. Do not edit by hand |
+| `laws.tex` | The law frames, generated from the library by `gen-laws.py`; do not edit by hand |
+| `gen-laws.py` | Locates each law's statement by line range and writes `laws.tex` |
+| `gen-frames.py` | Writes the frames the paper asks for, with `leanstrip.py` |
+| `leanstrip.py` | Removes Lean comments (nested block comments, line comments, strings) |
+| `check-listings.py` | Verifies every frame in the paper against the library |
+
+The paper builds with `pdflatex`, and its Lean frames are syntax-highlighted by
+`minted`, reading each frame through Pygments' Lean lexer under the
+`gruvbox-light` style — the light styles differ mostly in how much colour they
+spend, and the dark ones (`one-dark`, `monokai`, `dracula`, `lovelace`) paint
+identifiers near-white, which vanishes on paper. Two consequences for the build:
+it needs `-shell-escape` for minted to run `pygmentize`, and it needs Pygments on
+`PATH`. `_minted-<jobname>/` holds minted's cache and is ignored by git; deleting
+it only costs a slower rebuild.
+
+A frame is written `\codeframe[linerange=lo-hi]{../path}`, naming the source and
+not the frame: the preamble's `frames/lookup.tex` turns that range into
+`frames/<key>.lean`, and a range with no generated frame is a build error. The
+frame is that range with its comments removed, so a doc comment between two
+constructors does not appear, and a range that begins inside a doc comment does
+not leak the tail of it. Each frame is set in an unbreakable box, so it cannot be
+split across a page: a frame too tall for the space left moves to the next page,
+and the build reports an overfull vbox if a frame were taller than a page. The
+toolchain's `lualatex` cannot load its font loader, so `pdflatex` it is, and the
+Unicode in the quoted Lean is mapped to font commands in the preamble by
+`newunicodechar`. A character in a quoted range with no mapping fails the build,
+which is the signal to add one.
+
+```sh
+cd Paper
+python3 gen-laws.py                       # law frames, after a library change
+python3 gen-frames.py                     # the frames themselves
+latexmk -pdf -shell-escape unobservable-effects.tex   # the paper
+python3 check-listings.py                 # every frame, against the library
+```
+
+Every frame is a line range into the library, so the paper quotes the source
+rather than a transcription of it, and a range that has drifted is a build
+failure rather than a silent misquotation. `check-listings.py` checks a panel
+against a fragment the marginal `%!check:` directive names, a law frame against
+the declaration it names, and a generated frame against the range it was made
+from, recomputing the comments-removed text. Nothing here compiles the Lean: the
+library is built separately, and the paper's measurements are the `inplace`
+harness's.
+
+The description, observation and layout universes are quoted in the body, where
+they are defined, rather than in the appendix, so each is shown once.
+
 ## Layout
 
 | Path | Contents |
@@ -1225,4 +1282,5 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
 | `paper/` | The paper on the lowering and the static count-one guarantee: `lowering.tex` and its built PDF |
 | `Slides/` | The slide deck's sources: prose series and stepped proofs |
+| `Paper/` | The paper: source, built PDF, and the tools that keep its quotations to the library |
 | `Main.lean` | Entry point of the `scidonia` executable |
