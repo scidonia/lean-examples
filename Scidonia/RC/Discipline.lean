@@ -141,7 +141,12 @@ location and the resumed store is judged there. The universally quantified oblig
 is what the judgement adds beyond the rule, and it is exactly why the judgement is a
 sufficient condition the write theorem consumes rather than an invariant of the
 relation. `ScidoniaTest/Discipline`'s `bindVal_not_judged`, `bindVal_body_judged` and
-`bindVal_step_reaches` are that witness.
+`bindVal_step_reaches` are that witness. The same obligation is what refuses the
+judgement at a *lowering*: the source term of `ScidoniaTest/Target`'s lowered run is
+typed at `[]`, `[0, 1, 2]`, and its canonical lowering is not judged, because
+`Runs.bindVal` demands the resumed write at `r = 2`, where the account counts the
+reference three times --- `ScidoniaTest/Target`'s `lowered_not_runs`, beside
+`source_typed`, is that witness.
 
 **What is modelled, and what is trusted.** The judgement is a static reading of a
 configuration: the environment, the term's own multiplicities and the term, with no

@@ -6,7 +6,7 @@ The two modules are the target runtime of λ¹'s heap semantics at
 the coupling invariant `Couple`, its preservation by every step, and the two store
 theorems. A proof development has no pre-fix behaviour to observe, so the checks here
 meet its definitions and theorems from outside, on heaps, terms and multiplicities a
-client can build. They are of seven kinds:
+client can build. They are of nine kinds:
 
 * **The checks and the store's branch, evaluated**, as `#guard`s: the liveness test at
   the cells of a small heap, the write's own check at two operands, the naming checks
@@ -42,6 +42,11 @@ client can build. They are of seven kinds:
   well formed, counted at the run's handles and the term's own references, and each
   pair of the account names the reference the environment binds its variable to; the
   steps the contexts take leave coupled configurations.
+* **The lowering of a typed term, and the judgement at it**, as theorems: the source
+  term the guards above lower is typed at the environments the strategy walks, and the
+  judgement of `Scidonia.RC.Discipline` is refused at the lowering the strategy answers
+  --- the binding clause's obligation read at the reference it fails at, with the count
+  that fails it.
 * **Axioms**: each representative theorem's `#print axioms` output is pinned to the
   standard kernel principles, so a proof that acquires any other axiom fails the build
   rather than printing a longer list for a reader to notice.
@@ -546,6 +551,146 @@ did not evaluate to `true`
 #guard decide (trun 4 (base, [], env0, [(0, 0), (1, 1), (2, 2)], lowered)
   = (base, [], env0, [(0, 0), (1, 1), (2, 2)], lowered))
 
+/-! ## The typing of the source, and the judgement at the lowering
+
+The source term and the lowering the guards above read are a typed term and the target
+the strategy answers it: the binding's body writes the name it binds exactly once and is
+bound to a node the program built --- the two conditions the typing's binding rule carries
+beyond the lowering's discipline --- and the write's subject is owned once at the
+environment the binding hands its body. The judgement of `Scidonia.RC.Discipline` is *not*
+derived at that lowering. Its binding clause asks the resumed body to be judged at *every*
+reference the binder could take, and at the reference `2`, the one the environment already
+names for the written value, the account counts `2` three times: once through the binder
+the clause adds, and twice through the occurrences the prologue left. The store's clause
+carries a distinctness demand that the reference the environment names is counted once, so
+it is not met there, and no other clause of the binding's shape is available: the bound
+term is a value that is no variable, so `Runs.bindVal` is the clause. The checks below read
+the typing, the account the prologue leaves, the count the obligation fails at, the
+obligation itself and the judgement, refused. -/
+
+/-- The account the lowering's prologue leaves: the source account with the occurrence the
+`dup` supplies for the variable `2` and the occurrence the `drop` releases from the
+variable `0`. It is the account the binding is judged at. -/
+def prologueAcct : Multi := Multi.dropOcc (Multi.insert [(0, 0), (1, 1), (2, 2)] 2 2) 0 0
+
+/-
+The count the obligation fails at, evaluated: the account the prologue leaves names the
+reference `2` twice, and the account the binding hands its body names it three times once
+the binder's own occurrence joins it. The store's clause demands a count of one. The
+control beside it is the reference `0`, which the same account counts once.
+-/
+#guard decide ((expand prologueAcct).count 2 = 2)
+#guard decide ((expand (Multi.insert prologueAcct 0 2)).count 2 = 3)
+#guard decide ((expand (Multi.insert prologueAcct 0 0)).count 0 = 1)
+
+/--
+error: Expression
+  decide (List.count 2 (expand (prologueAcct.insert 0 2)) = 1)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide ((expand (Multi.insert prologueAcct 0 2)).count 2 = 1)
+
+/-- The source term is typed at the owned occurrences `[0, 1, 2]`, with nothing borrowed:
+its binding's body writes the name it binds exactly once and that name is introduced for a
+node the program built, and the write's subject is owned once there and not borrowed. -/
+theorem source_typed : Typed [] [0, 1, 2] source := by
+  unfold source
+  refine Typed.bind (x := 0) (by decide) (by intro _; rfl) ?_ ?_
+  · refine Typed.con2 (c := 7) ?_ ?_
+    · exact Typed.var (Or.inl (by decide))
+    · exact Typed.var (Or.inl (by decide))
+  · refine Typed.store (by decide) (by decide) ?_
+    exact Typed.var (Or.inl (by decide))
+
+/-- The environment the binding clause's obligation is read at when the binder takes the
+reference `2`: the variable `0` names `2` there, which is the reference the written value's
+own name already carries. -/
+theorem setEnv0_zero_two : (TEnv.set env0 0 2).lookup 0 = some (2 : Ref) := by decide
+
+/-- The count the obligation fails at: the account the binding hands its body counts the
+reference `2` three times, the binder's own occurrence beside the two the prologue left ---
+the source account's pair for the variable `2` and the occurrence the `dup` supplied. -/
+theorem prologueAcct_count_two : (expand (Multi.insert prologueAcct 0 2)).count 2 = 3 := by
+  decide
+
+/-- The binding clause's obligation at the reference `2`, refused: the resumed write's
+clause demands, at the reference the environment names for its subject, that the account
+count that reference once, and the account counts it three times. -/
+theorem prologueAcct_store_not_judged :
+    ¬ Runs (TEnv.set env0 0 2) (Multi.insert prologueAcct 0 2) storeTerm := by
+  intro h
+  obtain ⟨_, r, hρ, hcount⟩ := runs_store_owned h
+  have hr : _ = (2 : Ref) := Option.some.inj (hρ.symm.trans setEnv0_zero_two)
+  rw [hr, prologueAcct_count_two] at hcount
+  exact absurd hcount (by decide)
+
+/-- The affirmative control at the same body: the reference `0` is one the account the
+binder hands the body counts once, so the resumed write *is* judged there --- the write's
+own clause is met, and what the refutation above reads is the reference `2` the account
+counts three times, not a term the judgement never accepts. -/
+theorem prologueAcct_store_judged_at_zero :
+    Runs (TEnv.set env0 0 0) (Multi.insert prologueAcct 0 0) storeTerm := by
+  refine Runs.store (ρ := TEnv.set env0 0 0) (y := 0) (i := 0) (v := .var 2)
+    (m := Multi.insert prologueAcct 0 0)
+    (Owns.store (m := Multi.insert prologueAcct 0 0) (y := 0) (r := 0) (i := 0) (v := .var 2)
+      (hρ := TEnv.lookup_set_self env0 0 0) (hmem := by decide)) ?_ ?_ ?_
+  · intro r hr
+    have hrr : r = 0 := Option.some.inj (hr.symm.trans (TEnv.lookup_set_self env0 0 0))
+    rw [hrr]
+    decide
+  · exact Runs.var (x := 2) (r := 2) (hρ := by decide) (hmem := by decide)
+  · exact Runs.var (x := 0) (r := 0) (hρ := TEnv.lookup_set_self env0 0 0)
+      (hmem := by decide)
+
+/-- The instance of `Runs.bindVal`'s continuation premise that fails: the clause demands
+the resumed body be judged at *every* reference the binder could take, and the instance at
+the reference `2` is refused. -/
+theorem prologueAcct_obligation_fails :
+    ¬ (∀ r, Runs (TEnv.set env0 0 r) (Multi.insert prologueAcct 0 r) storeTerm) :=
+  fun hcont => prologueAcct_store_not_judged (hcont 2)
+
+/-- The failing reading in one statement: the environment names the write's subject at `2`,
+the account counts `2` three times where the store's clause demands one, and the body's
+write is therefore not judged. -/
+theorem prologueAcct_binding_refused :
+    (TEnv.set env0 0 2).lookup 0 = some (2 : Ref)
+      ∧ (expand (Multi.insert prologueAcct 0 2)).count 2 = 3
+      ∧ ¬ Runs (TEnv.set env0 0 2) (Multi.insert prologueAcct 0 2) storeTerm :=
+  ⟨setEnv0_zero_two, prologueAcct_count_two, prologueAcct_store_not_judged⟩
+
+/-- The judgement is not derived at the lowering of the typed source: the prologue's `dup`
+and `drop` are those instructions' clauses, the binding's own clause is `Runs.bindVal` ---
+its bound term is a value that is no variable --- and that clause's continuation premise
+fails at the reference `2`. -/
+theorem lowered_not_runs : ¬ Runs env0 [(0, 0), (1, 1), (2, 2)] lowered := by
+  intro h
+  unfold lowered at h
+  cases h with
+  | dup hρ h₁ =>
+      have hr : _ = (2 : Ref) :=
+        Option.some.inj (hρ.symm.trans (by decide : env0.lookup (2 : Var) = some (2 : Ref)))
+      rw [hr] at h₁
+      cases h₁ with
+      | drop hρ' _ h₂ =>
+          have hr' : _ = (0 : Ref) :=
+            Option.some.inj (hρ'.symm.trans (by decide : env0.lookup (0 : Var) = some (0 : Ref)))
+          rw [hr'] at h₂
+          cases h₂ with
+          | bindVal _ _ _ hcont => exact prologueAcct_store_not_judged (hcont 2)
+          | bindPos hval _ _ =>
+              exact absurd (Value.con2 (Value.var 1) (Value.var 2)) hval
+
+/-- The cross-check at one pair of terms: the source is typed at the environments the
+strategy walks, the strategy answers the lowering the guards above read, `Scidonia.RC.Lower`'s
+relation holds at the same target, and the judgement of `Scidonia.RC.Discipline` is not
+derived there. -/
+theorem lowered_typed_not_runs :
+    Typed [] [0, 1, 2] source ∧ lowerB [] [0, 1, 2] source = some lowered
+      ∧ Lower [] [0, 1, 2] source lowered
+      ∧ ¬ Runs env0 [(0, 0), (1, 1), (2, 2)] lowered :=
+  ⟨source_typed, by decide, lowerB_sound source [] [0, 1, 2] lowered (by decide), lowered_not_runs⟩
+
 /-! ## The evaluation contexts, evaluated
 
 The positions λ¹'s heap semantics reaches: a binding's right-hand side, an
@@ -821,5 +966,29 @@ info: 'Scidonia.RC.trun_stepStar' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms trun_stepStar
+
+/--
+info: 'ScidoniaTest.Target.source_typed' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms source_typed
+
+/--
+info: 'ScidoniaTest.Target.prologueAcct_binding_refused' does not depend on any axioms
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms prologueAcct_binding_refused
+
+/--
+info: 'ScidoniaTest.Target.lowered_not_runs' does not depend on any axioms
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms lowered_not_runs
+
+/--
+info: 'ScidoniaTest.Target.lowered_typed_not_runs' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms lowered_typed_not_runs
 
 end ScidoniaTest.Target
