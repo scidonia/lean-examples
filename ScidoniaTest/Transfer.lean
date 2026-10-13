@@ -124,6 +124,30 @@ did not evaluate to `true`
 #guard decide ((1 :: [0] : List Ref).count 0 = 0)
 
 /-
+The two lists the transfer relates count alike: the run's handle list names the extracted
+occurrence at its head and the runner's handle behind it, and the coupling's split names
+the runner's handle and the account's one occurrence, which is the extracted reference.
+-/
+#guard decide ((1 :: [0] : List Ref).count 1 = ([0] ++ expand acct).count 1)
+#guard decide ((1 :: [0] : List Ref).count 0 = ([0] ++ expand acct).count 0)
+
+/--
+error: Expression
+  decide (List.count 1 ([0] ++ expand acct) = 0)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (([0] ++ expand acct).count 1 = 0)
+
+/--
+error: Expression
+  decide (List.count 0 ([0] ++ expand acct) = 2)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (([0] ++ expand acct).count 0 = 2)
+
+/-
 The take-out's check at the extracted occurrence passes: the cell is named by that one
 handle and by no slot.
 -/
@@ -142,7 +166,16 @@ The write's heap does not depend on the handle list it was handed, and it lands 
 written slots at the extracted occurrence: the addressed cell holds the write's slots and
 the cell its emptied slot named is freed by the cascade.
 -/
+#guard decide ((update held (1 :: [0]) 1 []).1 = (update held ([0] ++ expand acct) 1 []).1)
 #guard decide ((update held ([0] ++ expand acct) 1 []).1.lookup 1 = some [])
+
+/--
+error: Expression
+  decide ((update held [1, 0] 1 []).fst = (update held ([0] ++ expand acct) 1 [2]).fst)
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide ((update held (1 :: [0]) 1 []).1 = (update held ([0] ++ expand acct) 1 [2]).1)
 
 /--
 error: Expression
