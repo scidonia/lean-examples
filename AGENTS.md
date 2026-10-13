@@ -1000,6 +1000,21 @@ nothing here is about compiled code. The runtime's own decision is
 repository's write paths into this shape is checked by `ScidoniaTest/IRShape.lean`
 and otherwise trusted, and the `Ref`s are names in a list, not addresses.
 
+`paper/lowering.tex` is the paper on this material: the counted heap, the two
+calculi, the lowering strategy, the account and the two store theorems, with the
+definitions quoted and the prose kept to what each step is for. It is built with
+`pdflatex` — twice, for the bibliography — and the built `paper/lowering.pdf` is
+committed beside it. Two facts about that build are worth recording, because both
+cost time to find. Unicode Lean in `listings` needs `inputencoding=utf8` together
+with `extendedchars` and a `literate` entry for every symbol the excerpts use;
+without the entry the character reaches the font undeclared and the build stops.
+And `fontspec` cannot find any font by name or by path in this environment, so the
+paper is built with `pdflatex` rather than `lualatex`, which forbids Unicode outside
+the listings — the prose uses math mode for symbols and the excerpts do not. The
+excerpts themselves are quoted by hand from the modules and are **not** checked
+against them, unlike the deck's `@path` panels, which are, so they can drift if a
+module changes; quoting them from the modules the way the deck does is the remedy.
+
 ## The in-place check in the generated C
 
 `HSt.write` runs the object's `check` on the operation and the state before
@@ -1173,5 +1188,6 @@ assertions that ship live in the `inplace` harness.
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
+| `paper/` | The paper on the lowering and the static count-one guarantee: `lowering.tex` and its built PDF |
 | `Slides/` | The slide deck's sources: prose series and stepped proofs |
 | `Main.lean` | Entry point of the `scidonia` executable |
