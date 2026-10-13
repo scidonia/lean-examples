@@ -376,9 +376,28 @@ def indented(text: str) -> str:
 
 
 def in_archive(paper: Path, *args: str):
-    """Run one of the archive's scripts in it, as the command line does."""
-    return subprocess.run([sys.executable, *args], cwd=paper,
-                          capture_output=True, text=True)
+    """Run one of the archive's scripts in it, as the command line does.
+
+    A run that cannot be launched -- no interpreter to launch it with, or
+    nothing readable at the script's path -- has no status for a case to read,
+    so it is given one: exit 127, the shell's status for a command that did not
+    run, and a diagnostic naming what was to be run and why it did not.  A case
+    whose script never started is then reported like any other failure, rather
+    than passing for want of anything to check.
+    """
+    if not sys.executable:
+        return subprocess.CompletedProcess(
+            args, 127, "",
+            "cannot run the archive's scripts: no interpreter in "
+            "sys.executable\n")
+    command = [sys.executable, *args]
+    try:
+        return subprocess.run(command, cwd=paper,
+                              capture_output=True, text=True)
+    except OSError as error:
+        return subprocess.CompletedProcess(
+            command, 127, "",
+            f"cannot run {' '.join(args)} in {paper}: {error}\n")
 
 
 def report_of(run) -> str:
@@ -405,23 +424,37 @@ def expect(case: str, run, must_fail: bool, wanted: str,
         problems.append(f"{case}: a paper it must accept did not check out")
 
 
-def self_test() -> int:
-    """Run these checks against a scratch paper that is wrong in one place.
+def reported(problems: list[str]) -> int:
+    """Report the self-test's problems, and its verdict, and fail for any.
+
+    A problem is a failure, so it is printed on stderr as well as stdout: a
+    reader of either stream, and a run whose output is piped past one of them,
+    still sees what went wrong.  A run that could not reach the library, its
+    scripts or its scratch archive reports that reason the same way and with the
+    same non-zero status, so a run that checked nothing cannot be read as one
+    that passed.  A self-test with no problems prints its verdict on stdout
+    alone.
+    """
+    for problem in problems:
+        print(problem)
+        print(problem, file=sys.stderr)
+    print(f"self-test: "
+          f"{'failed' if problems else 'the scratch archive checked out'}")
+    return 1 if problems else 0
+
+
+def scratch_cases(here: Path, problems: list[str]) -> None:
+    """Run every case against a scratch paper that is wrong in one place.
 
     The archive carries this checker, the generators, the recognizer and the
     library, so every case exercises the command line rather than a function
-    inside it.  A case that does not report its own diagnostic, or that passes
-    where it must fail, is recorded as a problem: that is what makes each of
-    these checks falsifiable rather than merely plausible.
+    inside it.  Each case is a paper written into the archive and run through
+    the scripts as the command line runs them, and what it reports is recorded
+    in `problems`: that is what makes each of these checks falsifiable rather
+    than merely plausible.  A scratch tree that cannot be built or written
+    leaves the failure to the caller, which reports it rather than passing the
+    run off as one that checked something.
     """
-    here = Path(__file__).resolve().parent
-    absent = [str(here.parent / tree) for tree in SELF_TEST_TREES
-              if not (here.parent / tree).is_dir()]
-    if absent:
-        print(f"--self-test reads the library beside {here.name}: "
-              + ", ".join(absent) + " not found", file=sys.stderr)
-        return 1
-    problems: list[str] = []
     with tempfile.TemporaryDirectory(prefix="check-listings-") as temporary:
         root, paper = Path(temporary), Path(temporary) / "Paper"
         paper.mkdir()
@@ -484,11 +517,40 @@ def self_test() -> int:
         expect("a panel with no generated frame",
                in_archive(paper, "check-listings.py", "probe.tex"), True,
                SELF_TEST_UNFRAMED_WANTED, problems)
-    for problem in problems:
-        print(problem)
-    print(f"self-test: "
-          f"{'failed' if problems else 'the scratch archive checked out'}")
-    return 1 if problems else 0
+
+
+def self_test() -> int:
+    """Run these checks against a scratch paper that is wrong in one place.
+
+    A case that does not report its own diagnostic, or that passes where it must
+    fail, is recorded as a problem, and the run fails with it: a check whose red
+    case has stopped failing is a check that has stopped guarding.
+
+    The ways the self-test itself can fail to run are failures too -- a library
+    that is not beside the paper, a script that is not beside this file, a
+    scratch archive that cannot be written, a script run that cannot be launched
+    -- each reported with its reason and a non-zero status rather than skipped
+    quietly, so that no reader of either stream can take a run that checked
+    nothing for one that passed.
+    """
+    here = Path(__file__).resolve().parent
+    problems: list[str] = []
+    absent = [str(here.parent / tree) for tree in SELF_TEST_TREES
+              if not (here.parent / tree).is_dir()]
+    if absent:
+        problems.append(f"--self-test reads the library beside {here.name}: "
+                        + ", ".join(absent) + " not found")
+        return reported(problems)
+    missing = [name for name in SELF_TEST_SCRIPTS if not (here / name).is_file()]
+    if missing:
+        problems.append("--self-test copies the scripts beside it: "
+                        + ", ".join(missing) + " not found")
+        return reported(problems)
+    try:
+        scratch_cases(here, problems)
+    except OSError as error:
+        problems.append(f"--self-test cannot use its scratch archive: {error}")
+    return reported(problems)
 
 
 def main(argv: list[str]) -> int:
