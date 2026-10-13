@@ -197,6 +197,20 @@ theorem duplicated_lowers : ∃ e', Lower [] [] duplicated e' :=
 /-- A typed term is a term of the source fragment. -/
 theorem disciplined_pure : Pure disciplined := typed_pure disciplined_typed
 
+/-! ## The resource instructions have no typing
+
+The fragment the typing is stated over has one rule per construct and none for a
+resource instruction, so a program carrying one is refused wherever it is read. -/
+
+/-- A `dup` node has no typing at environments that do supply the name it carries: the
+instruction the lowering's `wrap` prologue emits for a use the environment does not
+supply has no rule, so the name's environment is not what refuses it. -/
+theorem dup_instruction_no_typing : ¬ Typed [] [0] (.dup 0 (.var 0)) := dup_no_typing
+
+/-- The release instruction is refused for the same missing rule and at the same
+environments. -/
+theorem drop_instruction_no_typing : ¬ Typed [] [0] (.drop 0 (.var 0)) := drop_no_typing
+
 /-! ## The name conditions applied, and their complements -/
 
 /-- The disciplined program carries the first name condition: its binding rule's body
@@ -253,7 +267,8 @@ theorem alias_no_typing_at_env : ¬ Typed [] [1] alias := by
   exact alias_bind_no_typing
 
 /-- A written name bound by a binding is bound to a construction and used exactly once
-in that binding's body: the cell is the term's own, and the term holds it once. -/
+in that binding's body: the program builds the cell the write lands at and names it
+once --- source-level construction and use, not a count on the target heap. -/
 theorem built_written_own :
     BuiltB (.con1 5 (.con0 5)) = true ∧ (uses (.store (.var 0) 0 (.con0 9))).count 0 = 1 :=
   typed_bind_written_own built_typed (by decide)

@@ -523,6 +523,11 @@ theorem runs_appArgPos {ρ : TEnv} {m : Multi} {f a : Expr} {ρ' : TEnv} {m' : M
   | appVar _ _ _ _ => exact absurd rfl (hnotlam _ _)
   | appVal hnovar _ _ _ => exact absurd rfl (hnotlam _ _)
   | appLamArg _ _ => exact absurd rfl (hnotlam _ _)
+
+/-- The exclusive branch of a store preserves the judgement: it leaves the subject
+variable at the environment and account the store was judged at, and the clause
+`Runs.store` carries that term, `Runs ρ m (.var y)`, as its own premise, so inverting a
+derivation of the store supplies it. -/
 theorem runs_storeExclusive {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
     (h : Runs ρ m (.store (.var y) i v)) : Runs ρ m (.var y) := by
   cases h with

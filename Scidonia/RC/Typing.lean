@@ -116,15 +116,15 @@ what excludes it.
   `typed_arm_written_linear`, `typed_bind_written_built`, `typed_arm_written_built`,
   `typed_bind_written_own` and `typed_arm_written_own` read the two conditions at a
   rule: the name is used once in the scope that binds it, and it is introduced for a
-  construction, so the cell is the term's own and the term holds it once.
+  construction, so the program builds the cell the write lands at and names it once ---
+  source-level facts of construction and use, and not a count on the target heap.
 * `typed_lowers`: a typed term is a term `Scidonia.RC.Lower` lowers from the same
   environments.
 * `subst_typed_var` and `subst_typed_redex`: a typed term stays typed under the
   substitution of a fresh variable for a name it does not rebind, read at the renamed
   environments --- and at the environments the abstraction rule of a redex leaves.
-* `typed_pure`, `typed_step_pure` and `typed_run_pure`: a typed term is of the source
-  fragment and stays in it along any run --- the half of survival the judgement's own
-  clauses give.
+* `typed_pure` and `typed_run_pure`: a typed term is of the source fragment and stays
+  in it along any run --- the half of survival the judgement's own clauses give.
 
 ## What is modelled, and what is trusted
 
@@ -336,13 +336,6 @@ theorem typed_write_owned {Δ Γ : Occs} {e : Expr} (h : Typed Δ Γ e) :
   | con2 h₁ h₂ ih₁ ih₂ => exact ⟨ih₁, ih₂⟩
   | store hown hborrow hv ihv => exact ⟨hown, hborrow, ihv⟩
 
-/-- A write at the root of a typed term satisfies the write's own requirement: the
-subject's variable is owned exactly once in the environment and not borrowed. -/
-theorem typed_store_owned {Δ Γ : Occs} {y : Var} {i : Nat} {v : Expr}
-    (h : Typed Δ Γ (.store (.var y) i v)) : Γ.count y = 1 ∧ y ∉ Δ := by
-  cases h with
-  | store hown hborrow _ => exact ⟨hown, hborrow⟩
-
 /-! ## The name a write's subject carries
 
 The two name conditions are statements about the term's syntax alone, and each is
@@ -454,16 +447,18 @@ theorem typed_arm_written_built {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List 
   | matchC _ hbuild _ _ => exact hbuild y hy hw
 
 /-- A name bound by a binding whose body writes it is bound to a construction of the
-program and used exactly once in that body: the cell is the term's own, and the term
-holds it once. -/
+program and used exactly once in that body: two source-level facts of the term --- the
+program builds the cell the write lands at, and the term names it once --- and not a
+count on the target heap. -/
 theorem typed_bind_written_own {Δ Γ : Occs} {x : Var} {e₁ e₂ : Expr}
     (h : Typed Δ Γ (.bind x e₁ e₂)) (hw : writes x e₂ = true) :
     BuiltB e₁ = true ∧ (uses e₂).count x = 1 :=
   ⟨typed_bind_written_built h hw, typed_bind_written_linear h hw⟩
 
 /-- An arm's binder whose name the arm's body writes is matched out of a construction of
-the program and used exactly once in that body: the cell is the arm's own, and the arm
-holds it once. -/
+the program and used exactly once in that body: two source-level facts of the arm --- the
+program built the matched cell, and the arm names it once --- and not a count on the
+target heap. -/
 theorem typed_arm_written_own {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List Var}
     {body : Expr} (h : Typed Δ Γ (.matchC s c ys body)) {y : Var} (hy : y ∈ ys)
     (hw : writes y body = true) : BuiltB s = true ∧ (uses body).count y = 1 :=
@@ -702,12 +697,6 @@ theorem typed_pure {Δ Γ : Occs} {e : Expr} (h : Typed Δ Γ e) : Pure e := by
   | con1 h ih => exact Pure.con1 ih
   | con2 h₁ h₂ ih₁ ih₂ => exact Pure.con2 ih₁ ih₂
   | store hown hborrow hv ihv => exact Pure.store (Pure.var _) ihv
-
-/-- A step of the source's reduction keeps the term it reaches in the fragment a typed
-term lies in: the typing survives the reduction as the fragment's own closure. -/
-theorem typed_step_pure {Δ Γ : Occs} {e e' : Expr} (h : Typed Δ Γ e) (hs : Step e e') :
-    Pure e' :=
-  step_preserves_pure hs (typed_pure h)
 
 /-- Along any run of the source's reduction, a term reached from a typed term is still
 in the fragment the typing is stated over. -/
