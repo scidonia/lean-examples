@@ -24,7 +24,9 @@ calculus, added beside these modules and changing none of them: an additional
 `Expr`, a quotation of the existing `Slot` as a λPure value, a private array
 interpreter of the admitted fragment, and the agreement between that
 interpreter's value and the value the copying reduction of the same term
-reaches.
+reaches. The interpreter's own `IO` runner, `runFresh`, is available beside it
+with its logical equation proved, and is not advertised as a supported execution
+route.
 -/
 import Scidonia.RC.Syntax
 import Scidonia.RC.Pure

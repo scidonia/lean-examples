@@ -2,7 +2,7 @@
 Checks for `Scidonia.RC.OwnershipTyped` from outside the library.
 
 The subject is a discipline over a calculus rather than a program, and the checks
-here are of seven kinds:
+here are of eight kinds:
 
 * **The quotation, evaluated**, as `#guard`s of `unquoteSlot` on the quotations
   of `empty`, `full 7` and a payload of thirty decimal digits, together with the
@@ -21,6 +21,10 @@ here are of seven kinds:
   expression of each shape the rules cannot admit, beside the same-purpose
   expression they do admit and its evaluated value. No refusal is merely stuck
   because the shape violates A-normal form; each is an inversion of the rules.
+* **The store with no cell, evaluated**: a closed program whose store runs on the
+  empty array the evaluation starts from evaluates to nothing rather than to a
+  value built from that array, beside the same store with the cell created and
+  its value evaluated.
 * **The omissions, by inversion**: a theorem that there is no rule for an
   abstraction, an application, a `dup` or a `drop`.
 * **The totality, quotation and `IO` statements applied** at the witnesses.
@@ -415,10 +419,11 @@ theorem readDetached_own :
     some (quoteSlot (.full 7)))
 
 /-- The cell-headed pair the pair rule refuses: its components are slot
-observations, and the owner's name is a cell. -/
+observations, and the owner's name is a cell. The second component is the slot
+observation `Γ₂` binds, so the refused component is the first alone. -/
 theorem pairCell_refused :
-    ¬ Own Γ₁ .none (.con2 pairTag (.var 0) (.var 1)) (.obs (.pair slotObs slotObs)) :=
-  own_pair_cell_absent (Γ := Γ₁) (x := 0) (b := .var 1) (by decide)
+    ¬ Own Γ₂ .none (.con2 pairTag (.var 0) (.var 1)) (.obs (.pair slotObs slotObs)) :=
+  own_pair_cell_absent (Γ := Γ₂) (x := 0) (b := .var 1) (by decide)
 
 /--
 error: Tactic `decide` proved that the proposition
@@ -458,9 +463,11 @@ theorem readThenWrite_own :
     Own (TyEnv.empty : TyEnv) .none witness (.obs (.pair slotObs slotObs)) :=
   witness_own
 
-/-- A write through the observation a read handed over: the read's continuation
-must be an observation, and no write is one. -/
-theorem writeDuringRead_refused :
+/-- A store in the read's continuation, through the observation the read handed
+over: the continuation must be an observation, and a store is admitted at no
+observation type. The store is after the read has ended, through the detached
+result — it is not a write while the read is active. -/
+theorem writeThroughDetached_refused :
     ¬ Own Γ₁ (.held 0)
         (.matchC (.var 0) rootTag [1] (.store (.var 1) 0 (quoteSlot (.full 9)))) (.obs slotObs) := by
   intro h
@@ -487,6 +494,62 @@ then writes through the owner, then reads the new cell. -/
 theorem writeAfterRead_own :
     Own (TyEnv.empty : TyEnv) .none witness (.obs (.pair slotObs slotObs)) :=
   witness_own
+
+/-! ## The store with no cell
+
+The store's update is asked for only when the array the evaluation threads holds
+its cell. A store the discipline does not admit reaches the evaluation with no
+cell at all — its term never constructs a root, so the array is still the empty
+one the evaluation started from — and it evaluates to nothing. Beside it stands
+the same store with the cell created, on which the update runs and whose value is
+the quoted root of the written slot. -/
+
+/-- The store of the control below, with no cell: the binding's value is the unit,
+so the array the store threads is the empty one the evaluation starts from.
+Closed, and admitted at no type: the bound term is a unit, which no rule admits
+as a cell, and a store is admitted at no observation type. -/
+def absentCellStore : Expr := .bind 1 quoteUnit (.store (.var 1) 0 (quoteSlot (.full 9)))
+
+/-- The same store with the cell created: the root binds the handle the store
+uses, and the store yields the quoted root of the written slot. -/
+def cellStore : Expr := .bind 1 (root .empty) (.store (.var 1) 0 (quoteSlot (.full 9)))
+
+/-- The store without a cell is closed: it has no free variable. -/
+theorem absentCellStore_closed : Closed absentCellStore := by decide
+
+/-- The store without a cell is admitted at no type at all: the hand-off's bound
+term would have to be a cell and the observation binding's continuation a store
+admitted as an observation, and neither holds of a unit and a store. -/
+theorem absentCellStore_not_admitted {Γ : TyEnv} {κ : Owner} {τ : Ty} :
+    ¬ Own Γ κ absentCellStore τ := by
+  intro h
+  cases h with
+  | obs hobs => cases hobs
+  | cellBind y e₁ e₂ h₁ hy h₂ =>
+      rcases own_cell_shape h₁ with ⟨_, ha, _⟩ | ⟨_, _, ha, _⟩ <;> cases ha
+  | obsBind y e₁ e₂ h₁ hy h₂ => exact own_store_obs_absent h₂
+
+/-
+The store with no cell evaluates to nothing, and stands beside a pinned failing
+control of the same shape, so the check is shown to fire rather than to pass
+whatever it is given.
+-/
+#guard decide (evalArray absentCellStore = none)
+
+/--
+error: Expression
+  decide (evalArray absentCellStore = some (root (Slot.full 9)))
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (evalArray absentCellStore = some (root (.full 9)))
+
+/-
+The affirmative control: the same store with the cell created evaluates, and its
+value is the quoted root of the written slot, so the branch is shown to produce
+a value where a cell is there and to fail the recursion where it is not.
+-/
+#guard decide (evalArray cellStore = some (root (.full 9)))
 
 /-! ## The omissions, by inversion
 
@@ -543,6 +606,26 @@ example (ρ : VEnv) (arr : Array Slot) (e : Expr) : Option (Expr × Array Slot) 
 #guard_msgs (whitespace := lax) in
 #check Scidonia.RC.OwnershipTyped.runFresh
 
+/-
+A client cannot hand the runner an array: `runFresh` takes the term and the
+admission proof, so a third argument is a type error rather than a second route
+to the array.
+-/
+/--
+error: Application type mismatch: The argument
+  arr
+has type
+  Array Slot
+but is expected to have type
+  Void IO.RealWorld
+in the application
+  runFresh witness h arr
+-/
+#guard_msgs (whitespace := lax) in
+example (h : Own (TyEnv.empty : TyEnv) .none witness (.obs (.pair slotObs slotObs)))
+    (arr : Array Slot) : IO Expr :=
+  runFresh witness h arr
+
 /-- info: Scidonia.RC.OwnershipTyped.runOn (ρ : VEnv) (a : Array Slot) (e : Expr) :
   Option (Expr × Array Slot) -/
 #guard_msgs (whitespace := lax) in
@@ -596,6 +679,10 @@ longer list. The principles that appear are the ones this development rests on:
 /-- info: 'Scidonia.RC.OwnershipTyped.runOn_simulate' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.OwnershipTyped.runOn_simulate
+
+/-- info: 'Scidonia.RC.OwnershipTyped.runWith_congr' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.OwnershipTyped.runWith_congr
 
 /-- info: 'Scidonia.RC.OwnershipTyped.denote_shape' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
@@ -660,6 +747,10 @@ longer list. The principles that appear are the ones this development rests on:
 /-- info: 'ScidoniaTest.OwnershipTyped.alias_refused' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ScidoniaTest.OwnershipTyped.alias_refused
+
+/-- info: 'ScidoniaTest.OwnershipTyped.absentCellStore_not_admitted' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScidoniaTest.OwnershipTyped.absentCellStore_not_admitted
 
 end ScidoniaTest.OwnershipTyped
 

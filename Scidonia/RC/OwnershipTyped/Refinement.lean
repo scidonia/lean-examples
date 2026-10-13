@@ -101,7 +101,8 @@ theorem evalArray_no_root {o : ObsDesc} {e : Expr}
 runner is the `pure` return of the value the copying reduction reaches. This is
 an equality of Lean `IO` *descriptions* — the runner's single `return` — and not
 a kernel statement about executing `IO`, about a foreign backend or about a
-physical address. -/
+physical address. It is a statement about the description and not a supported
+execution route: it says nothing about what a caller may rely on from a run. -/
 theorem runFresh_eq_pure {o : ObsDesc} {e v : Expr}
     (h : Own (TyEnv.empty : TyEnv) .none e (.obs o)) (hc : Closed e)
     (hs : StepStar e v) (hv : Value v) : runFresh e h = pure v :=

@@ -48,7 +48,8 @@ quotation to the continuation's name, a write replaces the array's element with
 the slot the written operand denotes and yields the quoted root of it, and a
 binding extends the environment with the value it bound. `runOn` is that
 recursion at `Array.set!`; a term outside the fragment is not evaluated and
-yields `none`, so the interpreter is *precisely* the admitted syntax.
+yields `none`, and a write whose array holds no cell fails the same way rather
+than returning a value built from the array it was given.
 -/
 import Scidonia.RC.OwnershipTyped.Judgement
 
@@ -465,9 +466,10 @@ theorem readCell_singleton (s : Slot) : readCell (#[s] : Array Slot) = some s :=
 /-- The evaluation of the fragment, with the update step as a parameter: the
 sealed executor's own write goes through the exclusivity check and the model's
 through `Array.set!`, and the recursion is the same one. A term outside the
-fragment is not evaluated and yields `none`, and a write is asked for only when
-the array actually holds slot `0` — which an admitted program always reaches, and
-which keeps the evaluation total for the terms the discipline does not admit. -/
+fragment is not evaluated and yields `none`. A write is asked for only when the
+array actually holds slot `0`: the guard is what keeps `Array.set!` off an empty
+array, and a write threaded no cell fails the recursion instead of yielding a
+value built from the array it was given. -/
 def runWith (write : Array Slot → Slot → Array Slot) (ρ : VEnv) (a : Array Slot) :
     Expr → Option (Expr × Array Slot)
   | .var x => (ρ x).map (fun v => (v, a))
@@ -494,8 +496,9 @@ def runWith (write : Array Slot → Slot → Array Slot) (ρ : VEnv) (a : Array 
       | .var _ =>
           if i = 0 then
             (runWith write ρ a b).bind (fun p =>
-              (unquoteSlot p.1).map (fun t =>
-                (.con1 rootTag p.1, if 0 < p.2.size then write p.2 t else p.2)))
+              if 0 < p.2.size then
+                (unquoteSlot p.1).map (fun t => (.con1 rootTag p.1, write p.2 t))
+              else none)
           else none
       | _ => none
   | .bind y e₁ e₂ =>
@@ -570,12 +573,14 @@ theorem runWith_congr {w₁ w₂ : Array Slot → Slot → Array Slot}
           | none => rfl
           | some p =>
               show (if i = 0 then
-                  (unquoteSlot p.1).map (fun t =>
-                    (Expr.con1 rootTag p.1, if 0 < p.2.size then w₁ p.2 t else p.2))
+                  (if 0 < p.2.size then
+                    (unquoteSlot p.1).map (fun t => (Expr.con1 rootTag p.1, w₁ p.2 t))
+                   else none)
                 else none) =
                 (if i = 0 then
-                  (unquoteSlot p.1).map (fun t =>
-                    (Expr.con1 rootTag p.1, if 0 < p.2.size then w₂ p.2 t else p.2))
+                  (if 0 < p.2.size then
+                    (unquoteSlot p.1).map (fun t => (Expr.con1 rootTag p.1, w₂ p.2 t))
+                   else none)
                 else none)
               rw [show w₁ p.2 = w₂ p.2 from funext (h p.2)]
       | lam x b => rfl

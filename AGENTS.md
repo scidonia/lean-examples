@@ -200,13 +200,17 @@ The compile-time checks live in the check library:
   is held, and a write through the observation a read handed over — each beside an
   accepted same-purpose control with its value evaluated, each with an elaboration
   rejection pinned by `#guard_msgs`, and the absent rules by inversion for an
-  abstraction, an application, a `dup` and a `drop`. Its privacy pins are
-  `#guard_msgs` rejections of the sealed interpreter's name and the `#check`s of
-  the public evaluation and runner, beside the affirmative theorems that a client
-  can evaluate and run a submitted program. Its axiom checks assert the
+  abstraction, an application, a `dup` and a `drop`; a closed store whose term
+  never creates a cell is admitted at no type, evaluates to nothing, and stands
+  beside the same store with the cell created and its value evaluated. Its privacy
+  pins are `#guard_msgs` rejections of the sealed interpreter's name, of an
+  attempt to hand the runner an array, and the `#check`s of the public evaluation
+  and runner, beside the affirmative theorems that a client can evaluate and run a
+  submitted program. Its axiom checks assert the
   `#print axioms` lists of the agreement, the totality, the quotation, the `IO`
-  equation, the simulation, the quotation laws and the witnesses, which show the
-  new theorems rest on the standard kernel principles only.
+  equation, the simulation, the recursion's congruence, the quotation laws and the
+  witnesses, which show the new theorems rest on the standard kernel principles
+  only.
 - `ScidoniaTest/Run.lean` checks the run model from outside: evaluated steps and
   path resolutions on short heaps and programs, each with a pinned control beside
   it — including a step a check turns away, which does not run; the countermodel
@@ -1173,12 +1177,14 @@ cell holds the cell, that name's value is the quoted root of exactly the slot th
 array holds, and the array is that slot's one-element array), and `runWith`/`runOn`
 are the array-threading recursion of the admitted fragment, with
 `runOn_simulate` the simulation against the *existing* `RC.StepStar`: the direct
-evaluation returns a value the copying reduction of the same term reaches, and a
-write is asked for only when the array holds slot `0`, which is what keeps the
-evaluation total for a term the discipline does not admit. `Executor.lean` is the
-sealed runner: its array-taking interpreter is private, `evalArray` creates the
-session's cell itself and returns only the quoted observation, and `runFresh` is
-the `IO` description over it in front of a proof argument that is erased.
+evaluation returns a value the copying reduction of the same term reaches, its
+guard keeps `Array.set!` off an empty array, and a write threaded no cell fails
+the recursion rather than yielding a value. `Executor.lean` is the sealed runner:
+its array-taking interpreter is private, `evalArray` creates the session's cell
+itself and returns only the quoted observation, and `runFresh` is the `IO`
+description over that interpreter in front of a proof argument that is erased —
+the interpreter's runner, kept beside it, and not advertised as a supported
+execution route.
 `Refinement.lean` is the agreement, the totality, the quotation lemma — the result
 carries no unary root node, so the cell is never among the values an admitted
 program returns — and the runner's logical `IO` equation `runFresh e h = pure v`.
