@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Paper/laws.tex: one frame per law the paper's claims rest on.
+"""Generate Paper/laws.tex, the paper's law frames, and Paper/counts.tex, the
+numbers its prose states about the library.
 
 Each frame quotes the *statement* of a declaration, ending at the line where
 the statement is complete (`:=`, or the last signature line for a clause-style
 definition).  Nothing is transcribed: the frames are line ranges into the
 library, and check-listings.py re-checks every one of them against the source.
 
-Usage:  python3 gen-laws.py            # writes laws.tex, prints a report
+counts.tex holds one \\newcommand per number the paper's prose states -- the
+public theorems the library publishes, the law statements and panels the
+appendix reproduces, the theorems vendored from Lean's own model -- so no
+numeral is typed by hand, and check-listings.py recomputes the file and fails
+when it is stale.
+
+Usage:  python3 gen-laws.py            # writes laws.tex and counts.tex
         python3 gen-laws.py --dry-run  # prints a report only
 """
 
@@ -15,9 +22,22 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+PAPER = Path(__file__).resolve().parent
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 ATTR = r"(?:@\[[^\]]*\]\s*)?"
 OPEN, CLOSE = "([{", ")]}"
+
+# A public theorem as the library writes one: what the paper counts.
+THEOREM = re.compile(rf"^{ATTR}(theorem|lemma)\s")
+# A panel as the paper asks for one: a \codeframe call naming a library range.
+CALL = re.compile(r"\\codeframe\[linerange=\d+-\d+\]\{[^}]*\}")
+
+# The reference count's module marks where its vendored block ends; the header
+# says the declarations up to there are Lean's own model of the count, and the
+# rest are this repository's.  The prose states both counts, so they are read
+# from that mark rather than typed.
+REFCOUNT = "Scidonia/FracPerm/StateVar/RefCount.lean"
+VENDORED_END = "The declarations up to here are vendored"
 
 # The declarations the paper names or leans on, grouped as the appendix
 # presents them.  (module, declaration name)
@@ -200,9 +220,78 @@ def published_theorems():
     total = 0
     for path in sorted(ROOT.glob("Scidonia/**/*.lean")):
         for line in path.read_text(encoding="utf-8").splitlines():
-            if re.match(r"^(?:@\[[^\]]*\]\s*)?(theorem|lemma)\s", line):
+            if THEOREM.match(line):
                 total += 1
     return total
+
+
+def quoted_laws():
+    """How many law frames the appendix reproduces."""
+    return sum(len(items) for _, items in GROUPS)
+
+
+def frames_from(module):
+    """How many of the appendix's law frames come from `module`."""
+    return sum(1 for _, items in GROUPS for path, _ in items if path == module)
+
+
+def vendored_theorems():
+    """How many of the reference count's theorems are Lean's own model.
+
+    The public theorems above the module's mark for the end of its vendored
+    block are the vendored ones; those below it are this repository's.
+    """
+    lines = (ROOT / REFCOUNT).read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines):
+        if VENDORED_END in line:
+            return sum(1 for line in lines[:i] if THEOREM.match(line))
+    raise SystemExit(f"{REFCOUNT}: no {VENDORED_END!r} line to split the "
+                     f"vendored block at")
+
+
+def panel_counts():
+    """(panels in the body, panels in the appendix) the paper's sources ask for.
+
+    A panel is a `\\codeframe` call naming a range of the library; the body's are
+    the ones above `\\appendix`, and the appendix's are the ones below it.
+    """
+    body = appendix = 0
+    for tex in sorted(PAPER.glob("*.tex")):
+        lines = tex.read_text(encoding="utf-8").splitlines()
+        end = next((i for i, line in enumerate(lines)
+                    if line.strip() == "\\appendix"), len(lines))
+        calls = [i for i, line in enumerate(lines) if CALL.search(line)]
+        body += sum(1 for i in calls if i <= end)
+        appendix += sum(1 for i in calls if i > end)
+    return body, appendix
+
+
+def counts():
+    """The numbers the paper's prose states, in the order the file writes them."""
+    body, appendix = panel_counts()
+    return [
+        ("theoremcount", "public theorems under Scidonia/", published_theorems()),
+        ("vendoredtheoremcount", "of them vendored from Lean's own model",
+         vendored_theorems()),
+        ("lawcount", "law statements the appendix reproduces", quoted_laws()),
+        ("panelcount", "panels the paper quotes", body + appendix),
+        ("appendixpanelcount", "of them in the appendix", appendix),
+        ("refcountframecount", "frames of the reference-count section",
+         frames_from(REFCOUNT)),
+    ]
+
+
+def counts_text():
+    """The contents of counts.tex: one \\newcommand per number the prose states."""
+    header = (
+        "% Generated from the library by gen-laws.py; do not edit by hand.\n"
+        "% The numbers the paper's prose states about the library and about the\n"
+        "% frames it quotes, one \\newcommand each, so no numeral is typed by hand.\n"
+        "% The paper's preamble reads this file, and check-listings.py recomputes\n"
+        "% it from the library and from the paper's own call sites.\n\n")
+    return header + "".join(
+        f"\\newcommand{{\\{name}}}{{{value}}}  % {what}\n"
+        for name, what, value in counts())
 
 
 def main(argv):
@@ -240,8 +329,10 @@ def main(argv):
         "% Each \\lawframe{module}{lines}{name} quotes the statement of `name` from\n"
         "% that module.  check-listings.py verifies that every range still holds the\n"
         "% declaration it names, so the appendix cannot drift from the library.\n\n")
-    (ROOT / "Paper/laws.tex").write_text(header + "\n".join(frames), encoding="utf-8")
+    (PAPER / "laws.tex").write_text(header + "\n".join(frames), encoding="utf-8")
     print("wrote Paper/laws.tex")
+    (PAPER / "counts.tex").write_text(counts_text(), encoding="utf-8")
+    print("wrote Paper/counts.tex")
     return 1 if missing else 0
 
 

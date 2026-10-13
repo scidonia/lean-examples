@@ -3,10 +3,11 @@
 %
 % Build, from this directory. Highlighting is minted's, so the build needs
 % shell escape and Pygments on PATH:
-%   python3 gen-laws.py     # the law frames, after a change to the library
+%   python3 gen-laws.py     # the law frames and counts.tex, after a library change
 %   python3 gen-frames.py   # the frames themselves: the quoted ranges, comment-free
 %   latexmk -pdf -shell-escape unobservable-effects.tex
-% Check that every frame still quotes the library:
+% Check that every frame still quotes the library, and that counts.tex holds the
+% count the library gives:
 %   python3 check-listings.py
 %
 % pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
@@ -73,6 +74,12 @@
 % A frame is one unbreakable box, so a frame that does not fit the space left on
 % a page moves to the next one instead of being split across two.
 \input{frames/lookup.tex}
+% The numbers the prose states about the library -- how many theorems it
+% publishes, how many of them the appendix reproduces, how many panels are
+% quoted -- are generated into counts.tex by gen-laws.py and read here, so a
+% numeral in the prose is read from the library rather than typed beside it.
+% check-listings.py fails when the file is stale.
+\input{counts.tex}
 \def\codeframe[linerange=#1-#2]#3{%
   \edef\cfkey{cf@#3@#1-#2}%
   \ifcsname\cfkey\endcsname\else
@@ -280,11 +287,11 @@ structural, measured or trusted (\cref{sec:evidence}).
 
 All of the code discussed here is Lean 4, on a pinned toolchain, in a library
 that builds and whose checks are theorems rather than test assertions. The
-paper quotes the library's declarations verbatim in \cref{app:listings}: 37
-panels for the types and the operations, and the statements of 110 of the
-library's 442 public theorems. Every frame is a line range into the library,
-re-checked by \code{check-listings.py}, so the appendix cannot drift from the
-source it quotes.
+paper quotes the library's declarations verbatim in \cref{app:listings}:
+\panelcount{} panels for the types and the operations, and the statements of
+\lawcount{} of the library's \theoremcount{} public theorems. Every frame is a
+line range into the library, re-checked by \code{check-listings.py}, so the
+appendix cannot drift from the source it quotes.
 
 \subsection{How much is claimed}
 
@@ -1860,10 +1867,10 @@ each one from the library and fails when the two differ. The highlighting is
 
 The description, observation and layout universes are quoted where they are
 defined, in \cref{sec:levitation} and \cref{sec:sealed}; what follows is the
-rest of the types and the operations, 32 panels, and then 110 law statements,
-grouped as the prose groups them. Each frame is one unbreakable box, so a frame
-that does not fit the space left on a page moves to the next page instead of
-being split across two.
+rest of the types and the operations, \appendixpanelcount{} panels, and then
+\lawcount{} law statements, grouped as the prose groups them. Each frame is one
+unbreakable box, so a frame that does not fit the space left on a page moves to
+the next page instead of being split across two.
 
 Two further conventions. A frame is a whole source line range, so a declaration
 short enough to fit on one line shows its proof on that line: the frame is the
@@ -1871,10 +1878,11 @@ line, not a truncation of it. And a law frame quotes the \emph{statement} of a
 theorem, ending where the statement ends, so the proof that follows it is
 usually not shown.
 
-The library publishes 442 theorems under \code{Scidonia/}, of which this appendix
-reproduces 110: the ones the paper's claims rest on. Seventeen of the 442 are
-vendored from Lean's own model of the count, and the seven frames of the
-reference-count section are this repository's own facts; the counted model of
+The library publishes \theoremcount{} theorems under \code{Scidonia/}, of which
+this appendix reproduces \lawcount{}: the ones the paper's claims rest on.
+\vendoredtheoremcount{} of the \theoremcount{} are vendored from Lean's own model
+of the count, and the \refcountframecount{} frames of the reference-count section
+are this repository's own facts; the counted model of
 \cref{rem:link7}, and the checks beside it, are not quoted here.
 Two checks run against the frames. Every panel carries a \code{\%!check:}
 directive naming a fragment the quoted range must contain, and every law frame

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that every frame in the paper still quotes what it claims.
 
-Three kinds of check, all against the library:
+Four kinds of check, all against the library:
 
   %!check: <fragment>
   \\codeframe[linerange=<lo>-<hi>]{<file>}
@@ -17,10 +17,17 @@ Three kinds of check, all against the library:
       checked rather than asserted: the generator writes the file, and this
       recomputes it.
 
+  counts.tex
+      the generated counts must be exactly what gen-laws.py derives from the
+      library and from the paper's own call sites, recomputed here.  This is
+      what keeps a stated number -- the theorems the library publishes, the
+      panels the paper quotes -- from outliving what it counts.
+
 Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
-Exit status 0 when every frame checks out, 1 otherwise.
+Exit status 0 when every frame and count checks out, 1 otherwise.
 """
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -170,6 +177,42 @@ def check_frames(here: Path, tex: Path, table: dict, problems: list[str]) -> int
     return checked
 
 
+def load_generator(here: Path):
+    """Load gen-laws.py, which derives the counts counts.tex holds.
+
+    Its name has a hyphen, so it is loaded from its path rather than imported by
+    name; loading it generates nothing, as its work is under a __main__ guard.
+    """
+    spec = importlib.util.spec_from_file_location("gen_laws", here / "gen-laws.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_counts(here: Path, problems: list[str]) -> int:
+    """Verify counts.tex against the counts the library and the paper imply."""
+    path = here / "counts.tex"
+    try:
+        held = path.read_text(encoding="utf-8")
+    except OSError as error:
+        problems.append(f"cannot read counts.tex: {error}\n"
+                        f"    run python3 gen-laws.py")
+        return 0
+    want = load_generator(here).counts_text()
+    if held.rstrip("\n") != want.rstrip("\n"):
+        problem = "counts.tex is not the file gen-laws.py generates"
+        for a, b in zip(want.splitlines(), held.splitlines()):
+            if a != b:
+                problem += f"\n    generated:  {a!r}\n    counts.tex: {b!r}"
+                break
+        else:
+            problem += (f"\n    {len(want.splitlines())} lines generated, "
+                        f"{len(held.splitlines())} held")
+        problems.append(problem + "\n    run python3 gen-laws.py")
+        return 0
+    return 1
+
+
 def main(argv: list[str]) -> int:
     here = Path(__file__).resolve().parent
     files = [Path(a) for a in argv[1:]] or sorted(here.glob("*.tex"))
@@ -186,10 +229,12 @@ def main(argv: list[str]) -> int:
         fragments += check_fragments(tex, problems)
         laws += check_lawframes(tex, problems)
         frames += check_frames(here, tex, table, problems)
+    stated = check_counts(here, problems)
     for problem in problems:
         print(problem)
     print(f"{fragments} quoted panels, {laws} law frames and {frames} generated "
-          f"frames checked, {len(problems)} failed")
+          f"frames checked, {stated} generated counts checked, "
+          f"{len(problems)} failed")
     return 1 if problems else 0
 
 
