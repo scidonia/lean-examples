@@ -45,13 +45,17 @@ LOOKUP = re.compile(
     r"\\expandafter\\def\\csname cf@(?P<path>.*)@(?P<lo>\d+)-(?P<hi>\d+)"
     r"\\endcsname\{(?P<key>[^}]*)\}"
 )
-# The bracket argument of a frame call, in any shape, so that a call the pattern
-# above cannot resolve is seen rather than passed over.  An argument that is a call
-# at all is a line range or one of the shape-and-colour macros' own parameters;
-# `code_of` then drops what a comment holds, since that is not a call either.
+# A non-numeric argument is exempt only at the two actual macro templates: the
+# range in \codeframe's definition signature and the forwarded range in
+# \lawframe's definition body.  These are recognized by their definition context,
+# not by accepting placeholder-shaped arguments in general.
 SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
 RANGE = re.compile(r"\d+-\d+")
-PARAM = re.compile(r"#\d+(?:-#\d+)?")
+CODEFRAME_DEF = re.compile(r"\\def\\codeframe\[linerange=#1-#2\]#3\s*\{")
+LAWFRAME_DEF = re.compile(
+    r"\\newcommand\s*\{\s*\\lawframe\s*\}\s*\[3\]\s*\{"
+)
+LAWFRAME_BODY_CALL = re.compile(r"\\codeframe\[linerange=#2\]\{\.\./#1\}")
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
 
@@ -69,6 +73,56 @@ def code_of(line: str) -> str:
             return line[:i]
         escaped = ch == "\\" and not escaped
     return line
+
+
+def source_without_comments(text: str) -> str:
+    """Blank comments while preserving source offsets for macro-context checks."""
+    result = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        visible = code_of(body)
+        result.append(visible + " " * (len(body) - len(visible)) + ending)
+    return "".join(result)
+
+
+def macro_body_end(source: str, opening: int) -> int | None:
+    """The position after a macro body's matching closing brace, or None."""
+    depth, escaped = 0, False
+    for position in range(opening, len(source)):
+        char = source[position]
+        if char == "\\":
+            escaped = not escaped
+            continue
+        if not escaped:
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return position + 1
+        escaped = False
+    return None
+
+
+def macro_template_spans(text: str) -> set[tuple[int, int]]:
+    """The range arguments that are syntax in the two macro definitions."""
+    source = source_without_comments(text)
+    templates: set[tuple[int, int]] = set()
+    for definition in CODEFRAME_DEF.finditer(source):
+        shape = SHAPE.search(source, definition.start(), definition.end())
+        if shape:
+            templates.add(shape.span())
+    for definition in LAWFRAME_DEF.finditer(source):
+        opening = definition.end() - 1
+        end = macro_body_end(source, opening)
+        if end is None:
+            continue
+        for call in LAWFRAME_BODY_CALL.finditer(source, opening + 1, end - 1):
+            shape = SHAPE.search(source, call.start(), call.end())
+            if shape:
+                templates.add(shape.span())
+    return templates
 
 
 def normalise(text: str) -> str:
@@ -121,26 +175,30 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
 
 
 def check_calls(tex: Path, problems: list[str]) -> int:
-    """Frame calls in a shape no frame can be generated for.
+    """Report every nonnumeric frame argument outside the macro templates.
 
-    A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
-    line. A definition such as a `\\lawframe`'s body writes
-    `\\codeframe[linerange=#2]{../#1}`, whose argument is a macro parameter and not
-    a range; nor is a call one written inside a comment, which the typesetter never
-    reaches. Every other argument that is not `lo-hi` is a call with no frame, so
-    the `%!check:` directive before it would be paired with whatever frame follows.
-    It is reported rather than skipped.
+    A call has a numeric `lo-hi` range. The only placeholder ranges that are not
+    calls are the `\\codeframe` definition's parameter text and the forwarded
+    range call inside the `\\lawframe` definition. Their exact source locations
+    are recognized by `macro_template_spans`; a placeholder in any real call is
+    reported, as is any other nonnumeric argument. Text after a LaTeX comment is
+    not part of the source the typesetter reaches.
     """
-    found = 0
-    for number, line in enumerate(tex.read_text(encoding="utf-8").splitlines(), 1):
+    text = tex.read_text(encoding="utf-8")
+    templates = macro_template_spans(text)
+    found, offset = 0, 0
+    for number, raw_line in enumerate(text.splitlines(keepends=True), 1):
+        line = raw_line.rstrip("\r\n")
         for match in SHAPE.finditer(code_of(line)):
             arg = match.group(1)
-            if RANGE.fullmatch(arg) or PARAM.fullmatch(arg):
+            span = (offset + match.start(), offset + match.end())
+            if RANGE.fullmatch(arg) or span in templates:
                 continue
             problems.append(f"{tex.name}:{number}: not a "
                             f"\\codeframe[linerange=lo-hi]{{path}} call: "
                             f"{line.strip()}")
             found += 1
+        offset += len(raw_line)
     return found
 
 

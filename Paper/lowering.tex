@@ -140,17 +140,22 @@
 \maketitle
 
 \begin{abstract}
-A reference-counted runtime updates an object in place exactly when its count is
-one. Implementations decide this at run time, because one compiled body serves
-owning and borrowing call sites, and the decision is taken per site, from what the
-compiler can see there. This paper formalises a pure core, a reference-counted
+A reference-counted runtime's documented behaviour is to test its own count
+before a write and update in place on its exclusive branch; that machine test is
+distinct from the count-one predicate proved here for the counted heap.
+Implementations decide this at run time, because one compiled body serves owning
+and borrowing call sites, and the decision is taken per site, from what the
+compiler can see there; the status of that compiler behaviour is stated in
+\cref{sec:trusted}. This paper formalises a pure core, a reference-counted
 target over a counted heap, and the lowering between them, and proves the pair
-that characterises the target's write: in that counted heap, an owned store is
-destructive and keeps its location, a shared store copies. The runtime's own test
-of the count, and the correspondence between a model count and the machine's, are
-stated below as assumptions and measurements with the limits they hold under, and
-not as theorems. That pair reads the count of a \emph{reference}
-in the term's own account of itself; a compiler reads a count of a \emph{name}.
+that characterises that target's write: in its counted heap, at count one the
+store is destructive and keeps its location; above one it copies. The runtime's
+own test of the count, and the correspondence between a model count and the
+machine's, are stated below as assumptions and measurements with the limits they
+hold under, and not as theorems. That pair reads the count of a \emph{reference}
+in the term's own account of itself; the compiler-side account reads a count of
+a \emph{name}, as the typing section explains (\cref{sec:typing}), with its
+implementation link trusted as stated in \cref{sec:trusted}.
 The second half of the paper closes the gap with a typing: the write's rule asks
 the subject's name to be owned exactly once in the store's environment and not
 borrowed, and the rules the term itself carries that bind that name ask it to be
@@ -209,14 +214,14 @@ statement of it. Whether a machine's number is that sum where a write runs is th
 hypothesis \cref{sec:trusted} names rather than derives, and a compiler reaches the
 question one site at a time.
 
-\paragraph{What a compiler reads per site.} One compiled body serves an owning call
-site and a borrowing one, so the decision cannot be made once and for all when the
-body is compiled. What the compiler emits is a test, and it decides the test at
-each site from what it can see there: how many times a variable is used, whether
-two names may denote one cell, and how an update is projected through a record's
-fields. The test is exact when the analysis is exact, and conservative otherwise.
-Nothing in this is specific to arrays: the same test guards any cell of a counted
-heap.
+\paragraph{What a compiler reads per site.} The compiler's own per-site
+arrangement, whose status \cref{sec:trusted} names, is that one compiled body
+serves an owning call site and a borrowing one, so the test is decided at each
+site from what the compiler can see there: how many times a variable is used,
+whether two names may denote one cell, and how an update is projected through a
+record's fields. The test is exact when the analysis is exact, and conservative
+otherwise. Nothing in this is specific to arrays: the same test guards any cell
+of a counted heap.
 
 \paragraph{The value.} An in-place update avoids an allocation and reuses the
 buffer. It is not an optimisation of the meaning of the program --- the meaning is

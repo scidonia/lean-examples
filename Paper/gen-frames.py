@@ -37,13 +37,17 @@ CALL = re.compile(
 LAW = re.compile(
     r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
 )
-# The bracket argument of a frame call, in any shape, so that a call the pattern
-# above cannot resolve is seen rather than passed over.  An argument that is a call
-# at all is a line range or one of the shape-and-colour macros' own parameters;
-# `code_of` then drops what a comment holds, since that is not a call either.
+# A non-numeric argument is exempt only at the two actual macro templates: the
+# range in \codeframe's definition signature and the forwarded range in
+# \lawframe's definition body.  These are recognized by their definition context,
+# not by accepting placeholder-shaped arguments in general.
 SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
 RANGE = re.compile(r"\d+-\d+")
-PARAM = re.compile(r"#\d+(?:-#\d+)?")
+CODEFRAME_DEF = re.compile(r"\\def\\codeframe\[linerange=#1-#2\]#3\s*\{")
+LAWFRAME_DEF = re.compile(
+    r"\\newcommand\s*\{\s*\\lawframe\s*\}\s*\[3\]\s*\{"
+)
+LAWFRAME_BODY_CALL = re.compile(r"\\codeframe\[linerange=#2\]\{\.\./#1\}")
 
 
 def code_of(line: str) -> str:
@@ -62,27 +66,79 @@ def code_of(line: str) -> str:
     return line
 
 
-def calls():
-    """Every frame the paper asks for, in source order and deduplicated, and every
-    frame call the generator cannot resolve.
+def source_without_comments(text: str) -> str:
+    """Blank comments while preserving source offsets for macro-context checks."""
+    result = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        visible = code_of(body)
+        result.append(visible + " " * (len(body) - len(visible)) + ending)
+    return "".join(result)
 
-    A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
-    line.  A shape-and-colour definition such as a `\\lawframe`'s body writes
-    `\\codeframe[linerange=#2]{../#1}`, whose argument is a macro parameter and not
-    a range, and is not a call; nor is one written inside a comment.  Every other
-    argument that is not `lo-hi` is a call with no frame.  The paper would meet it
-    as a LaTeX error at best and a silently missing box at worst, and the
-    `%!check:` beside it would be paired with whatever frame follows, so it is
-    reported here rather than skipped.
+
+def macro_body_end(source: str, opening: int) -> int | None:
+    """The position after a macro body's matching closing brace, or None."""
+    depth, escaped = 0, False
+    for position in range(opening, len(source)):
+        char = source[position]
+        if char == "\\":
+            escaped = not escaped
+            continue
+        if not escaped:
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return position + 1
+        escaped = False
+    return None
+
+
+def macro_template_spans(text: str) -> set[tuple[int, int]]:
+    """The range arguments that are syntax in the two macro definitions."""
+    source = source_without_comments(text)
+    templates: set[tuple[int, int]] = set()
+    for definition in CODEFRAME_DEF.finditer(source):
+        shape = SHAPE.search(source, definition.start(), definition.end())
+        if shape:
+            templates.add(shape.span())
+    for definition in LAWFRAME_DEF.finditer(source):
+        opening = definition.end() - 1
+        end = macro_body_end(source, opening)
+        if end is None:
+            continue
+        for call in LAWFRAME_BODY_CALL.finditer(source, opening + 1, end - 1):
+            shape = SHAPE.search(source, call.start(), call.end())
+            if shape:
+                templates.add(shape.span())
+    return templates
+
+
+def calls():
+    """Every frame the paper asks for, and every nonnumeric call to reject.
+
+    A call has a numeric `lo-hi` range. The only placeholder ranges that are not
+    calls are the `\\codeframe` definition's parameter text and the forwarded
+    range call inside the `\\lawframe` definition. Their exact source locations
+    are recognized by `macro_template_spans`; a placeholder in any real call is
+    reported, as is any other nonnumeric argument. Text after a LaTeX comment is
+    not part of the source the typesetter reaches.
     """
     found, malformed = [], []
     for tex in sorted(HERE.glob("*.tex")):
         text = tex.read_text(encoding="utf-8")
-        for number, line in enumerate(text.splitlines(), start=1):
+        templates = macro_template_spans(text)
+        offset = 0
+        for number, raw_line in enumerate(text.splitlines(keepends=True), 1):
+            line = raw_line.rstrip("\r\n")
             for match in SHAPE.finditer(code_of(line)):
                 arg = match.group(1)
-                if not RANGE.fullmatch(arg) and not PARAM.fullmatch(arg):
+                span = (offset + match.start(), offset + match.end())
+                if not RANGE.fullmatch(arg) and span not in templates:
                     malformed.append(f"{tex.name}:{number}: {line.strip()}")
+            offset += len(raw_line)
         for match in CALL.finditer(text):
             key = (match.group("path"), int(match.group("lo")), int(match.group("hi")))
             if key not in found:
