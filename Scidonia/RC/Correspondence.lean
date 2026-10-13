@@ -55,11 +55,18 @@ and `1` both name the reference `0`, the store at the subject `0` is typed at `[
 account counts the reference twice, so the count of one the write needs does not
 follow. `couple_does_not_give_count_one` is that statement, and
 `count_one_fails_without_inj` is the same refutation as the negation of the bridge's
-second conclusion. What would supply the injectivity is a distinctness or a freshness
-condition on the environment the program starts from --- no two of its names naming one
-reference --- or the same condition read at the take-out of a nested write, where the
-cell's count of one and the absence of a second name for it are facts the take-out
-provides; neither is in this slice.
+second conclusion. What supplies the injectivity on the environment side is a
+distinctness or a freshness condition on the environment the program starts from --- no
+two of its names naming one reference --- and that condition is not in this slice. At the
+take-out of a nested write no such condition is needed, and none is read: the run's
+counting of its own handles together with the coupling's counting of the same heap leave
+the account the one occurrence the take-out extracted
+(`Scidonia.RC.Transfer`'s `expand_eq_singleton_of_counted`), and an account of one
+occurrence is injective whatever it is named (`Transfer.refInj_of_counted`) --- the
+take-out being name-free precisely because what it pins is the account's size and not
+its tags. `Transfer.refInj_not_determined` is the other half of that boundary: two
+accounts with the same references are one configuration to the run's side, and one of
+them names a reference twice.
 
 **The affirmative side, and where it is checked.** The accounts the lowering's prologue
 and the source's own environment leave *are* injective, the bridge applies at the

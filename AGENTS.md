@@ -1007,13 +1007,37 @@ injectivity, and `store_destructive_of_typed` composes the two with
 `Couple` supplies, and the module exhibits the configuration that separates them:
 two names naming one reference, the store typed there, the account `Bound` and
 inside `Couple`, and the reference counted twice, so the count of one does not
-follow (`couple_does_not_give_count_one`); what would supply it is a distinctness
-or freshness condition on the environment the program starts from, or the same at
-the take-out of a nested write. `ScidoniaTest/Correspondence` reads the account a
+follow (`couple_does_not_give_count_one`); what would supply it on the environment
+side is a distinctness or freshness condition on the environment the program starts
+from. `ScidoniaTest/Correspondence` reads the account a
 lowered run actually reaches, the correspondence and the composition applied there,
 and the affirmative side — the accounts the lowering's prologue and the source's own
 environment leave are injective, and the typing refuses the sibling term that would
 leave one name twice.
+
+`Transfer.lean` is the link from the run model to that account, and the one module
+that sees both: it imports `Correspondence.lean` and
+`Scidonia.FracPerm.StateVar.Run`, neither of which imports the other. At a nested write
+the take-out has emptied the slot the write lands at and holds the extracted occurrence
+as a handle, so the run's handle list is that occurrence followed by the outer handles
+while the coupling's split is the outer handles followed by the account's references;
+the two read the same references exactly when the account is the extracted occurrence
+(`count_takeout_split`, `counted_couple_of_takeout`), and the run's own handle list is
+the coupling's split exactly at the empty account (`count_split_agree_iff`).
+`Run.exclusive_head` gives the addressed cell no slot naming it and the run's own
+handle the only name on it, which are the two hypotheses
+`store_owned_is_destructive` names as what the take-out provides, so
+`store_destructive_of_takeout` reads the nested write's destructive branch off the
+take-out's check. The injectivity is not one of its inputs: the run's counting beside
+the coupling's counting of one heap force the account to be the one extracted
+occurrence (`expand_eq_singleton_of_counted`), and one occurrence's tags are injective
+whatever they are (`refInj_of_counted`), which is what
+`ScidoniaTest/Transfer`'s `acct_inj` reads at the take-out. `refInj_not_determined` is
+the boundary: two accounts with the same references are one configuration to the run's
+side — the same count at every heap and handle list — and one of them names a reference
+twice. `ScidoniaTest/Transfer` reads the transfer at a heap the take-out has emptied,
+the composition applied at the run's own handle list beside `store_destructive_of_typed`
+at the coupling's split, and that boundary at one heap and one handle list.
 
 `Discipline.lean`'s `Runs` and this correspondence are two routes and not one.
 `Runs` is a target-side sufficient condition *at a store*, which `runs_store_owned`
