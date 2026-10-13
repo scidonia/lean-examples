@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+import framescan
+
 ROOT = Path(__file__).resolve().parent.parent
 PAPER = Path(__file__).resolve().parent
 # The two papers in this directory.  Each states its own panel count, so the
@@ -33,8 +35,6 @@ OPEN, CLOSE = "([{", ")]}"
 
 # A public theorem as the library writes one: what the paper counts.
 THEOREM = re.compile(rf"^{ATTR}(theorem|lemma)\s")
-# A panel as the paper asks for one: a \codeframe call naming a library range.
-CALL = re.compile(r"\\codeframe\[linerange=\d+-\d+\]\{[^}]*\}")
 
 # The reference count's module marks where its vendored block ends; the header
 # says the declarations up to there are Lean's own model of the count, and the
@@ -256,18 +256,25 @@ def vendored_theorems():
 def panel_counts(tex_name):
     """(panels in the body, panels in the appendix) one paper's sources ask for.
 
-    A panel is a `\\codeframe` call naming a range of the library, so a line that
-    carries two calls quotes two panels and is counted as two: the number the
-    prose states is the panels, not the lines that happen to hold them.  The
-    body's are the ones above `\\appendix`, and the appendix's are the ones below
-    it. Each paper's count is its own: two papers quote the library here, and a
-    count that mixed them would be a numeral neither paper could state.
+    A panel is a `\\codeframe` call naming a range of the library, recognized by
+    the rule the checker uses, so a line that carries two calls quotes two panels
+    and is counted as two: the number the prose states is the panels, not the
+    lines that happen to hold them.  The body's are the ones above `\\appendix`,
+    and the appendix's are the ones below it. Each paper's count is its own: two
+    papers quote the library here, and a count that mixed them would be a numeral
+    neither paper could state.
     """
-    lines = (PAPER / tex_name).read_text(encoding="utf-8").splitlines()
+    text = (PAPER / tex_name).read_text(encoding="utf-8")
+    lines = text.splitlines()
     end = next((i for i, line in enumerate(lines)
                 if line.strip() == "\\appendix"), len(lines))
-    per_line = [len(CALL.findall(line)) for line in lines]
-    return sum(per_line[:end + 1]), sum(per_line[end + 1:])
+    calls, _ = framescan.scan_frames(text)
+    per_line: dict[int, int] = {}
+    for kind, line, *_ in calls:
+        if kind == "codeframe":
+            per_line[line] = per_line.get(line, 0) + 1
+    return (sum(n for line, n in per_line.items() if line <= end + 1),
+            sum(n for line, n in per_line.items() if line > end + 1))
 
 
 def counts():

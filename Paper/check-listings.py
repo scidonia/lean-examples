@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """Check that every frame in the paper still quotes what it claims.
 
-Four kinds of check, all against the library:
+Five kinds of check, all against the library:
+
+  a frame command
+  \\codeframe[linerange=<lo>-<hi>]{<file>}
+  \\lawframe{<file>}{<lo>-<hi>}{<name>}
+      every occurrence of either command must be one of those two calls, with a
+      numeric `lo-hi` range.  Recognition is total (`framescan.py`): a missing
+      bracket, path or brace, a range that is not a numeric `lo-hi`, and a
+      placeholder outside the two macro definitions are reported, so a call the
+      paper makes cannot pass as a form no pattern happens to match;
 
   %!check: <fragment>
   \\codeframe[linerange=<lo>-<hi>]{<file>}
@@ -24,14 +33,21 @@ Four kinds of check, all against the library:
       what keeps a stated number -- the theorems the library publishes, the
       panels the paper quotes -- from outliving what it counts.
 
-Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
-        python3 check-listings.py --self-test         # these checks, on a scratch paper
+Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here,
+                                                      # and then the self-test
+        python3 check-listings.py --self-test         # the self-test alone
 Exit status 0 when every frame and count checks out, 1 otherwise.
 
 A source that cannot be opened, and a range the source does not reach, are
 failures rather than skipped checks: both are reported and neither counts as a
 check performed, so the summary cannot report a panel as checked when nothing
 was read.
+
+The default run is the one a reader runs, so it also runs the self-test: the
+scratch paper that pins these checks, red, against each form of failure they
+exist to catch.  A check whose red case has stopped failing is a check that has
+stopped guarding, and the default run then fails too.  Naming files runs the
+checks alone, which is what the self-test itself does.
 """
 
 import importlib.util
@@ -42,97 +58,20 @@ import sys
 import tempfile
 from pathlib import Path
 
+import framescan
 import leanstrip
 
 CHECK = re.compile(r"^\s*%\s*!check:\s*(?P<frag>.*\S)\s*$")
-FRAME = re.compile(
-    r"\\codeframe\[linerange=(?P<lo>\d+)-(?P<hi>\d+)\]\{(?P<path>[^}]*)\}"
-)
-LAWFRAME = re.compile(
-    r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
-)
 LOOKUP = re.compile(
     r"\\expandafter\\def\\csname cf@(?P<path>.*)@(?P<lo>\d+)-(?P<hi>\d+)"
     r"\\endcsname\{(?P<key>[^}]*)\}"
 )
-# A non-numeric argument is exempt only at the two actual macro templates: the
-# range in \codeframe's definition signature and the forwarded range in
-# \lawframe's definition body.  These are recognized by their definition context,
-# not by accepting placeholder-shaped arguments in general.
-SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
-RANGE = re.compile(r"\d+-\d+")
-CODEFRAME_DEF = re.compile(r"\\def\\codeframe\[linerange=#1-#2\]#3\s*\{")
-LAWFRAME_DEF = re.compile(
-    r"\\newcommand\s*\{\s*\\lawframe\s*\}\s*\[3\]\s*\{"
-)
-LAWFRAME_BODY_CALL = re.compile(r"\\codeframe\[linerange=#2\]\{\.\./#1\}")
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
 
-def code_of(line: str) -> str:
-    """`line` up to its LaTeX comment, if it has one.
-
-    LaTeX ends the line at an unescaped per cent, so a `\\codeframe` after one is
-    text the typesetter never reaches: it is not a call, and the `%!check:` beside
-    it is not paired with it.  `\\%` is a literal per cent and does not begin a
-    comment.
-    """
-    escaped = False
-    for i, ch in enumerate(line):
-        if ch == "%" and not escaped:
-            return line[:i]
-        escaped = ch == "\\" and not escaped
-    return line
-
-
-def source_without_comments(text: str) -> str:
-    """Blank comments while preserving source offsets for macro-context checks."""
-    result = []
-    for line in text.splitlines(keepends=True):
-        body = line.rstrip("\r\n")
-        ending = line[len(body):]
-        visible = code_of(body)
-        result.append(visible + " " * (len(body) - len(visible)) + ending)
-    return "".join(result)
-
-
-def macro_body_end(source: str, opening: int) -> int | None:
-    """The position after a macro body's matching closing brace, or None."""
-    depth, escaped = 0, False
-    for position in range(opening, len(source)):
-        char = source[position]
-        if char == "\\":
-            escaped = not escaped
-            continue
-        if not escaped:
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    return position + 1
-        escaped = False
-    return None
-
-
-def macro_template_spans(text: str) -> set[tuple[int, int]]:
-    """The range arguments that are syntax in the two macro definitions."""
-    source = source_without_comments(text)
-    templates: set[tuple[int, int]] = set()
-    for definition in CODEFRAME_DEF.finditer(source):
-        shape = SHAPE.search(source, definition.start(), definition.end())
-        if shape:
-            templates.add(shape.span())
-    for definition in LAWFRAME_DEF.finditer(source):
-        opening = definition.end() - 1
-        end = macro_body_end(source, opening)
-        if end is None:
-            continue
-        for call in LAWFRAME_BODY_CALL.finditer(source, opening + 1, end - 1):
-            shape = SHAPE.search(source, call.start(), call.end())
-            if shape:
-                templates.add(shape.span())
-    return templates
+def panel_text(path: str, lo: int, hi: int) -> str:
+    """A panel call as the paper writes one, for a message."""
+    return f"\\codeframe[linerange={lo}-{hi}]{{{path}}}"
 
 
 def normalise(text: str) -> str:
@@ -161,16 +100,21 @@ def read_source(path: Path, limit: int, context: str,
     return lines
 
 
-def check_fragments(tex: Path, problems: list[str]) -> int:
+def check_fragments(tex: Path, calls: list, problems: list[str]) -> int:
     """Verify each %!check: directive against every frame that follows it.
 
     A line can carry more than one call, and each call is a panel: the directive
     before the line pairs with the first, and a second call on the same line has
     no directive of its own to pair with, so it is reported rather than passed
-    over.  Only the code before a LaTeX comment is read, so a call the typesetter
-    never reaches neither asks for a directive nor takes one.
+    over.  Only the calls `framescan` recognizes are panels, so a command the
+    typesetter never reaches neither asks for a directive nor takes one, and a
+    malformed one is reported by the caller rather than paired with anything.
     """
     lines = tex.read_text(encoding="utf-8").splitlines()
+    panels: dict[int, list] = {}
+    for kind, number, path, lo, hi, _ in calls:
+        if kind == "codeframe":
+            panels.setdefault(number, []).append((path, lo, hi))
     pending, checked = None, 0
     for number, line in enumerate(lines, start=1):
         match = CHECK.match(line)
@@ -181,66 +125,35 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
                     f"and the one at line {number}")
             pending = (number, match.group("frag"))
             continue
-        for match in FRAME.finditer(code_of(line)):
+        for path, lo, hi in panels.get(number, []):
             if pending is None:
                 problems.append(f"{tex.name}:{number}: frame without a %!check: "
-                                f"{match.group(0)}")
+                                f"{panel_text(path, lo, hi)}")
                 continue
             directive, fragment = pending
             pending = None
             where = f"{tex.name}:{directive}"
-            lo, hi = int(match.group("lo")), int(match.group("hi"))
-            body = read_source(tex.parent / match.group("path"), hi, where, problems)
+            body = read_source(tex.parent / path, hi, where, problems)
             if body is None:
                 continue
             checked += 1
             if normalise(fragment) not in normalise("\n".join(body[lo - 1:hi])):
                 problems.append(
-                    f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
+                    f"{where}: {path}:{lo}-{hi} does not contain\n"
                     f"    {fragment}")
     if pending is not None:
         problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no frame")
     return checked
 
 
-def check_calls(tex: Path, problems: list[str]) -> int:
-    """Report every nonnumeric frame argument outside the macro templates.
-
-    A call has a numeric `lo-hi` range. The only placeholder ranges that are not
-    calls are the `\\codeframe` definition's parameter text and the forwarded
-    range call inside the `\\lawframe` definition. Their exact source locations
-    are recognized by `macro_template_spans`; a placeholder in any real call is
-    reported, as is any other nonnumeric argument. Text after a LaTeX comment is
-    not part of the source the typesetter reaches.
-    """
-    text = tex.read_text(encoding="utf-8")
-    templates = macro_template_spans(text)
-    found, offset = 0, 0
-    for number, raw_line in enumerate(text.splitlines(keepends=True), 1):
-        line = raw_line.rstrip("\r\n")
-        for match in SHAPE.finditer(code_of(line)):
-            arg = match.group(1)
-            span = (offset + match.start(), offset + match.end())
-            if RANGE.fullmatch(arg) or span in templates:
-                continue
-            problems.append(f"{tex.name}:{number}: not a "
-                            f"\\codeframe[linerange=lo-hi]{{path}} call: "
-                            f"{line.strip()}")
-            found += 1
-        offset += len(raw_line)
-    return found
-
-
-def check_lawframes(tex: Path, problems: list[str]) -> int:
+def check_lawframes(tex: Path, calls: list, problems: list[str]) -> int:
     """Verify each law frame against the declaration it names."""
-    text = tex.read_text(encoding="utf-8")
     checked = 0
-    for match in LAWFRAME.finditer(text):
-        number = text.count("\n", 0, match.start()) + 1
+    for kind, number, module, lo, hi, name in calls:
+        if kind != "lawframe":
+            continue
         where = f"{tex.name}:{number}"
-        name = match.group("name").replace("\\_", "_").replace("\\%", "%")
-        lo, hi = int(match.group("lo")), int(match.group("hi"))
-        module = match.group("path")
+        name = name.replace("\\_", "_").replace("\\%", "%")
         body = read_source(tex.parent / ".." / module, hi, where, problems)
         if body is None:
             continue
@@ -269,16 +182,14 @@ def load_lookup(here: Path, problems: list[str]) -> dict:
     return table
 
 
-def check_frames(here: Path, tex: Path, table: dict, problems: list[str]) -> int:
+def check_frames(here: Path, tex: Path, table: dict, calls: list,
+                 problems: list[str]) -> int:
     """Verify every generated frame against the range it was generated from."""
-    text = tex.read_text(encoding="utf-8")
-    wanted = [(m.group("path"), int(m.group("lo")), int(m.group("hi")), m.start())
-              for m in FRAME.finditer(text)]
-    wanted += [("../" + m.group("path"), int(m.group("lo")), int(m.group("hi")), m.start())
-               for m in LAWFRAME.finditer(text)]
     checked = 0
-    for path, lo, hi, at in wanted:
-        where = f"{tex.name}:{text.count(chr(10), 0, at) + 1}"
+    for kind, number, path, lo, hi, _ in calls:
+        where = f"{tex.name}:{number}"
+        if kind == "lawframe":
+            path = "../" + path
         key = table.get((path, lo, hi))
         if key is None:
             problems.append(f"{where}: no generated frame for {path}:{lo}-{hi}\n"
@@ -351,15 +262,14 @@ def check_counts(here: Path, problems: list[str]) -> int:
 
 
 # The self-test's scratch archive: these scripts, the library gen-laws.py locates
-# its counts in, one source to quote, and two papers.  One pairs each of its two
-# panels with the directive before it and must check out.  The other carries a
-# second call on the line of its first, which no directive can precede: it must
-# be reported rather than passed over, or a panel nothing checks sits in the
-# paper.  The archive is a temporary copy, so neither run reads or writes the
-# papers beside this script.
+# its counts in, one source to quote, and two papers.  Probe.lean is the source
+# every case quotes: a declaration on its second and third lines and a doc
+# comment on its first, so the one file gives a range that holds code, a range
+# that strips to nothing, and a range its end does not reach.  The archive is a
+# temporary copy, so neither run reads or writes the papers beside this script.
 SELF_TEST_TREES = ("Scidonia", "ScidoniaTest")
 SELF_TEST_SCRIPTS = ("check-listings.py", "gen-laws.py", "gen-frames.py",
-                     "leanstrip.py")
+                     "framescan.py", "leanstrip.py")
 SELF_TEST_SOURCE = ("/-- A declaration to quote. -/\n"
                     "def probeValue : Nat :=\n"
                     "  41 + 1\n")
@@ -382,6 +292,82 @@ SELF_TEST_PAIRED_SUMMARY = ("2 quoted panels, 0 law frames and 2 generated frame
 SELF_TEST_UNPAIRED = "frame without a %!check: " + SELF_TEST_SECOND
 SELF_TEST_PANELCOUNT = "\\newcommand{\\panelcount}{4}"
 SELF_TEST_APPENDIXCOUNT = "\\newcommand{\\appendixpanelcount}{2}"
+# Both papers' preambles define the two commands, and that parameter text is not
+# a frame: a paper carrying the definitions beside a real panel must check out,
+# or the recognition that catches a malformed call is also catching the macros.
+SELF_TEST_TEMPLATES = (
+    "\\def\\codeframe[linerange=#1-#2]#3{%\n"
+    "  \\inputminted{lean}{frames/#3.lean}}\n"
+    "\\newcommand{\\lawframe}[3]{%\n"
+    "  \\texttt{#3} \\codeframe[linerange=#2]{../#1}}\n"
+    "%!check: def probeValue\n"
+    + SELF_TEST_PANEL + "\n")
+# One case per form of failure these checks exist to catch, each a whole paper
+# run through the scripts as the command line runs them.  A case is what the
+# checker must report, and what the generator must for the forms it recognizes
+# too (None means the generator has nothing to say and it is not run).  A case
+# that stops reporting its diagnostic, or that passes where it must fail, is a
+# case whose guard has stopped guarding, and the self-test records it.
+SELF_TEST_RED = [
+    ("a codeframe call with no closing brace",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=2-3]{../Scidonia/Probe.lean\n",
+     "malformed \\codeframe call: no {path} after [linerange=2-3]",
+     "MALFORMED FRAME CALL"),
+    ("a codeframe call with no closing bracket",
+     "\\codeframe[linerange=2-3{../Scidonia/Probe.lean}\n",
+     "malformed \\codeframe call: no [linerange=lo-hi]{path}",
+     "MALFORMED FRAME CALL"),
+    ("a lawframe call with no closing brace",
+     "\\lawframe{Scidonia/FracPerm/Ledger.lean}{25-25}{held_nil\n",
+     "malformed \\lawframe call: no {path}{lo-hi}{name}",
+     "MALFORMED FRAME CALL"),
+    ("a source that cannot be read",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=2-3]{../Scidonia/Absent.lean}\n",
+     "cannot read",
+     "MISSING SOURCE"),
+    ("a range past the end of its source",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=2-9]{../Scidonia/Probe.lean}\n",
+     "has only 3 lines, range is ..9",
+     "RANGE PAST END"),
+    ("a placeholder where a range belongs",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=#1-#2]{../Scidonia/Probe.lean}\n",
+     "\\codeframe[linerange=#1-#2] is not a numeric lo-hi range",
+     "MALFORMED FRAME CALL"),
+    ("a range that is not numeric",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=2-x]{../Scidonia/Probe.lean}\n",
+     "\\codeframe[linerange=2-x] is not a numeric lo-hi range",
+     "MALFORMED FRAME CALL"),
+    ("a range whose code strips to nothing",
+     "%!check: /-- A declaration to quote. -/\n"
+     "\\codeframe[linerange=1-1]{../Scidonia/Probe.lean}\n",
+     "quotes no code",
+     "EMPTY FRAMES"),
+    ("a fragment its quoted range does not contain",
+     "%!check: def probeValue\n"
+     "\\codeframe[linerange=3-3]{../Scidonia/Probe.lean}\n",
+     "does not contain",
+     None),
+    ("a directive superseded before its frame",
+     "%!check: def probeValue\n"
+     "%!check: 41 + 1\n"
+     + SELF_TEST_PANEL + "\n",
+     "%!check: with no frame between it and the one at line 2",
+     None),
+    ("a second call on a line, with no directive",
+     SELF_TEST_SAME_LINE,
+     SELF_TEST_UNPAIRED,
+     None),
+]
+# A panel the generator has never seen: generate for a paper, then add a call.
+SELF_TEST_UNFRAMED = SELF_TEST_PAIRED + (
+    "%!check: def probeValue\n"
+    "\\codeframe[linerange=2-2]{../Scidonia/Probe.lean}\n")
+SELF_TEST_UNFRAMED_WANTED = "no generated frame for ../Scidonia/Probe.lean:2-2"
 
 
 def indented(text: str) -> str:
@@ -395,14 +381,38 @@ def in_archive(paper: Path, *args: str):
                           capture_output=True, text=True)
 
 
+def report_of(run) -> str:
+    """A run's output, without the generator's per-frame listing.
+
+    `gen-frames.py` prints one line per frame it writes, which is a page of
+    lines beside the diagnostic a case is about.  That listing is indented under
+    the run's report; the diagnostics and the summary are not.
+    """
+    return "\n".join(line for line in (run.stdout + run.stderr).splitlines()
+                     if not line.startswith("  "))
+
+
+def expect(case: str, run, must_fail: bool, wanted: str,
+           problems: list[str]) -> None:
+    """Record a problem unless `run` printed `wanted` and ended as it must."""
+    print(f"--- {case}: exit {run.returncode}")
+    print(indented(report_of(run)), end="")
+    if wanted not in run.stdout + run.stderr:
+        problems.append(f"{case}: did not report\n    {wanted}")
+    if run.returncode == 0 and must_fail:
+        problems.append(f"{case}: a paper it must reject passed")
+    if run.returncode != 0 and not must_fail:
+        problems.append(f"{case}: a paper it must accept did not check out")
+
+
 def self_test() -> int:
     """Run these checks against a scratch paper that is wrong in one place.
 
-    The archive carries this checker, the generators and the library, so the run
-    exercises the command line rather than a function inside it.  A paper whose
-    panels each have the directive before them must check out; a paper whose
-    line carries a second call, with no directive that could precede it, must be
-    reported; and the paper the counts are taken from must be counted in calls.
+    The archive carries this checker, the generators, the recognizer and the
+    library, so every case exercises the command line rather than a function
+    inside it.  A case that does not report its own diagnostic, or that passes
+    where it must fail, is recorded as a problem: that is what makes each of
+    these checks falsifiable rather than merely plausible.
     """
     here = Path(__file__).resolve().parent
     absent = [str(here.parent / tree) for tree in SELF_TEST_TREES
@@ -430,12 +440,12 @@ def self_test() -> int:
             if step.returncode != 0:
                 problems.append(f"{script} failed in the scratch archive:\n"
                                 + step.stdout + step.stderr)
+
+        # A paper whose every panel has the directive before it checks out, and
+        # the paper the counts are taken from is counted in calls.
         paired = in_archive(paper, "check-listings.py", "probe.tex")
-        print(f"--- a directive before each panel: exit {paired.returncode}")
-        print(indented(paired.stdout), end="")
-        if paired.returncode != 0 or SELF_TEST_PAIRED_SUMMARY not in paired.stdout:
-            problems.append("the paired paper did not check out as\n    "
-                            + SELF_TEST_PAIRED_SUMMARY)
+        expect("a directive before each panel", paired, False,
+               SELF_TEST_PAIRED_SUMMARY, problems)
         if SELF_TEST_UNPAIRED in paired.stdout:
             problems.append("the paired paper reported " + SELF_TEST_UNPAIRED)
         counts = (paper / "counts.tex").read_text(encoding="utf-8")
@@ -443,18 +453,37 @@ def self_test() -> int:
             if wanted not in counts:
                 problems.append("two calls on one line are not counted as two "
                                 "panels: counts.tex does not state\n    " + wanted)
-        (paper / "probe.tex").write_text(SELF_TEST_SAME_LINE, encoding="utf-8")
+
+        # The definitions' parameter text is a call to neither script, so the
+        # paper that carries the definitions must check out.
+        (paper / "probe.tex").write_text(SELF_TEST_TEMPLATES, encoding="utf-8")
+        templates = in_archive(paper, "gen-frames.py")
+        if templates.returncode != 0:
+            problems.append("gen-frames.py failed on the paper with the "
+                            "definitions:\n" + templates.stdout + templates.stderr)
+        expect("the parameter text of both definitions",
+               in_archive(paper, "check-listings.py", "probe.tex"), False,
+               "0 failed", problems)
+
+        # Every form of failure these checks catch, red.
+        for case, text, checked_for, generated_for in SELF_TEST_RED:
+            (paper / "probe.tex").write_text(text, encoding="utf-8")
+            if generated_for is not None:
+                expect(f"{case}, in gen-frames.py",
+                       in_archive(paper, "gen-frames.py"), True, generated_for,
+                       problems)
+            expect(f"{case}, in check-listings.py",
+                   in_archive(paper, "check-listings.py", "probe.tex"), True,
+                   checked_for, problems)
+
+        # A panel the generator has not seen has no frame.
+        (paper / "probe.tex").write_text(SELF_TEST_PAIRED, encoding="utf-8")
         if in_archive(paper, "gen-frames.py").returncode != 0:
-            problems.append("gen-frames.py failed on the same-line paper")
-        unpaired = in_archive(paper, "check-listings.py", "probe.tex")
-        print(f"--- a second call on the line, with no directive: "
-              f"exit {unpaired.returncode}")
-        print(indented(unpaired.stdout), end="")
-        if unpaired.returncode == 0:
-            problems.append("a second call on one line, with no %!check:, passed")
-        if "probe.tex:2: " + SELF_TEST_UNPAIRED not in unpaired.stdout:
-            problems.append("the same-line paper did not report\n    probe.tex:2: "
-                            + SELF_TEST_UNPAIRED)
+            problems.append("gen-frames.py failed before the unframed panel")
+        (paper / "probe.tex").write_text(SELF_TEST_UNFRAMED, encoding="utf-8")
+        expect("a panel with no generated frame",
+               in_archive(paper, "check-listings.py", "probe.tex"), True,
+               SELF_TEST_UNFRAMED_WANTED, problems)
     for problem in problems:
         print(problem)
     print(f"self-test: "
@@ -463,10 +492,11 @@ def self_test() -> int:
 
 
 def main(argv: list[str]) -> int:
-    if "--self-test" in argv[1:]:
+    args = argv[1:]
+    if "--self-test" in args:
         return self_test()
     here = Path(__file__).resolve().parent
-    files = [Path(a) for a in argv[1:]] or sorted(here.glob("*.tex"))
+    files = [Path(a) for a in args] or sorted(here.glob("*.tex"))
     if not files:
         print("no .tex files to check", file=sys.stderr)
         return 1
@@ -477,13 +507,24 @@ def main(argv: list[str]) -> int:
         if not tex.is_file():
             print(f"no such file: {tex}", file=sys.stderr)
             return 1
-        check_calls(tex, problems)
-        fragments += check_fragments(tex, problems)
-        laws += check_lawframes(tex, problems)
-        frames += check_frames(here, tex, table, problems)
+        calls, malformed = framescan.scan_frames(tex.read_text(encoding="utf-8"))
+        for line, message in malformed:
+            problems.append(f"{tex.name}:{line}: {message}")
+        fragments += check_fragments(tex, calls, problems)
+        laws += check_lawframes(tex, calls, problems)
+        frames += check_frames(here, tex, table, calls, problems)
     stated = check_counts(here, problems)
     for problem in problems:
         print(problem)
+    if not args:
+        # The default run is the one a reader runs, so it carries the self-test
+        # with it: the fixtures that keep these checks honest are then part of the
+        # command rather than a second one a reader has to know to run.
+        print()
+        print("--- the checker's own self-test, on a scratch paper beside the library")
+        if self_test():
+            problems.append("the self-test did not check out")
+            print(problems[-1])
     print(f"{fragments} quoted panels, {laws} law frames and {frames} generated "
           f"frames checked, {stated} generated counts checked, "
           f"{len(problems)} failed")

@@ -8,8 +8,10 @@
 %   python3 gen-frames.py   # the frames themselves: the quoted ranges, comment-free
 %   latexmk -pdf -shell-escape lowering.tex
 % Check that every frame still quotes the library, and that counts.tex holds the
-% counts the library gives:
-%   python3 check-listings.py
+% counts the library gives. This also runs the checker's own red fixtures, on a
+% scratch paper beside the library:
+%   python3 check-listings.py               # the checks, then the red fixtures
+%   python3 check-listings.py --self-test   # the red fixtures alone
 %
 % pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
 % in the quoted Lean is mapped to font commands by newunicodechar below. A
