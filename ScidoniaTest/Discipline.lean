@@ -540,6 +540,138 @@ theorem appArg_value_not_reached :
       ∧ ¬ Runs env1 (Multi.dropOcc twoPairs 3 3) (.app (.lam 0 (.var 1)) (.var 2)) :=
   ⟨appArg_judged, appArg_step, appArg_not_judged⟩
 
+/-! ## The non-lambda `appArg` failure, inherited from the nested `appFun`
+
+`Runs.appArgPos` --- the clause for an application whose function is a value that is not
+an abstraction --- reads the argument and nothing else, so it preserves whenever the
+argument position does. A counterexample at a *top-level* `appArg` with a non-lambda
+function therefore has to be one whose *argument* is already such a configuration: the
+wrapper below is the `appFun` check as the argument of an application whose function is
+a nullary node, and its failure is the argument's, not the application's own clause. -/
+
+/-- The `appFun` check wrapped as the argument of an application whose function is a
+value that is not an abstraction. -/
+theorem appArg_inherited_judged :
+    Runs env1 onePair (.app (.con0 5) (.app (.drop 2 (.con0 0)) (.var 2))) :=
+  Runs.appArgPos (Value.con0 5) (by intro x body h; cases h) appFun_judged
+
+/-- The wrapper's step: the argument's own step, taken by the application's `appArg`
+rule. -/
+theorem appArg_inherited_step :
+    TStep shared [] env1 onePair (.app (.con0 5) (.app (.drop 2 (.con0 0)) (.var 2)))
+      (decRef shared [] 2).1 [] env1 (Multi.dropOcc onePair 2 2)
+      (.app (.con0 5) (.app (.con0 0) (.var 2))) :=
+  TStep.appArg (Value.con0 5) appFun_step
+
+/-- The wrapper is not judged once its argument has stepped: the failure is the
+argument's, and the application's own clause is the one that carried it. -/
+theorem appArg_inherited_not_judged :
+    ¬ Runs env1 (Multi.dropOcc onePair 2 2) (.app (.con0 5) (.app (.con0 0) (.var 2))) := by
+  intro h
+  cases h with
+  | appArgPos _ _ ha => exact appFun_not_judged ha
+  | appPos hne _ _ => exact absurd (Value.con0 5) hne
+
+/-- The nested-wrapper goal, refused: a configuration judged and stepped, whose
+conclusion is not judged because the *argument* is not --- the failure is inherited from
+`appFun` and not a sibling-resource overlap of the application's own clause, which reads
+only the argument. -/
+theorem appArg_nested_inherited :
+    Runs env1 onePair (.app (.con0 5) (.app (.drop 2 (.con0 0)) (.var 2)))
+      ∧ TStep shared [] env1 onePair (.app (.con0 5) (.app (.drop 2 (.con0 0)) (.var 2)))
+          (decRef shared [] 2).1 [] env1 (Multi.dropOcc onePair 2 2)
+          (.app (.con0 5) (.app (.con0 0) (.var 2)))
+      ∧ ¬ Runs env1 (Multi.dropOcc onePair 2 2)
+          (.app (.con0 5) (.app (.con0 0) (.var 2))) :=
+  ⟨appArg_inherited_judged, appArg_inherited_step, appArg_inherited_not_judged⟩
+
+/-! ## The value clause, narrower than the rule it mirrors
+
+`Runs.bindVal` asks the resumed body to be judged at *every* reference the binder could
+take, while the target's `bindVal` resumes at the one reference its `ValRef` returns. At
+the configuration below the binding is not judged, because the body's write is
+undisciplined at `r = 0`, where the account holds three occurrences of the subject; the
+target nonetheless reaches a disciplined state from it, because `bindVal` realises the
+value at the heap's fresh location and the body is judged there. The universally
+quantified obligation is what the judgement adds beyond the rule. -/
+
+/-- The environment of the value-clause check: `1` and `2` both name the reference `0`. -/
+def envR : TEnv := [(1, 0), (2, 0)]
+
+/-- The account of the value-clause check: one occurrence of each of `1` and `2`. -/
+def mR : Multi := [(1, 0), (2, 0)]
+
+/-- The body of the value-clause check: a write to `0` at the value `1`. The subject `0`
+is the binder's, so it is the one occurrence the binder supplies. -/
+def bindBody : Expr := .store (.var 0) 0 (.var 1)
+
+/-- The binding the value-clause check reads: `con0 7` bound to `0`. -/
+def bindTerm : Expr := .bind 0 (.con0 7) bindBody
+
+/-- The body is judged once the binder's reference is not `0`: the write's subject is
+counted once there. -/
+theorem bindBody_runs_of_ne {r₀ : Ref} (hr : r₀ ≠ 0) :
+    Runs (TEnv.set envR 0 r₀) (Multi.insert mR 0 r₀) bindBody := by
+  refine Runs.store (ρ := TEnv.set envR 0 r₀) (y := 0) (i := 0) (v := .var 1)
+    (m := Multi.insert mR 0 r₀)
+    (Owns.store (m := Multi.insert mR 0 r₀) (y := 0) (r := r₀) (i := 0) (v := .var 1)
+      (hρ := TEnv.lookup_set_self envR 0 r₀) (hmem := by simp [Multi.insert])) ?_ ?_ ?_
+  · intro r' hr'
+    have hrr : r' = r₀ :=
+      Option.some.inj (hr'.symm.trans (TEnv.lookup_set_self envR 0 r₀))
+    rw [hrr]
+    have hexp : expand (Multi.insert mR 0 r₀) = r₀ :: expand mR := rfl
+    rw [hexp, List.count_cons_self]
+    have hz : (expand mR).count r₀ = 0 := by
+      rw [show expand mR = [0, 0] from rfl]
+      exact List.count_eq_zero.mpr (by simp [hr])
+    rw [hz]
+  · refine Runs.var (x := 1) (r := 0) (hρ := ?_) (hmem := ?_)
+    · rw [TEnv.lookup_set_of_ne (show (0 : Var) ≠ 1 by decide) r₀]
+      decide
+    · exact List.mem_cons_of_mem _ (by decide)
+  · exact Runs.var (x := 0) (r := r₀) (hρ := TEnv.lookup_set_self envR 0 r₀)
+      (hmem := by simp [Multi.insert])
+
+/-- The binding is not judged: `Runs.bindVal` demands the body judge for every reference
+`r`, and at `r = 0` the body's write is undisciplined. -/
+theorem bindVal_not_judged : ¬ Runs envR mR bindTerm := by
+  intro h
+  unfold bindTerm at h
+  cases h with
+  | bindVal _ _ _ hcont =>
+      have hb0 : ¬ Runs (TEnv.set envR 0 0) (Multi.insert mR 0 0) bindBody := by
+        intro hb
+        unfold bindBody at hb
+        cases hb with
+        | store _ hdist =>
+            have hlook : (TEnv.set envR 0 0).lookup 0 = some (0 : Ref) := by decide
+            exact absurd (hdist 0 hlook) (by decide)
+      exact hb0 (hcont 0)
+  | bindPos hval _ _ => exact absurd (Value.con0 7) hval
+
+/-- The body is judged at the reference `1`, which is not `0`. -/
+theorem bindVal_body_judged : Runs (TEnv.set envR 0 1) (Multi.insert mR 0 1) bindBody :=
+  bindBody_runs_of_ne (by decide)
+
+/-- The target reaches the disciplined state: the binding's `bindVal` step realises the
+value at the heap's fresh location and resumes the body, which is judged there. -/
+theorem bindVal_step :
+    TStep [] [] envR mR bindTerm (allocWith [] [] []).1
+      (dropHandle (allocWith [] [] []).2 (fresh [] []))
+      (TEnv.set envR 0 (fresh [] [])) (Multi.insert mR 0 (fresh [] [])) bindBody :=
+  TStep.bindVal (ValRef.con0) (by intro z h; cases h) (by decide)
+
+/-- The binding's step reaches a configuration whose body is judged: the judgement
+excludes the binding, and the rule's own realisation reaches a state the judgement
+accepts. -/
+theorem bindVal_step_reaches :
+    ∃ c' hs' r, r ≠ 0
+      ∧ TStep [] [] envR mR bindTerm c' hs' (TEnv.set envR 0 r) (Multi.insert mR 0 r) bindBody
+      ∧ Runs (TEnv.set envR 0 r) (Multi.insert mR 0 r) bindBody :=
+  ⟨(allocWith [] [] []).1, dropHandle (allocWith [] [] []).2 (fresh [] []), fresh [] [],
+    by decide, bindVal_step, bindBody_runs_of_ne (by decide)⟩
+
 /-- The heap the match check steps at: the cell the subject names at `5`, whose one
 slot names `7`. -/
 def matched : CHeap :=
@@ -710,5 +842,29 @@ info: 'ScidoniaTest.Discipline.matchC_arm_not_paired' depends on axioms: [propex
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms matchC_arm_not_paired
+
+/--
+info: 'ScidoniaTest.Discipline.appArg_nested_inherited' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms appArg_nested_inherited
+
+/--
+info: 'ScidoniaTest.Discipline.bindVal_not_judged' does not depend on any axioms
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms bindVal_not_judged
+
+/--
+info: 'ScidoniaTest.Discipline.bindVal_step_reaches' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms bindVal_step_reaches
+
+/--
+info: 'Scidonia.RC.runs_appArgPos' does not depend on any axioms
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.runs_appArgPos
 
 end ScidoniaTest.Discipline

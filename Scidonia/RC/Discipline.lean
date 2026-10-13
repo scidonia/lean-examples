@@ -80,27 +80,40 @@ preservation is at hand, and they are stated with that preservation as a hypothe
 because that is exactly what the induction over the relation gives a congruence rule
 about its position's step: `runs_con1Field`, `runs_con2FieldL` (whose case is vacuous:
 the clause asks a binary node's first field to be a value, and `value_does_not_step`)
-and `runs_con2FieldR`.
+and `runs_con2FieldR`. An application whose function is a value that is not an
+abstraction is a fifth: its clause reads only the argument, so it preserves once the
+argument position does, which is `runs_appArgPos`.
 
-**Where the target's rules do not preserve it.** Four rules do not, and they are a
-finding about the relation's own shape rather than about a missing clause: the
-judgement's positional clauses read a term's positions at the *whole*
-configuration's account and environment, and these rules step a position there while
-leaving its sibling in place.
+**Why the judgement is not an invariant of runs.** It is a *sufficient condition at a
+store* and not an invariant of the relation: the judgement exists to hand the write's
+two hypotheses --- the term's own occurrence of the subject and the account's counting
+it once --- to `Ownership.store_owned_is_destructive`, which is what `runs_store_owned`
+reads, and the discipline proper lives on the source. It is deliberately narrower than
+the relation and is *not* preserved by every step, for two reasons, neither of which any
+theorem needs fixed. No clause is added to chase preservation.
 
-* `appFun` and the first family of `appArg`: a clause reads the sibling position's
-  own judgement at the configuration the step starts from, and the step may move the
-  environment or consume an occurrence the sibling's clause rests on. The judgement
-  admits the state where two positions' requirements rest on one occurrence --- its
-  clauses are the rules' premises, and the rules' premises are membership in the
-  configuration's account --- and a step in one position then removes the ground
-  under the other's clause.
-* the second family of `appArg`, and `bindRhs`: a position whose step produces a
-  *value* meets the clause for a term whose position is that value, and that clause
-  carries the continuation the rule runs --- the body's own judgement at the moved
-  environment and account. A clause for a position that holds a computation carries
-  the position's judgement and not that continuation, so the value-shaped conclusion
-  asks for something the computation-shaped configuration never supplied.
+* *A shared sibling.* The positional clauses read a term's positions at the *whole*
+  configuration's account and environment, and a congruence rule steps a position there
+  while leaving its sibling in place. The judgement admits a state where two positions'
+  requirements rest on one occurrence --- its clauses are the rules' premises, and the
+  rules' premises are membership in the configuration's account --- and a step in one
+  position then removes the ground under the other's clause. This is `appFun`, and only
+  `appFun`: `Runs.appArgPos`, the clause for an application whose function is a value
+  that is not an abstraction, reads the argument and not its sibling, so it preserves
+  whenever the argument position itself does (`runs_appArgPos`), and a counterexample at
+  a top-level `TStep.appArg` with a non-lambda function appears only when the argument
+  position is itself such a configuration. That failure is then inherited from the
+  nested `appFun` and not caused by a sibling requirement of the application's own
+  clause; `ScidoniaTest/Discipline`'s `appArg_nested_inherited` is the wrapper.
+* *A step that reaches a subterm the clause never asked about.* This is a different
+  failure, and it is not a split problem at all: no re-splitting of the environments
+  recovers it, because the subterm was never in the clause. A position whose step
+  produces a *value* meets the clause for a term whose position is that value, and that
+  clause carries the continuation the rule runs --- the abstraction's body, the binder's
+  body --- whose judgement the computation-shaped clause never mentioned.
+  `Runs.appLamArg`, the lambda-valued half of `appArg`, reads the argument and not the
+  body the resumed redex needs, and `Runs.bindPos` reads the bound term and the body and
+  not the body the resumed binding needs.
 * `matchC`: the rule binds the arm's binders to the *cell's slots*, which are the
   heap's, and leaves the account unchanged; a heap-free judgement can only ask the
   body to run at bindings the account pairs with the binders, and the rule's own
@@ -109,10 +122,26 @@ leaving its sibling in place.
   re-established at the arm it leaves.
 
 The exact goals and the counterexamples are `ScidoniaTest/Discipline`'s
-`appFun_account_shared`, `appArg_value_not_reached`, `bindRhs_value_not_reached` and
-`matchC_arm_not_paired`. Each failing goal is stated with the account and
-environment the step starts from and leaves; none of them is a clause the judgement
-is missing, and none is hidden by restricting the judgement.
+`appFun_account_shared`, `appArg_nested_inherited`, `appArg_value_not_reached`,
+`bindRhs_value_not_reached` and `matchC_arm_not_paired`. Each failing goal is stated
+with the account and environment the step starts from and leaves; none of them is a
+clause the judgement is missing, and none is hidden by restricting the judgement.
+
+The value clauses are narrower than the target rules they mirror in a second way, and
+that narrowing is a witness too rather than a missing clause. `Runs.bindVal` and
+`Runs.appVal` ask the resumed body to be judged at *every* reference the binder could
+take, while the rule resumes at the one reference its actual `ValRef` returns; and
+`Runs.matchC` asks the arm's body to be judged for every reference list the account
+pairs with the binders, while the rule reads the binders off the cell's slots. At
+`ρ = [(1,0),(2,0)]` and `m = [(1,0),(2,0)]` the binding `bind 0 (con0 7) (store (var 0) 0
+(var 1))` is therefore not judged --- `Runs.bindVal` demands the resumed store at
+`r = 0`, where the account holds three occurrences of `0` --- yet the target reaches a
+disciplined state from it, because `bindVal` realises the value at the heap's fresh
+location and the resumed store is judged there. The universally quantified obligation
+is what the judgement adds beyond the rule, and it is exactly why the judgement is a
+sufficient condition the write theorem consumes rather than an invariant of the
+relation. `ScidoniaTest/Discipline`'s `bindVal_not_judged`, `bindVal_body_judged` and
+`bindVal_step_reaches` are that witness.
 
 **What is modelled, and what is trusted.** The judgement is a static reading of a
 configuration: the environment, the term's own multiplicities and the term, with no
@@ -221,11 +250,15 @@ construct takes, together with the account movement that rule makes, read
 root-first: the outer instruction's premise and movement, and the continuation's own
 clause. -/
 
-/-- The term `e` is run at the account `m` in the environment `ρ`: the judgement the
-target's rules preserve at their instructions. The environment is an index of the
-judgement and not a parameter, because a clause's continuation runs at the
-environment the rule leaves --- a binding's body at the binding's own environment,
-an arm's body at the arm's binders --- and a uniform parameter could not hold it. -/
+/-- The term `e` is run at the account `m` in the environment `ρ`: a sufficient
+condition at a store, each clause the premise of the target rule that construct takes
+together with the account movement that rule makes, read root-first. It is narrower
+than the relation and is not an invariant of it (the module note says why); what it is
+*for* is `runs_store_owned`, which reads the write's two hypotheses off a derivation.
+The environment is an index of the judgement and not a parameter, because a clause's
+continuation runs at the environment the rule leaves --- a binding's body at the
+binding's own environment, an arm's body at the arm's binders --- and a uniform
+parameter could not hold it. -/
 inductive Runs : TEnv → Multi → Expr → Prop where
   /-- A variable is a value whose occurrence the account holds, at the reference the
   environment names for it. -/
@@ -473,9 +506,23 @@ theorem runs_appVal {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {x : Var
   | appArgPos _ hnotlam _ => exact absurd rfl (hnotlam x body)
   | appLamArg hval _ => exact absurd (valRef_value hv) hval
 
-/-- The destructive branch of a store preserves the judgement: the account and the
-environment are what they were, and the write's result is the subject's occurrence,
-which the clause holds as its own conjunct. -/
+/-- An application whose function is a value that is not an abstraction preserves the
+judgement whenever its argument position does. Its clause reads only the argument
+(`Runs.appArgPos`), with no sibling requirement, so the step's environment and account
+are the argument's, and the function's value and non-abstraction facts carry over
+unchanged. This is the clause a non-lambda `TStep.appArg` meets; a non-lambda
+application that fails to preserve does so through a nested `appFun`, not through this
+clause. -/
+theorem runs_appArgPos {ρ : TEnv} {m : Multi} {f a : Expr} {ρ' : TEnv} {m' : Multi}
+    {a' : Expr} (hval : Value f) (hnotlam : ∀ x body, f ≠ .lam x body)
+    (hpos : Runs ρ m a → Runs ρ' m' a') (h : Runs ρ m (.app f a)) :
+    Runs ρ' m' (.app f a') := by
+  cases h with
+  | appArgPos _ _ ha => exact Runs.appArgPos hval hnotlam (hpos ha)
+  | appPos hval' _ _ => exact absurd hval hval'
+  | appVar _ _ _ _ => exact absurd rfl (hnotlam _ _)
+  | appVal hnovar _ _ _ => exact absurd rfl (hnotlam _ _)
+  | appLamArg _ _ => exact absurd rfl (hnotlam _ _)
 theorem runs_storeExclusive {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
     (h : Runs ρ m (.store (.var y) i v)) : Runs ρ m (.var y) := by
   cases h with
