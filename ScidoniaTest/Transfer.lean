@@ -32,8 +32,10 @@ can build. They are of five kinds:
   a step of `Run.writeStep`: the heap the step's take-out leaves is the one the transfer's
   configuration is read at, the coupling holds at it for the account that names the extracted
   occurrence, the composition gives the destructive branch at the nested subject beside the
-  step's own result, and the boundary statement says what a coupling at the run's own handle
-  list leaves.
+  step's own result --- at a step whose path's level is its last and again at a step whose
+  path has two levels, the deeper step's coupling being read at the take-out's immediate cell
+  and that step's own result at the leaf below it --- and the boundary statement says what a
+  coupling at the run's own handle list leaves.
 * **Axioms**: each representative theorem's `#print axioms` output is pinned, so a proof
   that acquires an axiom it should not fails the build rather than printing a longer list
   for a reader to notice. The lists that name `Classical.choice` are those that read a
@@ -408,6 +410,50 @@ theorem writeStep_chain_nested_destructive :
     exact (Option.some.inj ht).symm
   exact ⟨hcouple, hdest, by rw [ht1] at hl; exact hl⟩
 
+/-- The heap the write at the chain's depth-two path leaves: the write's slots land at the
+leaf, and they name the root, so the root's count is the handle's beside that name. -/
+def deepest : CHeap :=
+  [(0, { slots := [1], count := 2 }), (1, { slots := [2], count := 1 }),
+   (2, { slots := [0], count := 1 })]
+
+/-
+The step at the chain's depth-two path runs, and the heap it leaves is that one: the control
+beside the guard is the same equation with the depth-one step's result in place of it, so the
+guard is shown to fire at the deeper step's own result and not at whatever it is given.
+-/
+#guard decide (writeStep ScidoniaTest.Run.chain ScidoniaTest.Run.handles 0 [0, 0] [0] =
+  some (deepest, ScidoniaTest.Run.handles))
+
+/--
+error: Expression
+  decide (writeStep Run.chain Run.handles 0 [0, 0] [0] = some (Run.upper, Run.handles))
+did not evaluate to `true`
+-/
+#guard_msgs (whitespace := lax) in
+#guard decide (writeStep ScidoniaTest.Run.chain ScidoniaTest.Run.handles 0 [0, 0] [0] =
+  some (ScidoniaTest.Run.upper, ScidoniaTest.Run.handles))
+
+/-- The same composition at a path of two levels: the coupling is read at the take-out's
+immediate cell --- the middle cell, which a write whose path stopped there would land at ---
+and the step's own result at the leaf below it, where the written slots are read back. -/
+theorem writeStep_chain_nested_destructive_at_two_levels :
+    Couple held rest env acct ∧
+      (update held taken 1 [0]).1.lookup 1 = some [0] ∧
+      deepest.lookup 2 = some [0] := by
+  have hstep : writeStep ScidoniaTest.Run.chain ScidoniaTest.Run.handles 0 [0, 0] [0] =
+      some (deepest, ScidoniaTest.Run.handles) := by decide
+  have hlook : (CHeap.slotsAt ScidoniaTest.Run.chain 0)[0]? = some 1 := by decide
+  obtain ⟨hcouple, hdest, _, t, ht, hl⟩ :=
+    writeStep_nested_destructive_of_couple (root := 0) (c := ScidoniaTest.Run.chain)
+      (hs := ScidoniaTest.Run.handles) (i := 0) (p := [0]) (ks := [0]) (e := 1)
+      (c' := deepest) (hs' := ScidoniaTest.Run.handles)
+      ScidoniaTest.Run.chain_accept hstep hlook env_bound (by decide) (by decide)
+      acct_names env_lookup store_typed
+  have ht1 : t = 2 := by
+    rw [show resolve ScidoniaTest.Run.chain 0 [0, 0] = some 2 from by decide] at ht
+    exact (Option.some.inj ht).symm
+  exact ⟨hcouple, hdest, by rw [ht1] at hl; exact hl⟩
+
 /-- The same composition at a write step whose path's level is its last: the recursion's
 entry is the write's own subject, so the leaf's check supplies the write rule's premise on the
 written slots and the run's result and the coupling's branch are about one cell. -/
@@ -541,6 +587,7 @@ info: 'Scidonia.RC.writeStep_nested_destructive_of_couple' depends on axioms: [p
 #print axioms step_takeout_is_held
 #print axioms held_couple_of_the_step
 #print axioms writeStep_chain_nested_destructive
+#print axioms writeStep_chain_nested_destructive_at_two_levels
 #print axioms writeStep_chain_subject_destructive
 #print axioms chain_couple_is_empty
 #print axioms run_handles_couple_is_empty

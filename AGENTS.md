@@ -1059,8 +1059,14 @@ The same module now reads the run's own write. `couple_of_takeout` is the coupli
 configuration `Run.writeStep`'s recursion hands the nested write: the run's counting at the
 level (`Run.takeOut_counted`) beside the schema's focus check there gives the coupling whose
 handles are the level's handle list and whose account names the extracted occurrence — the
-account is read *out of* the run's handle list rather than added beside it, which
+account's identity `expand m = [e]` is that theorem's hypothesis, since it is the coupling
+being built and the counting the identity would otherwise be read from does not exist yet —
+and the account is read *out of* the run's handle list rather than added beside it, which
 `couple_at_run_handles_is_empty` is why (`count_split_agree_iff` at the coupling's split).
+The identity is derived where an already-built coupling is at hand:
+`store_destructive_of_takeout` and `store_destructive_of_corr` hold the coupling, whose own
+counting is the second counting, so `expand_eq_singleton_of_counted` reads the identity off it
+beside the run's counting and the identity is no input of theirs.
 `writeStep_focus` and `writeStep_recurses` read the schema's own check and recursion off the
 step — the pair's drop cancels the increment, so the check the schema makes is the one the
 take-out's result carries, and the step's result is the put-back of the recursion's — and

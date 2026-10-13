@@ -76,12 +76,17 @@ each about `Run.writeStep`'s own steps.
 
 What is here is the two routes read at one configuration of a write step.
 `couple_of_takeout` states the coupling at the configuration the step's take-out hands the
-nested write: the run's counting at the level and the account that names the occurrence the
-take-out extracted, whose identity is the two countings' (`expand_eq_singleton_of_counted`),
-and `couple_at_run_handles_is_empty` is why the account is read out of the run's own handle
-list rather than added beside it --- the coupling's split and the run's list hold the same
-handles only at the empty account. `writeStep_focus` and `writeStep_recurses` read the
-schema's check and its recursion off the step itself, and
+nested write: the run's counting at the level beside the account that names the occurrence
+the take-out extracted --- the account's identity `expand m = [e]` is that statement's own
+hypothesis, since it is the coupling being built and the counting the identity would
+otherwise be read from does not exist yet --- and `couple_at_run_handles_is_empty` is why the
+account is read out of the run's own handle list rather than added beside it --- the
+coupling's split and the run's list hold the same handles only at the empty account.
+`store_destructive_of_takeout` and `store_destructive_of_corr` are handed the coupling, whose
+own counting is the second counting, so there `expand_eq_singleton_of_counted` reads the
+account's identity off it beside the run's counting and the identity is no input of theirs.
+`writeStep_focus` and `writeStep_recurses` read the schema's check and its recursion off the
+step itself, and
 `writeStep_nested_destructive_of_couple` composes them: the take-out of a write step of an
 accepted configuration, the account the term holds there through the coupling, and the
 schema's checks are the write theorem's two premises, so the destructive branch at the
@@ -356,14 +361,20 @@ occurrence the take-out moved into the run's handle. The account is not a second
 beside the run's, and `couple_at_run_handles_is_empty` is why it cannot be: the coupling's
 split and the run's own handle list hold the same handles only at the empty account, so at
 the run's own list the account's occurrence is the head of that list and the coupling's
-handles are what follows it. The account's identity `expand m = [e]` is then the identity
-of the two countings at the level below (`expand_eq_singleton_of_counted`), not an input
-of its own.
+handles are what follows it.
 
-`couple_of_takeout` is that statement at one level. `writeStep_focus` and
-`writeStep_recurses` are the two facts about `Run.writeStep` the statement is applied at:
-the check the schema makes is the one the take-out's result carries, the pair's drop
-cancelling the increment, and the step's result is the put-back of the recursion's.
+The account's identity `expand m = [e]` is the two countings' identity at the level below,
+and the statements that receive an already-built coupling derive it there:
+`store_destructive_of_takeout` and `store_destructive_of_corr` hold the coupling, whose own
+counting is the second counting, so `expand_eq_singleton_of_counted` reads the identity off
+it beside the run's counting and the identity is no input of theirs. `couple_of_takeout`
+takes it as its caller's hypothesis and must: it is the statement that *builds* the coupling,
+so at the point it applies the second counting does not exist yet, and there is nothing for
+`expand_eq_singleton_of_counted` to read the identity from. `couple_of_takeout` is the
+coupling at one level. `writeStep_focus` and `writeStep_recurses` are the two facts about
+`Run.writeStep` the statement is applied at: the check the schema makes is the one the
+take-out's result carries, the pair's drop cancelling the increment, and the step's result is
+the put-back of the recursion's.
 
 ## The run's own write, read through the coupling
 
@@ -482,9 +493,17 @@ checks are the write theorem's two premises, so the nested subject's write is th
 heap's destructive branch, read through the correspondence the coupling and the two
 countings build (`store_destructive_of_corr`) rather than off the take-out's check alone.
 
-The step's own result stands beside it, which is `Run.writeStep_spec`'s: the addressed cell
-reads the written slots back and the handle list is what it was. The write rule's own check
-on the written slots (`hks`) is the rule's premise and not the transfer's. -/
+The composition is stated at the take-out's immediate cell: the coupling and the write read
+off it are about `e`, the element the step's first level extracted and the recursion entered,
+whatever the path below that level does with it.
+
+The step's own result stands beside them, which is `Run.writeStep_spec`'s: the handle list is
+what it was, and the path resolves to a cell `t` --- the leaf the step ultimately writes ---
+whose written slots are read back there. At a path whose level is its last `t` is `e`, the
+cell the coupling is read at; at a path of length at least two `t` is a cell below `e`, so
+there the step's own result is about the leaf and the coupling is about the immediate cell.
+The write rule's own check on the written slots (`hks`) is the rule's premise and not the
+transfer's. -/
 theorem writeStep_nested_destructive_of_couple {root : Ref} {c : CHeap} {hs : List Ref}
     {vs : List Scidonia.FracPerm.StateVar.Value} {ρ : TEnv} {m : Multi} {i : Nat}
     {p : Path} {ks : List Ref}
