@@ -182,6 +182,18 @@ The compile-time checks live in the check library:
   it where it exists (the bounds walk, the structured reader). A failed
   requirement fails the elaboration, so `lake build ScidoniaTest` is the gate; a
   detector weakened to match nothing fails the build rather than passing quietly.
+- `ScidoniaTest/TreeOwnership.lean` checks `Scidonia.RC.TreeOwnership` from
+  outside, in the same style. Besides the quotation, the detector, the alignment
+  and the account's witness, its discipline checks are the library's own theorems
+  at concrete configurations: the witness's write at its right leaf admitted while
+  the reader holds half of the left leaf and half of the shared root, the write at
+  the root refused, the reader's read at the left leaf admitted and the read at the
+  root refused, the sequential hand-off admitted beside the write through the spent
+  handle refused, and the out-of-bounds write refused beside the in-bounds right.
+  Its frame checks apply the library's leaf frame at the witness, the same-path
+  snapshot at the pair with `7` before the write and `9` after, the nonleaf frame
+  and the replacement's landing at the pair, and the array take-out's per-level
+  equation; its axiom checks pin the list each of those theorems prints.
 - `ScidoniaTest/OwnershipTyped.lean` checks `Scidonia.RC.OwnershipTyped` from
   outside, in the same style. Its behavioural checks are `#guard`s of the
   quotation's round trip at the empty slot, at `full 7` and at a payload of thirty
@@ -1213,9 +1225,35 @@ the held fraction `heldAt_lend`/`heldAt_repay` with `repay_not_mem`,
 `spine_readThrough_positive`/`readThrough_fits`. `spine_sibling_compatible` is
 the witness: a reader owns half of a common root and half of the left leaf, a
 writer the root's other half and the whole right subtree, the root sums to one
-and the right subtree excludes every other holder. What is *not* here: no
-ownership relation over terms, no tree interpreter and no agreement theorem, so
-the tree slice is not advertised as a supported execution route.
+and the right subtree excludes every other holder. `Judgement.lean` is the
+ownership relation over the same term: `NodeTy` is the handle a name holds — a
+leaf node at a path, a struct node, or the spine of an array from an offset —
+`TreeTy` is an observation or a handle, and `TreeOwn d Γ ρ A s e τ v s'` admits
+`e` at the type `τ`, holding the value `v`, from the state `s` to the state `s'`,
+under the handle context, the environment and the per-node account. Its nine rules
+name the value each produces — an observation at its instance, a read at the
+detached quotation it hands on, a write at the root node of the observation
+written, a subtree replacement at the struct node of the operand's quotation —
+and the state each leaves, so an admitted write carries the success the library's
+own `setLeaf` reports, and no rule is a catch-all. `writeHolds` is the account's
+write right at a node, and `replaceAt` is the state-level replacement the
+replacement rule and the interpreter share. The refusals are `¬ TreeOwn` for
+specific expressions — a write at a node the root's subtree contains while a
+reader holds it, a write through the handle the hand-off consumed, and a read at a
+node that is not a leaf — each beside the same-purpose expression the rules do
+admit, with an out-of-bounds write refused by its own success premise.
+`Agreement.lean` carries the state replacement's own laws (`replaceAt_subAt`, its
+disjoint frame `replaceAt_subAt_of_disjoint` and its node-value form), the library
+leaf frame `read_frame_leaf`, the same-path snapshot `snapshot_leaf` with the
+concrete pair witness `snapshot_pair_witness`, the array take-out's per-level
+equation `replaceAt_index`, and the conditional take-out injectivity
+`takeout_transfer` from two `Counted` premises. `Executor.lean` is the private
+interpreter `runTree`, the value-level `evalTree` on the state it is given, the
+simulation `runTree_simulate` against the existing `RC.StepStar`, the public
+`evalTree_sound`/`evalTree_total`/`evalTree_no_protected`, and the runner's
+logical `IO` equation. The tree's public surface is the evaluation, the theorems
+about it and the discipline: the interpreter itself is private, and the state is
+what `evalTree` is handed.
 
 What the fragment does *not* claim: the agreement is about the values the two
 evaluations reach and not about compiled mutation. No equation relates the model's
@@ -1493,6 +1531,9 @@ they are defined, rather than in the appendix, so each is shown once.
 | `Scidonia/RC/OwnershipTyped/Refinement.lean` | The agreement, the totality, the quotation lemma and the runner's logical `IO` equation |
 | `Scidonia/RC/TreeOwnership/Quote.lean` | A `Layout5.State`'s quotation as a λPure term, its node values and their decode, the sub-state and node accessors, the in-bounds path check, the protected-node detector, the observation path of a path, and path navigation with its resolution law |
 | `Scidonia/RC/TreeOwnership/Spine.lean` | The per-node fractional account: the node ledgers, the held fraction and the loan and return laws, the whole-holding exclusion, the branch arithmetic, the read-through positivity and fit, and the sibling witness |
+| `Scidonia/RC/TreeOwnership/Judgement.lean` | The tree ownership discipline over the existing term: the handle context, `writeHolds`, the state-level `replaceAt` and `setStructLeft`, the `Recipe` node quotations, the nine rules of `TreeOwn` — each naming its value and the state it leaves — no catch-all, and the three refusals with their evaluated counterparts and an out-of-bounds control |
+| `Scidonia/RC/TreeOwnership/Agreement.lean` | The state replacement's own laws — the focus it lands at a path, the disjoint frame and its node-value form — the leaf frame and the same-path snapshot through the library's write, the array take-out's per-level equation, and the conditional take-out injectivity from two `Counted` premises |
+| `Scidonia/RC/TreeOwnership/Executor.lean` | The private interpreter of the tree fragment, the value-level `evalTree` on the state it is given, the simulation against `RC.StepStar`, the totality, the detachment of an admitted result, and the runner's logical `IO` equation |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -1509,7 +1550,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
 | `ScidoniaTest/RC.lean` | The calculus's controls — evaluated steps and translations with a control beside each, the capture pair, and asserted axiom lists |
 | `ScidoniaTest/OwnershipTyped.lean` | The ownership-typed fragment's controls — the quotation, the witnesses with their copying paths and direct evaluation, the refusals with their accepted counterparts and pinned rejections, the sealing, and asserted axiom lists |
-| `ScidoniaTest/TreeOwnership.lean` | The tree slice's controls — the quotation and its round trip at a struct and a nested array, the detector's two sides, the one-cell fragment's alignment, the path resolution at a struct leaf and at an in-bounds nested-array element, the sibling witness's account, and asserted `#print axioms` lists |
+| `ScidoniaTest/TreeOwnership.lean` | The tree slice's controls — the quotation and its round trip at a struct and a nested array, the detector's two sides, the one-cell fragment's alignment, the path resolution at a struct leaf and at an in-bounds nested-array element, the sibling witness's account, the discipline's admitted write beside the refused one, the reader's read beside the read at a struct node, the sequential hand-off beside the spent handle, the out-of-bounds refusal beside the in-bounds right, the leaf frame, the same-path snapshot at `7` and `9`, the nonleaf frame and the replacement's landing, and asserted `#print axioms` lists |
 | `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |

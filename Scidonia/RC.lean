@@ -31,9 +31,12 @@ route.
 `Scidonia.RC.TreeOwnership` extends the same calculus to a layout-indexed tree
 state, again beside these modules and changing none of them: a quotation of a
 `Layout5.State`, its navigation along a path, the detector that tells a leaf's
-observation from a protected node, and the per-node fractional account a spine
-of such a tree is read and written under. It is not yet an ownership relation
-over terms, and the tree slice is not advertised as a supported route.
+observation from a protected node, the per-node fractional account a spine of such
+a tree is read and written under, the ownership relation over the same term with
+its handle context and its refusals, the state-level replacement's own laws and
+the conditional take-out transfer, and the private interpreter of the admitted
+fragment with the agreement that its value is the value the copying reduction of
+the same term reaches.
 -/
 import Scidonia.RC.Syntax
 import Scidonia.RC.Pure
@@ -47,3 +50,6 @@ import Scidonia.RC.Transfer
 import Scidonia.RC.OwnershipTyped.Refinement
 import Scidonia.RC.TreeOwnership.Quote
 import Scidonia.RC.TreeOwnership.Spine
+import Scidonia.RC.TreeOwnership.Judgement
+import Scidonia.RC.TreeOwnership.Agreement
+import Scidonia.RC.TreeOwnership.Executor
