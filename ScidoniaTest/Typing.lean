@@ -56,11 +56,11 @@ def duplicated : Expr := .lam 0 (.con1 7 (.store (.var 0) 0 (.var 0)))
 def duplicatedTarget : Expr := .lam 0 (.dup 0 (.con1 7 (.store (.var 0) 0 (.var 0))))
 
 /-- The program whose write's subject is also used in a sibling position: the store's own
-occurrence is the subject's, so the write's clause is met and the program holds the cell
-twice. -/
+occurrence is the subject's, so the write's clause is met and the program uses the
+subject's name twice. -/
 def sibling : Expr := .lam 0 (.con1 7 (.con2 8 (.store (.var 0) 0 (.con0 9)) (.var 0)))
 
-/-- The same program with the sibling's second reference replaced by a node. -/
+/-- The same program with the sibling's second use of the name replaced by a node. -/
 def siblingOwned : Expr := .lam 0 (.con1 7 (.con2 8 (.store (.var 0) 0 (.con0 9)) (.con0 10)))
 
 /-- A program that binds the written name to another name. -/
@@ -233,7 +233,7 @@ own clause is met --- the sibling's use is not counted at the store --- which is
 store's own environment alone cannot refuse it. -/
 theorem sibling_no_typing : ¬ Typed [] [] sibling := sibling_use_no_typing
 
-/-- The counterpart of the refutation above: the program writes the cell `0` names and
+/-- The counterpart of the refutation above: the program writes through the name `0` and
 does not use `0` elsewhere, so it is typed. The derivation is given here from the rules,
 so the counterpart is not read off the module's own term. -/
 theorem sibling_owned_typed : Typed [] [] siblingOwned := by
@@ -268,8 +268,9 @@ theorem alias_no_typing_at_env : ¬ Typed [] [1] alias := by
   exact alias_bind_no_typing
 
 /-- A written name bound by a binding is bound to a construction and used exactly once
-in that binding's body: the program builds the cell the write lands at and names it
-once --- source-level construction and use, not a count on the target heap. -/
+in that binding's body: the bound term is a node the program built and not another
+name, so the program builds the cell the write lands at and names it once ---
+source-level construction and use, not a count on the target heap. -/
 theorem built_written_own :
     BuiltB (.con1 5 (.con0 5)) = true ∧ (uses (.store (.var 0) 0 (.con0 9))).count 0 = 1 :=
   typed_bind_written_own built_typed (by decide)

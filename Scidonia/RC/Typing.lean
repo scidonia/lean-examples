@@ -16,21 +16,21 @@ conditions on the *name* a write's subject carries.
 
 **The write's clause.** A write's rule is the only place where multiplicity and not
 membership is read. It requires the subject's variable to be owned exactly once in
-the environment of the store (`Γ.count y = 1`) and not borrowed (`y ∉ Δ`): the write
-is expressible only where the cell is the term's own, which is what a destructive
-write on a cell of reference count one needs. The unrepresentability results below are
-that clause's own inversion: a program whose write's subject is also used has no
-derivation at the empty environments a closed program is read at, which is the
-repository's form of "unwritable".
+the environment of the store (`Γ.count y = 1`) and not borrowed (`y ∉ Δ`): the store's
+own environment names the subject once and does not borrow it, which is the one
+occurrence a destructive write on a cell of reference count one needs. The
+unrepresentability results below are that clause's own inversion: a program whose
+write's subject is also used has no derivation at the empty environments a closed
+program is read at, which is the repository's form of "unwritable".
 
 **What the store's own environment does not say.** That clause reads the environment
 *at the store*, and an environment is a `filter` of its parent's, so a name's
 occurrences are claimed separately by each position that uses them: shares overlap,
 and a sibling's use of the subject's name is not counted at the store. A term whose
 write's subject is also used in a sibling position therefore meets the write's clause
---- the store's own occurrence is the subject's --- while the program as a whole holds
-the cell twice, and the lowering supplies the sibling's use with a `dup`, which is
-exactly the case where the write stops being in place. Reads the store's environment
+--- the store's own occurrence is the subject's --- while the program as a whole uses
+the subject's name twice, so the lowering supplies the sibling's use with a `dup`, the
+extra occurrence a second use of the name demands. Reads the store's environment
 alone, the typing cannot see the program's multiplicity, so two further conditions are
 needed on the name a subject carries. Both are side conditions of the rules that
 *bind* that name, and both are proved, not asserted.
@@ -40,19 +40,20 @@ needed on the name a subject carries. Both are side conditions of the rules that
   `writes x body = true → (uses body).count x = 1`: if the body writes the name the
   rule binds, the body uses that name exactly once. `writes` is the traversal below,
   in the style of `uses`: it is true at a write whose subject is the free variable
-  `x`, and a binder of `x` stops it. The condition is what makes the *program* hold
-  the cell once rather than the store's share of it, and `typed_write_linear` carries
-  it over a typed term. The term the earlier reading admitted as its control ---
+  `x`, and a binder of `x` stops it. The condition is what makes the *program* use the
+  bound name once in the scope that binds it rather than counting only the store's
+  share of the environment, and `typed_write_linear` carries it over a typed term. The
+  term the earlier reading admitted as its control ---
   `lam 0 (con1 7 (con2 8 (store (var 0) 0 (con0 9)) (var 0)))`, whose sibling's
-  `(var 0)` is a second reference to the cell the write lands at --- therefore has no
-  typing (`sibling_use_no_typing`), and `sibling_use_owned`, which writes the cell and
-  does not use it elsewhere, is its typed counterpart.
+  `(var 0)` is a second use of the name the write's subject carries --- therefore has
+  no typing (`sibling_use_no_typing`), and `sibling_use_owned`, which writes through
+  that name and does not use it elsewhere, is its typed counterpart.
 * **A written name comes from a construction rather than another name.** The `bind`
   rule carries `writes x e₂ = true → BuiltB e₁ = true`, and the arm rule of `matchC`
   carries `writes y body = true → BuiltB s = true` for each binder `y`: a binding's
   written name is bound to a *node* of the syntax --- a value the program built --- and
-  never to `(.var z)`, which would make the written name a second name for a cell the
-  program already holds; an arm's binder is matched out of a *subject* that is such a
+  never to `(.var z)`, which would make the written name a second name beside `z`,
+  whatever cell `z` names; an arm's binder is matched out of a *subject* that is such a
   node, and the *field* the subject hands the binder may itself be a name --- the case
   the caveat below leaves outside the guarantees. `typed_write_built` carries the
   condition over a typed term, `alias_bind_no_typing` is its inversion --- a program
@@ -119,10 +120,12 @@ what excludes it.
   `typed_arm_written_linear`, `typed_bind_written_built`, `typed_arm_written_built`,
   `typed_bind_written_own` and `typed_arm_written_own` read the two conditions at a
   rule: the name is used once in the scope that binds it, and it is introduced for, or
-  matched out of, a construction --- so a binding's program builds the cell the write
-  lands at and names it once, while an arm's program builds the matched subject and the
-  binder names a field of it, whose own construction the condition leaves open ---
-  source-level facts of construction and use, and not a count on the target heap.
+  matched out of, a construction --- so a binding's program, whose written name is
+  bound to a node the program built rather than to another name, builds the cell the
+  write lands at and names it once, while an arm's program builds the matched subject
+  and the binder names a field of it, whose own construction the condition leaves
+  open --- source-level facts of construction and use, and not a count on the target
+  heap.
 * `typed_lowers`: a typed term is a term `Scidonia.RC.Lower` lowers from the same
   environments.
 * `subst_typed_var` and `subst_typed_redex`: a typed term stays typed under the
@@ -190,7 +193,7 @@ def writes (x : Var) : Expr → Bool
   | .store s _ v => isVarB x s || writes x s || writes x v
 
 /-- Whether `e` is a node of the syntax: one of the three forms a node is written at,
-a value the program constructs rather than a name for a cell it already holds. -/
+a value the program constructs rather than a name. -/
 def BuiltB : Expr → Bool
   | .var _ => false
   | .lam _ _ => false
@@ -456,8 +459,9 @@ theorem typed_arm_written_built {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List 
 
 /-- A name bound by a binding whose body writes it is bound to a construction of the
 program and used exactly once in that body: two source-level facts of the term --- the
-program builds the cell the write lands at, and the term names it once --- and not a
-count on the target heap. -/
+bound term is a node the program built and not another name, so the program builds the
+cell the write lands at, and the term names it once --- and not a count on the target
+heap. -/
 theorem typed_bind_written_own {Δ Γ : Occs} {x : Var} {e₁ e₂ : Expr}
     (h : Typed Δ Γ (.bind x e₁ e₂)) (hw : writes x e₂ = true) :
     BuiltB e₁ = true ∧ (uses e₂).count x = 1 :=
@@ -549,16 +553,17 @@ def ownedArm : Expr := .matchC (.con1 5 (.con0 5)) 0 [0] (.store (.var 0) 0 (.co
 
 /-- The program that binds `0`, writes slot `0` of the cell `0` names, and also uses
 `0` in a sibling position: the store's own occurrence is the subject's, so the write's
-clause is met, and the *program* holds the cell twice. The first name condition is what
-refuses it. -/
+clause is met, and the *program* uses the subject's name twice. The first name condition
+is what refuses it. -/
 def siblingUse : Expr := .lam 0 (.con1 7 (.con2 8 (.store (.var 0) 0 (.con0 9)) (.var 0)))
 
-/-- The same program with the sibling's second reference replaced by a node: it writes
-the cell and does not use it elsewhere, so the body uses the name once. -/
+/-- The same program with the sibling's second use of the name replaced by a node: it
+writes through the name and does not use it elsewhere, so the body uses the name
+once. -/
 def siblingOwned : Expr := .lam 0 (.con1 7 (.con2 8 (.store (.var 0) 0 (.con0 9)) (.con0 10)))
 
 /-- The program that binds `0` to the *name* `1` and writes through the binding: the
-written name is a second name for a cell the program already holds. The second name
+written name is a second name beside `1`, whatever cell `1` names. The second name
 condition is what refuses it. -/
 def aliasBind : Expr := .bind 0 (.var 1) (.store (.var 0) 0 (.con0 9))
 
@@ -631,7 +636,7 @@ theorem sibling_use_no_typing : ¬ Typed [] [] siblingUse := by
         by decide
       omega
 
-/-- The counterpart of the refutation above: the program writes the cell `0` names and
+/-- The counterpart of the refutation above: the program writes through the name `0` and
 does not use `0` elsewhere, so the abstraction rule's name condition is met and the
 program is typed. -/
 theorem sibling_use_owned : Typed [] [] siblingOwned := by
