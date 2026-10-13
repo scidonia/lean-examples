@@ -25,6 +25,7 @@ Four kinds of check, all against the library:
       panels the paper quotes -- from outliving what it counts.
 
 Usage:  python3 check-listings.py [file.tex ...]      # default: every *.tex here
+        python3 check-listings.py --self-test         # these checks, on a scratch paper
 Exit status 0 when every frame and count checks out, 1 otherwise.
 
 A source that cannot be opened, and a range the source does not reach, are
@@ -35,7 +36,10 @@ was read.
 
 import importlib.util
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import leanstrip
@@ -158,7 +162,14 @@ def read_source(path: Path, limit: int, context: str,
 
 
 def check_fragments(tex: Path, problems: list[str]) -> int:
-    """Verify each %!check: directive against the frame that follows it."""
+    """Verify each %!check: directive against every frame that follows it.
+
+    A line can carry more than one call, and each call is a panel: the directive
+    before the line pairs with the first, and a second call on the same line has
+    no directive of its own to pair with, so it is reported rather than passed
+    over.  Only the code before a LaTeX comment is read, so a call the typesetter
+    never reaches neither asks for a directive nor takes one.
+    """
     lines = tex.read_text(encoding="utf-8").splitlines()
     pending, checked = None, 0
     for number, line in enumerate(lines, start=1):
@@ -170,24 +181,23 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
                     f"and the one at line {number}")
             pending = (number, match.group("frag"))
             continue
-        match = FRAME.search(line)
-        if not match:
-            continue
-        if pending is None:
-            problems.append(f"{tex.name}:{number}: frame without a %!check:")
-            continue
-        directive, fragment = pending
-        pending = None
-        where = f"{tex.name}:{directive}"
-        lo, hi = int(match.group("lo")), int(match.group("hi"))
-        body = read_source(tex.parent / match.group("path"), hi, where, problems)
-        if body is None:
-            continue
-        checked += 1
-        if normalise(fragment) not in normalise("\n".join(body[lo - 1:hi])):
-            problems.append(
-                f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
-                f"    {fragment}")
+        for match in FRAME.finditer(code_of(line)):
+            if pending is None:
+                problems.append(f"{tex.name}:{number}: frame without a %!check: "
+                                f"{match.group(0)}")
+                continue
+            directive, fragment = pending
+            pending = None
+            where = f"{tex.name}:{directive}"
+            lo, hi = int(match.group("lo")), int(match.group("hi"))
+            body = read_source(tex.parent / match.group("path"), hi, where, problems)
+            if body is None:
+                continue
+            checked += 1
+            if normalise(fragment) not in normalise("\n".join(body[lo - 1:hi])):
+                problems.append(
+                    f"{where}: {match.group('path')}:{lo}-{hi} does not contain\n"
+                    f"    {fragment}")
     if pending is not None:
         problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no frame")
     return checked
@@ -340,7 +350,121 @@ def check_counts(here: Path, problems: list[str]) -> int:
     return 1
 
 
+# The self-test's scratch archive: these scripts, the library gen-laws.py locates
+# its counts in, one source to quote, and two papers.  One pairs each of its two
+# panels with the directive before it and must check out.  The other carries a
+# second call on the line of its first, which no directive can precede: it must
+# be reported rather than passed over, or a panel nothing checks sits in the
+# paper.  The archive is a temporary copy, so neither run reads or writes the
+# papers beside this script.
+SELF_TEST_TREES = ("Scidonia", "ScidoniaTest")
+SELF_TEST_SCRIPTS = ("check-listings.py", "gen-laws.py", "gen-frames.py",
+                     "leanstrip.py")
+SELF_TEST_SOURCE = ("/-- A declaration to quote. -/\n"
+                    "def probeValue : Nat :=\n"
+                    "  41 + 1\n")
+SELF_TEST_PANEL = "\\codeframe[linerange=2-3]{../Scidonia/Probe.lean}"
+SELF_TEST_SECOND = "\\codeframe[linerange=3-3]{../Scidonia/Probe.lean}"
+SELF_TEST_PAIRED = ("%!check: def probeValue\n" + SELF_TEST_PANEL + "\n"
+                    "\n"
+                    "%!check: 41 + 1\n" + SELF_TEST_SECOND + "\n")
+SELF_TEST_SAME_LINE = ("%!check: def probeValue\n"
+                       + SELF_TEST_PANEL + " " + SELF_TEST_SECOND + "\n")
+# The counted paper's lines each carry two calls, one line above \appendix and
+# one below it: two calls are two panels, on either side of the split, and a
+# count of the lines they are written on would state half of that.
+SELF_TEST_COUNTED = ("% A stand-in for a counted paper.\n"
+                     + SELF_TEST_PANEL + " " + SELF_TEST_SECOND + "\n"
+                     "\\appendix\n"
+                     + SELF_TEST_PANEL + " " + SELF_TEST_SECOND + "\n")
+SELF_TEST_PAIRED_SUMMARY = ("2 quoted panels, 0 law frames and 2 generated frames "
+                            "checked, 1 generated counts checked, 0 failed")
+SELF_TEST_UNPAIRED = "frame without a %!check: " + SELF_TEST_SECOND
+SELF_TEST_PANELCOUNT = "\\newcommand{\\panelcount}{4}"
+SELF_TEST_APPENDIXCOUNT = "\\newcommand{\\appendixpanelcount}{2}"
+
+
+def indented(text: str) -> str:
+    """A run's output, indented under the line that reports it."""
+    return "".join("    " + line + "\n" for line in text.splitlines())
+
+
+def in_archive(paper: Path, *args: str):
+    """Run one of the archive's scripts in it, as the command line does."""
+    return subprocess.run([sys.executable, *args], cwd=paper,
+                          capture_output=True, text=True)
+
+
+def self_test() -> int:
+    """Run these checks against a scratch paper that is wrong in one place.
+
+    The archive carries this checker, the generators and the library, so the run
+    exercises the command line rather than a function inside it.  A paper whose
+    panels each have the directive before them must check out; a paper whose
+    line carries a second call, with no directive that could precede it, must be
+    reported; and the paper the counts are taken from must be counted in calls.
+    """
+    here = Path(__file__).resolve().parent
+    absent = [str(here.parent / tree) for tree in SELF_TEST_TREES
+              if not (here.parent / tree).is_dir()]
+    if absent:
+        print(f"--self-test reads the library beside {here.name}: "
+              + ", ".join(absent) + " not found", file=sys.stderr)
+        return 1
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="check-listings-") as temporary:
+        root, paper = Path(temporary), Path(temporary) / "Paper"
+        paper.mkdir()
+        for script in SELF_TEST_SCRIPTS:
+            shutil.copy2(here / script, paper / script)
+        for tree in SELF_TEST_TREES:
+            shutil.copytree(here.parent / tree, root / tree)
+        (root / "Scidonia/Probe.lean").write_text(SELF_TEST_SOURCE,
+                                                  encoding="utf-8")
+        (paper / "lowering.tex").write_text("% No panels.\n", encoding="utf-8")
+        (paper / "unobservable-effects.tex").write_text(SELF_TEST_COUNTED,
+                                                        encoding="utf-8")
+        (paper / "probe.tex").write_text(SELF_TEST_PAIRED, encoding="utf-8")
+        for script in ("gen-laws.py", "gen-frames.py"):
+            step = in_archive(paper, script)
+            if step.returncode != 0:
+                problems.append(f"{script} failed in the scratch archive:\n"
+                                + step.stdout + step.stderr)
+        paired = in_archive(paper, "check-listings.py", "probe.tex")
+        print(f"--- a directive before each panel: exit {paired.returncode}")
+        print(indented(paired.stdout), end="")
+        if paired.returncode != 0 or SELF_TEST_PAIRED_SUMMARY not in paired.stdout:
+            problems.append("the paired paper did not check out as\n    "
+                            + SELF_TEST_PAIRED_SUMMARY)
+        if SELF_TEST_UNPAIRED in paired.stdout:
+            problems.append("the paired paper reported " + SELF_TEST_UNPAIRED)
+        counts = (paper / "counts.tex").read_text(encoding="utf-8")
+        for wanted in (SELF_TEST_PANELCOUNT, SELF_TEST_APPENDIXCOUNT):
+            if wanted not in counts:
+                problems.append("two calls on one line are not counted as two "
+                                "panels: counts.tex does not state\n    " + wanted)
+        (paper / "probe.tex").write_text(SELF_TEST_SAME_LINE, encoding="utf-8")
+        if in_archive(paper, "gen-frames.py").returncode != 0:
+            problems.append("gen-frames.py failed on the same-line paper")
+        unpaired = in_archive(paper, "check-listings.py", "probe.tex")
+        print(f"--- a second call on the line, with no directive: "
+              f"exit {unpaired.returncode}")
+        print(indented(unpaired.stdout), end="")
+        if unpaired.returncode == 0:
+            problems.append("a second call on one line, with no %!check:, passed")
+        if "probe.tex:2: " + SELF_TEST_UNPAIRED not in unpaired.stdout:
+            problems.append("the same-line paper did not report\n    probe.tex:2: "
+                            + SELF_TEST_UNPAIRED)
+    for problem in problems:
+        print(problem)
+    print(f"self-test: "
+          f"{'failed' if problems else 'the scratch archive checked out'}")
+    return 1 if problems else 0
+
+
 def main(argv: list[str]) -> int:
+    if "--self-test" in argv[1:]:
+        return self_test()
     here = Path(__file__).resolve().parent
     files = [Path(a) for a in argv[1:]] or sorted(here.glob("*.tex"))
     if not files:

@@ -256,18 +256,18 @@ def vendored_theorems():
 def panel_counts(tex_name):
     """(panels in the body, panels in the appendix) one paper's sources ask for.
 
-    A panel is a `\\codeframe` call naming a range of the library; the body's are
-    the ones above `\\appendix`, and the appendix's are the ones below it. Each
-    paper's count is its own: two papers quote the library here, and a count that
-    mixed them would be a numeral neither paper could state.
+    A panel is a `\\codeframe` call naming a range of the library, so a line that
+    carries two calls quotes two panels and is counted as two: the number the
+    prose states is the panels, not the lines that happen to hold them.  The
+    body's are the ones above `\\appendix`, and the appendix's are the ones below
+    it. Each paper's count is its own: two papers quote the library here, and a
+    count that mixed them would be a numeral neither paper could state.
     """
     lines = (PAPER / tex_name).read_text(encoding="utf-8").splitlines()
     end = next((i for i, line in enumerate(lines)
                 if line.strip() == "\\appendix"), len(lines))
-    calls = [i for i, line in enumerate(lines) if CALL.search(line)]
-    body = sum(1 for i in calls if i <= end)
-    appendix = sum(1 for i in calls if i > end)
-    return body, appendix
+    per_line = [len(CALL.findall(line)) for line in lines]
+    return sum(per_line[:end + 1]), sum(per_line[end + 1:])
 
 
 def counts():

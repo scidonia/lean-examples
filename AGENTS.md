@@ -1302,6 +1302,7 @@ python3 gen-frames.py                     # the frames themselves
 latexmk -pdf -shell-escape unobservable-effects.tex   # the permissions companion
 latexmk -pdf -shell-escape lowering.tex               # the counted heap and the typing
 python3 check-listings.py                 # every frame and count, against the library
+python3 check-listings.py --self-test     # those checks, against a scratch paper
 ```
 
 Every frame is a line range into the library, so a paper quotes the source
@@ -1316,9 +1317,17 @@ publishes, and the panels it and the appendix quote — from that file rather th
 stating them, so a count that moves with the library is regenerated rather than
 corrected by hand. The panel counts are per paper, so the two do not share a
 numeral: `\panelcount` is the companion's, and the lowering paper reads its own
-count under that name through a `\let` in its preamble. Nothing here compiles the
-Lean: the library is built separately, and the papers' measurements are the
-`inplace` harness's.
+count under that name through a `\let` in its preamble. A line can hold more
+than one call, and each call is a panel: the checker reads every call on a line
+and pairs each with the directive before it, so a second call on a line, which
+no directive can precede, is reported rather than passed over, and the counted
+papers state calls rather than lines. `check-listings.py --self-test` is that
+rule's regression. It builds a scratch paper and a scratch counted paper in a
+temporary copy of the library, and requires the paper whose panels each carry
+their directive to check out, the paper whose second call on a line has none to
+be reported, and the counted paper's two calls per line to be counted as two,
+above and below `\appendix`. Nothing here compiles the Lean: the library is
+built separately, and the papers' measurements are the `inplace` harness's.
 
 The description, observation and layout universes are quoted in the body, where
 they are defined, rather than in the appendix, so each is shown once.
