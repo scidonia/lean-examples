@@ -1274,10 +1274,15 @@ it only costs a slower rebuild.
 A frame is written `\codeframe[linerange=lo-hi]{../path}`, naming the source and
 not the frame: the preamble's `frames/lookup.tex` turns that range into
 `frames/<key>.lean`, and a range with no generated frame is a build error. A
-single-line frame is written `lo-lo`; a call in any other shape is one no frame
+single-line frame is written `lo-lo`; every other bracket argument is one no frame
 can be made for, and both `gen-frames.py` and `check-listings.py` report it rather
 than passing it over, because the `%!check:` directive beside it would otherwise be
-paired with whatever frame follows. The frame is that range with its comments
+paired with whatever frame follows. Two arguments are not ranges and not mistakes:
+a `\lawframe`'s body and the preamble's own definition write
+`\codeframe[linerange=#2]` and `\codeframe[linerange=#1-#2]`, which are macro
+parameters rather than ranges to resolve. A call inside a comment is not a call
+either — the typesetter never reaches it — so a commented argument is passed over.
+The frame is that range with its comments
 removed, so a doc comment between two constructors does not appear, and a range
 that begins inside a doc comment does not leak the tail of it. Each frame is set in
 an unbreakable box, so it cannot be split across a page: a frame too tall for the

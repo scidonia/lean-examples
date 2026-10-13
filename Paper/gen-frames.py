@@ -38,8 +38,28 @@ LAW = re.compile(
     r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
 )
 # The bracket argument of a frame call, in any shape, so that a call the pattern
-# above cannot resolve is seen rather than passed over.
+# above cannot resolve is seen rather than passed over.  An argument that is a call
+# at all is a line range or one of the shape-and-colour macros' own parameters;
+# `code_of` then drops what a comment holds, since that is not a call either.
 SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
+RANGE = re.compile(r"\d+-\d+")
+PARAM = re.compile(r"#\d+(?:-#\d+)?")
+
+
+def code_of(line: str) -> str:
+    """`line` up to its LaTeX comment, if it has one.
+
+    LaTeX ends the line at an unescaped per cent, so a `\\codeframe` after one is
+    text the typesetter never reaches: it is not a call, and can neither ask for a
+    frame nor leave the `%!check:` beside it unpaired.  `\\%` is a literal per cent
+    and does not begin a comment.
+    """
+    escaped = False
+    for i, ch in enumerate(line):
+        if ch == "%" and not escaped:
+            return line[:i]
+        escaped = ch == "\\" and not escaped
+    return line
 
 
 def calls():
@@ -48,18 +68,20 @@ def calls():
 
     A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
     line.  A shape-and-colour definition such as a `\\lawframe`'s body writes
-    `\\codeframe[linerange=#2]{../#1}`, whose argument is not a range at all, and
-    is not a call; a range that begins with a digit and is not `lo-hi` is one, and
-    has no frame.  The paper would meet it as a LaTeX error at best and a silently
-    missing box at worst, so it is reported here rather than skipped.
+    `\\codeframe[linerange=#2]{../#1}`, whose argument is a macro parameter and not
+    a range, and is not a call; nor is one written inside a comment.  Every other
+    argument that is not `lo-hi` is a call with no frame.  The paper would meet it
+    as a LaTeX error at best and a silently missing box at worst, and the
+    `%!check:` beside it would be paired with whatever frame follows, so it is
+    reported here rather than skipped.
     """
     found, malformed = [], []
     for tex in sorted(HERE.glob("*.tex")):
         text = tex.read_text(encoding="utf-8")
         for number, line in enumerate(text.splitlines(), start=1):
-            for match in SHAPE.finditer(line):
+            for match in SHAPE.finditer(code_of(line)):
                 arg = match.group(1)
-                if arg[:1].isdigit() and not re.fullmatch(r"\d+-\d+", arg):
+                if not RANGE.fullmatch(arg) and not PARAM.fullmatch(arg):
                     malformed.append(f"{tex.name}:{number}: {line.strip()}")
         for match in CALL.finditer(text):
             key = (match.group("path"), int(match.group("lo")), int(match.group("hi")))

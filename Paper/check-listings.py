@@ -46,9 +46,29 @@ LOOKUP = re.compile(
     r"\\endcsname\{(?P<key>[^}]*)\}"
 )
 # The bracket argument of a frame call, in any shape, so that a call the pattern
-# above cannot resolve is seen rather than passed over.
+# above cannot resolve is seen rather than passed over.  An argument that is a call
+# at all is a line range or one of the shape-and-colour macros' own parameters;
+# `code_of` then drops what a comment holds, since that is not a call either.
 SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
+RANGE = re.compile(r"\d+-\d+")
+PARAM = re.compile(r"#\d+(?:-#\d+)?")
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
+
+
+def code_of(line: str) -> str:
+    """`line` up to its LaTeX comment, if it has one.
+
+    LaTeX ends the line at an unescaped per cent, so a `\\codeframe` after one is
+    text the typesetter never reaches: it is not a call, and the `%!check:` beside
+    it is not paired with it.  `\\%` is a literal per cent and does not begin a
+    comment.
+    """
+    escaped = False
+    for i, ch in enumerate(line):
+        if ch == "%" and not escaped:
+            return line[:i]
+        escaped = ch == "\\" and not escaped
+    return line
 
 
 def normalise(text: str) -> str:
@@ -105,20 +125,22 @@ def check_calls(tex: Path, problems: list[str]) -> int:
 
     A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
     line. A definition such as a `\\lawframe`'s body writes
-    `\\codeframe[linerange=#2]{../#1}`, whose argument is not a range at all; a
-    range that begins with a digit and is not `lo-hi` is a call, and has no frame,
-    so the `%!check:` directive before it would be paired with whatever frame
-    follows. It is reported rather than skipped.
+    `\\codeframe[linerange=#2]{../#1}`, whose argument is a macro parameter and not
+    a range; nor is a call one written inside a comment, which the typesetter never
+    reaches. Every other argument that is not `lo-hi` is a call with no frame, so
+    the `%!check:` directive before it would be paired with whatever frame follows.
+    It is reported rather than skipped.
     """
     found = 0
     for number, line in enumerate(tex.read_text(encoding="utf-8").splitlines(), 1):
-        for match in SHAPE.finditer(line):
+        for match in SHAPE.finditer(code_of(line)):
             arg = match.group(1)
-            if arg[:1].isdigit() and not re.fullmatch(r"\d+-\d+", arg):
-                problems.append(f"{tex.name}:{number}: not a "
-                                f"\\codeframe[linerange=lo-hi]{{path}} call: "
-                                f"{line.strip()}")
-                found += 1
+            if RANGE.fullmatch(arg) or PARAM.fullmatch(arg):
+                continue
+            problems.append(f"{tex.name}:{number}: not a "
+                            f"\\codeframe[linerange=lo-hi]{{path}} call: "
+                            f"{line.strip()}")
+            found += 1
     return found
 
 

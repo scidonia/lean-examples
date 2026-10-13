@@ -142,28 +142,37 @@
 \begin{abstract}
 A reference-counted runtime updates an object in place exactly when its count is
 one. Implementations decide this at run time, because one compiled body serves
-owning and borrowing call sites; but the count is determined by which references
-the term and the surrounding structure hold, so it is a static property of the
-program. This paper formalises a pure core, a reference-counted target over a
-counted heap, and the lowering between them, and proves the pair that
-characterises the target's write: an owned store is destructive and keeps its
-location, a shared store copies. That pair reads the count of a \emph{reference}
+owning and borrowing call sites, and the decision is taken per site, from what the
+compiler can see there. This paper formalises a pure core, a reference-counted
+target over a counted heap, and the lowering between them, and proves the pair
+that characterises the target's write: in that counted heap, an owned store is
+destructive and keeps its location, a shared store copies. The runtime's own test
+of the count, and the correspondence between a model count and the machine's, are
+stated below as assumptions and measurements with the limits they hold under, and
+not as theorems. That pair reads the count of a \emph{reference}
 in the term's own account of itself; a compiler reads a count of a \emph{name}.
 The second half of the paper closes the gap with a typing: the write's rule asks
 the subject's name to be owned exactly once in the store's environment and not
-borrowed, and the rules that bind a name ask a written name to be used exactly
-once in the scope that binds it and to be introduced for, or matched out of, a
-construction rather than another name. The programs a second holder of the cell
-would need --- the subject also used as the written value, an arm binding it
-twice, a use of it in a sibling position, and a binding of it to another name ---
-have no typing, each beside the same-shape program that has one. A correspondence
+borrowed, and the rules the term itself carries that bind that name ask it to be
+used exactly once in the scope that binds it --- at an abstraction, at a binding,
+and at each of an arm's binders --- and, at a binding and at each arm, to be
+introduced for, or matched out of, a construction rather than another name. What
+the typing establishes is conditional: it is a judgement on names, so it neither
+makes a cell's reference count one nor rules out a holder of it outside the term,
+and those are preconditions the correspondence and the take-out carry. The
+programs a second holder of the cell would need --- the subject also used as the
+written value, an arm binding it twice, a use of it in a sibling position, and a
+binding of it to another name --- have no typing, each beside the same-shape
+program that has one. A correspondence
 between the typing's environment and the target's account reads the typing's
 count of a name into the write theorem's count of a reference, the injectivity
 that reading needs is derived rather than assumed where a run reaches it, and the
 two routes meet at one step of an accepted run. Everything is mechanised in Lean~4
-against the core library alone, with no evaluation by native decision and no
-foreign axiom. The lowering is proved total and deterministic, not correct; that
-is stated, and so is each thing measured or trusted rather than proved.
+against the core library alone; this repository's own proofs take no step by
+native decision and acquire no axiom, and the one vendored block whose native
+evaluation does generate certificate axioms is named where it is used. The lowering
+is proved total and deterministic, not correct; that is stated, and so is each
+thing measured or trusted rather than proved.
 \end{abstract}
 
 \section{Introduction: the count at a write}
@@ -175,21 +184,30 @@ value that already exists, and no program can tell whether some other array
 happens to share a buffer with this one. The source language is pure, and the
 compiler is free to make it fast.
 
-The compiler is fast in a specific way. When the array \code{set!} is applied to
-has exactly one reference, the emitted code stores into that array's buffer and
-returns a pointer to the same buffer. When the array has two or more references,
-the emitted code allocates a copy and stores into that. Both implement the same
-value, so nothing about correctness depends on which one is chosen. What is at
-stake is allocation, and therefore speed.
+The compiler is fast in a specific way. The runtime tests a cell's count before a
+write and takes one of two branches, into the cell's own buffer or into a fresh
+one, and that test and its branches are the runtime's documented behaviour rather
+than anything proved here. What this paper proves is the same pair for a counted
+heap it defines, and at the model's count: at one the store is destructive and
+keeps its location, above one it copies. Everything this paper reads onto a
+machine carries its status: the runtime's test is documented, the correspondence
+between a model count of one and that test is a hypothesis no instance of which is
+constructed, the shape a compiler emits for these write paths is checked against
+one pinned toolchain's output rather than proved, and the in-place behaviour itself
+is measured on compiled code. Each is named, with its limit, in \cref{sec:trusted}.
+Both branches implement the same value, so nothing about correctness depends on
+which one is chosen; what is at stake is allocation, and therefore speed.
 
 \paragraph{The count, and where it comes from.} A reference-counted runtime keeps
 one number per cell: the number of references to it. At a write to a cell, that
 number is the sum of two things --- the references the cell's own slots hold, plus
 the references held outside the heap by whatever is running. Those outside
 references are, at the moment of the write, the ones the term itself holds
-together with any handle the surrounding structure holds. That is a fact about the
-program and its data, not a reading taken from the machine: an implementation
-performs the same sum, per site, at run time.
+together with any handle the surrounding structure holds. That sum is a fact about
+the term and its data, and the account of \cref{sec:account} is this paper's
+statement of it. Whether a machine's number is that sum where a write runs is the
+hypothesis \cref{sec:trusted} names rather than derives, and a compiler reaches the
+question one site at a time.
 
 \paragraph{What a compiler reads per site.} One compiled body serves an owning call
 site and a borrowing one, so the decision cannot be made once and for all when the
@@ -600,16 +618,26 @@ the store's environment alone, the typing cannot see the program's multiplicity,
 two further conditions are needed, and both are side conditions of the rules that
 \emph{bind} the name.
 
-\noindent The first: a written name is used exactly once in the scope that binds
-it, and it is introduced for, or matched out of, a construction rather than another
-name. For a binding, both conditions sit on the rule.
+\noindent The first condition --- a written name is used exactly once in the scope
+that binds it --- is carried by each rule of the term that binds a name, and the
+abstraction carries it alone.
+
+%!check: | lam {Δ Γ : Occs} {x : Var} {body : Expr}
+\sourceline{The first condition alone, on an abstraction}{Scidonia/RC/Typing.lean}{262--264}
+\codeframe[linerange=262-264]{../Scidonia/RC/Typing.lean}
+
+\noindent The abstraction cannot carry the second: its binder is bound to the
+argument an application supplies, and no side condition of an abstraction or of an
+application can see that argument's shape, so there is no term of the rule to ask
+whether it is a construction (\cref{sec:reach}). A binding carries both, for the one
+name it binds.
 
 %!check: | bind {Δ Γ : Occs} {x : Var} {e₁ e₂ : Expr}
 \sourceline{Both conditions, on a binding}{Scidonia/RC/Typing.lean}{273--277}
 \codeframe[linerange=273-277]{../Scidonia/RC/Typing.lean}
 
-\noindent For a matching arm, they are carried for each of the arm's binders, and
-the construction the name is matched out of is the matched subject.
+\noindent An arm carries both for each of its binders, and the construction the
+name is matched out of is the matched subject.
 
 %!check: | matchC {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List Var} {body : Expr}
 \sourceline{Both conditions, on an arm}{Scidonia/RC/Typing.lean}{282--287}
@@ -626,9 +654,9 @@ whatever cell it names. \lref{typed_write_linear} and \lref{typed_write_built}
 carry the two conditions over a typed term, as traversals in the style of
 \lref{WriteOwned}.
 
-\paragraph{Status.} Proved: the conditions are side conditions of the binding
-rules and are carried over typed terms, so the write's own clause and the two name
-conditions are three readings of one judgement.
+\paragraph{Status.} Proved: the conditions are side conditions of the rules that
+bind the name, and are carried over typed terms, so the write's own clause and the
+two name conditions are three readings of one judgement.
 
 \subsection{The refusals, and their typed companions}
 \label{sec:refusals}
@@ -692,9 +720,19 @@ its companion binds the name to a node the program built.
 \paragraph{The reading.} The shapes where a second holder of the cell exists have
 \emph{no} typing, and each beside its companion shows why: the companions differ
 from the refuted programs in nothing but the multiplicity of the subject's name or
-the shape of what binds it. A write is therefore only expressible where the cell is
-the program's own --- which is exactly the condition the target's destructive branch
-asks the account for, in the source's own vocabulary. \lref{dup_no_typing} and
+the shape of what binds it. Where the term itself binds the name a write's subject
+carries, the rule that binds it uses that name exactly once in the scope that binds
+it and, where the rule is a binding or an arm, introduces it for a construction
+rather than another name: the name's multiplicity in that scope is one, and what
+binds it is not another name for the same cell. That is the source-side half of the
+condition the target's destructive branch asks the account for. It is not a count on
+the target heap, and it is not a statement that no other holder of the cell exists:
+the judgement is on names, a store is typed in an environment whose two names may
+name one reference while \lref{Couple} holds (\cref{sec:inj}), and a subject that is
+a free variable, an abstraction's argument or a field a binder names is a holder the
+term's own rules cannot see (\cref{sec:reach}). The correspondence carries those
+cases as its own preconditions, and the take-out supplies them where a run reaches
+them (\cref{sec:corr}). \lref{dup_no_typing} and
 \lref{drop_no_typing} record the other half: a resource instruction has no rule, so
 a typed term mentions neither.
 
@@ -931,10 +969,13 @@ hypotheses of \lref{store_owned_is_destructive}; \cref{sec:hypotheses} is where 
 run supplies them, and \cref{sec:run} is where they are read off a step.
 
 \emph{The compiler's lowering.} That a compiler turns a language's write paths into
-the shape modelled here is not proved. In the accompanying repository that link is
-\emph{checked} --- structurally, and not by a theorem: the check reads the
-post-reference-counting intermediate representation the pinned toolchain emits and
-asserts the shape on one executing path, failing the build when it does not hold.
+the shape modelled here is not proved, and the link is \emph{trusted}. The
+accompanying repository bounds it with a check rather than a theorem: the check
+reads the post-reference-counting intermediate representation the pinned toolchain
+emits and asserts the shape on one executing path, failing the build when it does
+not hold. That is evidence about the output of one pinned toolchain, at the
+declarations the check names and the one path it selects; it is not a theorem about
+compilers, and it does not discharge the link, which stays an assumption here.
 
 \emph{The runtime's primitive.} The branch that stores in place is a runtime test
 whose meaning is documented in the runtime and not modelled here. The counted model
@@ -991,19 +1032,32 @@ compiled program: the references are names in a list, not addresses.
 \code{Scidonia/}, of which \vendoredtheoremcount{} are vendored from Lean's own
 model of the count. This paper quotes \panelcount{} panels of it, and every one is
 a line range of the source rather than a transcription: the range is generated into
-a frame with its comments removed, a \code{\%!check:} directive names a fragment
+a frame with its comments removed, a \texttt{\%!check:} directive names a fragment
 the range must contain, and \code{check-listings.py} fails when either has drifted.
 The counts the prose states are read from a generated file, so a count that moves
 with the library is regenerated rather than corrected by hand.
 
 The development is a few thousand lines of Lean~4 against the core library only,
-with no mathematics library dependency. There is no \code{sorry}, no evaluation by
-native decision, and every representative theorem's axiom list is asserted, so a
-proof that acquired a foreign axiom fails the build. Two design facts the
-formalisation forced are recorded as toolchain facts: terms are a flat inductive,
-because a nested one cannot be inducted on or derive decidable equality; and an
-evaluated check needs a structural recursion, because the kernel does not reduce a
-well-founded one.
+with no mathematics library dependency. This repository's own proofs have no
+\code{sorry} and take no step by native decision, and every representative theorem
+of this repository's has its axiom list asserted, so a proof of this repository's
+that acquired a foreign axiom fails the build. The counts module is the exception,
+and it is upstream's text: it is vendored from Lean's own model of the reference
+count. Thirteen of its seventeen public theorems carry at least one generated
+certificate axiom of the form \code{<theorem>._native.bv_decide.ax_*} beside
+\code{propext}, \code{Classical.choice} and \code{Quot.sound}, because
+\code{bv_decide} decides by native evaluation and asserts the result as an axiom;
+four print none, and of those only \code{LEAN_RC_STUCK_ST_eq} invokes
+\code{bv_decide} at all, its goal having been closed before the certificate step,
+the other three being \code{grind} and \code{omega} proofs. Those axioms are not
+this repository's to remove, and the vendored arithmetic is left as it stands. A
+fact derived from a vendored theorem inherits that theorem's axioms and says which
+declaration it inherits them from, and the checks of \code{ScidoniaTest/Count.lean}
+pin the list \texttt{\#print axioms} emits for this repository's own facts, so any
+other axiom fails the build there. Two design facts the formalisation forced are
+recorded as toolchain facts: terms are a flat inductive, because a nested one
+cannot be inducted on or derive decidable equality; and an evaluated check needs a
+structural recursion, because the kernel does not reduce a well-founded one.
 
 \noindent \textbf{Reference counting with reuse.} In-place update of a shared value,
 and the precise counting with ownership that makes it possible, is the design of
