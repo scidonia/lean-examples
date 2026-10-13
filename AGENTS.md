@@ -205,8 +205,9 @@ The compile-time checks live in the check library:
   beside the same store with the cell created and its value evaluated. Its privacy
   pins are `#guard_msgs` rejections of the sealed interpreter's name, of an
   attempt to hand the runner an array, and the `#check`s of the public evaluation
-  and runner, beside the affirmative theorems that a client can evaluate and run a
-  submitted program. Its axiom checks assert the
+  and runner, beside the affirmative theorem that a client can evaluate a
+  submitted program and the logical `IO` equation `runFresh e h = pure v` the
+  runner satisfies. Its axiom checks assert the
   `#print axioms` lists of the agreement, the totality, the quotation, the `IO`
   equation, the simulation, the recursion's congruence, the quotation laws and the
   witnesses, which show the new theorems rest on the standard kernel principles

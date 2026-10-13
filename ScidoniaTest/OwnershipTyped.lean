@@ -646,7 +646,9 @@ takes the term alone, and the runner's proof argument is a proposition.
 /-- A client can evaluate a submitted program and read the returned observation. -/
 example : evalArray witness = some witnessValue := witness_agreement
 
-/-- A client can run a submitted program; the proof argument is erased. -/
+/-- The runner's logical `IO` equation `runFresh e h = pure v`: the action is the
+`pure` return of the value the evaluation reaches, and the proof argument is
+erased. -/
 example : runFresh witness witness_own = pure witnessValue := witness_io
 
 /-! ## Axioms

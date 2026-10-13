@@ -465,8 +465,10 @@ theorem readCell_singleton (s : Slot) : readCell (#[s] : Array Slot) = some s :=
 
 /-- The evaluation of the fragment, with the update step as a parameter: the
 sealed executor's own write goes through the exclusivity check and the model's
-through `Array.set!`, and the recursion is the same one. A term outside the
-fragment is not evaluated and yields `none`. A write is asked for only when the
+through `Array.set!`, and the recursion is the same one. The recursion yields
+`none` where its clauses have no case for the shape or cannot find the value a
+case needs, and it stops there instead of producing a value; it does not follow
+that the typing turns every such shape away. A write is asked for only when the
 array actually holds slot `0`: the guard is what keeps `Array.set!` off an empty
 array, and a write threaded no cell fails the recursion instead of yielding a
 value built from the array it was given. -/
