@@ -47,12 +47,14 @@ needed on the name a subject carries. Both are side conditions of the rules that
   `(var 0)` is a second reference to the cell the write lands at --- therefore has no
   typing (`sibling_use_no_typing`), and `sibling_use_owned`, which writes the cell and
   does not use it elsewhere, is its typed counterpart.
-* **A written name is introduced for a construction, not for another name.** The
-  `bind` rule carries `writes x e₂ = true → BuiltB e₁ = true`, and the arm rule of
-  `matchC` carries `writes y body = true → BuiltB s = true` for each binder `y`: a name
-  that is written is bound to a *node* of the syntax --- a value the program built ---
-  or matched out of one, and never to `(.var z)`, which would make the written name a
-  second name for a cell the program already holds. `typed_write_built` carries the
+* **A written name comes from a construction rather than another name.** The `bind`
+  rule carries `writes x e₂ = true → BuiltB e₁ = true`, and the arm rule of `matchC`
+  carries `writes y body = true → BuiltB s = true` for each binder `y`: a binding's
+  written name is bound to a *node* of the syntax --- a value the program built --- and
+  never to `(.var z)`, which would make the written name a second name for a cell the
+  program already holds; an arm's binder is matched out of a *subject* that is such a
+  node, and the *field* the subject hands the binder may itself be a name --- the case
+  the caveat below leaves outside the guarantees. `typed_write_built` carries the
   condition over a typed term, `alias_bind_no_typing` is its inversion --- a program
   that binds a name to another name and writes through the binding has no typing ---
   and `built_bind_typed` is the same shape with the binding a construction.
@@ -77,7 +79,7 @@ other name for it are facts the take-out provides and `Scidonia.RC.Ownership`'s
 `store_owned_is_destructive` *names* among its hypotheses rather than deriving ---
 remain outside this module. What is proved here is the name side of the write: where
 the term itself binds the name a subject carries, that name is used exactly once in
-the scope that binds it and is introduced for a construction.
+the scope that binds it and is introduced for, or matched out of, a construction.
 
 **Survival.** The typing is preserved by the source's own substitution under a
 restriction the name conditions make natural. `subst_typed_var` substitutes the
@@ -103,8 +105,9 @@ what excludes it.
   it binds uses that name exactly once in the body it binds; stated as the recursive
   reading `WriteLinear`, which a traversal of the term carries.
 * `typed_write_built`: every binding rule of a typed term whose body writes the name it
-  binds introduces that name for a construction of the program; stated as the recursive
-  reading `WriteBuilt`, which a traversal of the term carries.
+  binds introduces that name for a construction of the program --- the bound term for a
+  binding, the matched subject for an arm; stated as the recursive reading `WriteBuilt`,
+  which a traversal of the term carries.
 * `dupValue_no_typing` and `dupArm_no_typing`: a program whose write's subject is also
   the written value, and one whose arm binds the subject twice, have no typing at the
   empty environments; `ownedValue_typed` and `ownedArm_typed` are the same shapes with
@@ -115,8 +118,10 @@ what excludes it.
   counterparts, and `typed_lam_written_linear`, `typed_bind_written_linear`,
   `typed_arm_written_linear`, `typed_bind_written_built`, `typed_arm_written_built`,
   `typed_bind_written_own` and `typed_arm_written_own` read the two conditions at a
-  rule: the name is used once in the scope that binds it, and it is introduced for a
-  construction, so the program builds the cell the write lands at and names it once ---
+  rule: the name is used once in the scope that binds it, and it is introduced for, or
+  matched out of, a construction --- so a binding's program builds the cell the write
+  lands at and names it once, while an arm's program builds the matched subject and the
+  binder names a field of it, whose own construction the condition leaves open ---
   source-level facts of construction and use, and not a count on the target heap.
 * `typed_lowers`: a typed term is a term `Scidonia.RC.Lower` lowers from the same
   environments.
@@ -239,7 +244,8 @@ that bind a name carrying the two conditions a written name has to meet. -/
 occurrences `Γ`: the lowering's environment discipline read as a typing, with a write's
 subject required to be owned exactly once in its environment and not borrowed, and with
 a name that a rule binds required to be used exactly once in its scope when its body
-writes it, and to be introduced for a construction rather than another name. The
+writes it, and required to be introduced for, or matched out of, a construction rather
+than another name --- the bound term for a binding, the matched subject for an arm. The
 environment is an index of the judgement and not a parameter of the rule's conclusion,
 because a binder's body is typed at the environment the binder leaves (`forget Δ x`,
 `bindEnv Γ x (uses body)`) and an arm's body at the arm's binders. -/
@@ -361,8 +367,9 @@ def WriteLinear : Expr → Prop
   | .store _ _ v => WriteLinear v
 
 /-- Every binding rule of `e` whose body writes the name it binds introduces that name
-for a construction of the program: the same recursion as the typing, asking at `bind`
-and each of an arm's binders the second side condition the rule requires. -/
+for a construction of the program --- the bound term for a binding, the matched subject
+for an arm: the same recursion as the typing, asking at `bind` and each of an arm's
+binders the second side condition the rule requires. -/
 def WriteBuilt : Expr → Prop
   | .var _ => True
   | .lam _ body => WriteBuilt body
@@ -395,8 +402,9 @@ theorem typed_write_linear {Δ Γ : Occs} {e : Expr} (h : Typed Δ Γ e) :
   | store hown hborrow hv ihv => exact ihv
 
 /-- A typed term has every binding rule whose body writes the name it binds introduce
-that name for a construction of the program: the rules' second name condition, carried
-by the traversal `WriteBuilt`. -/
+that name for a construction of the program --- the bound term for a binding, the
+matched subject for an arm: the rules' second name condition, carried by the traversal
+`WriteBuilt`. -/
 theorem typed_write_built {Δ Γ : Occs} {e : Expr} (h : Typed Δ Γ e) : WriteBuilt e := by
   induction h with
   | var h => trivial
@@ -455,10 +463,12 @@ theorem typed_bind_written_own {Δ Γ : Occs} {x : Var} {e₁ e₂ : Expr}
     BuiltB e₁ = true ∧ (uses e₂).count x = 1 :=
   ⟨typed_bind_written_built h hw, typed_bind_written_linear h hw⟩
 
-/-- An arm's binder whose name the arm's body writes is matched out of a construction of
-the program and used exactly once in that body: two source-level facts of the arm --- the
-program built the matched cell, and the arm names it once --- and not a count on the
-target heap. -/
+/-- An arm's binder whose name the arm's body writes is matched out of a subject the
+program built, and is used exactly once in that body: two source-level facts of the arm
+--- the matched subject is a construction of the program, and the arm's body names its
+binder once --- and not a count on the target heap. The binder names a *field* of that
+subject, and a field that is itself a name is the case the caveat above leaves outside
+the guarantees. -/
 theorem typed_arm_written_own {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List Var}
     {body : Expr} (h : Typed Δ Γ (.matchC s c ys body)) {y : Var} (hy : y ∈ ys)
     (hw : writes y body = true) : BuiltB s = true ∧ (uses body).count y = 1 :=

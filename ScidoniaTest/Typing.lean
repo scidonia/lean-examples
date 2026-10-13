@@ -4,8 +4,9 @@ Checks for `Scidonia.RC.Typing`, from outside the module.
 The module fixes the typing `Typed`: the lowering's environment discipline read as a
 typing of the source, with a write's subject required to be owned exactly once in its
 environment and not borrowed, and with two conditions on the name a subject carries ---
-a name a rule binds is used exactly once in its scope when its body writes it, and it is
-introduced for a construction of the program rather than another name. A proof
+a name a rule binds is used exactly once in its scope when its body writes it, and that
+rule asks a construction of the program, rather than another name, to be the term the
+name is introduced for or matched out of. A proof
 development has no pre-fix behaviour to observe, so the checks here meet the typing from
 outside, on terms and environments a client can build, and each is paired with a control
 of the same shape whose failure is pinned. They are of seven kinds:
@@ -273,8 +274,8 @@ theorem built_written_own :
     BuiltB (.con1 5 (.con0 5)) = true ∧ (uses (.store (.var 0) 0 (.con0 9))).count 0 = 1 :=
   typed_bind_written_own built_typed (by decide)
 
-/-- The same reading at an arm's binder: the written name is matched out of a
-construction and used exactly once in the arm's body. -/
+/-- The same reading at an arm's binder: the written name is matched out of the arm's
+subject, which is a construction, and is used exactly once in the arm's body. -/
 theorem arm_written_own :
     BuiltB (.con1 5 (.con0 5)) = true ∧ (uses (.store (.var 0) 0 (.con0 9))).count 0 = 1 :=
   typed_arm_written_own ownedArm_typed (by decide) (by decide)
