@@ -932,9 +932,9 @@ run supplies them, and \cref{sec:run} is where they are read off a step.
 
 \emph{The compiler's lowering.} That a compiler turns a language's write paths into
 the shape modelled here is not proved. In the accompanying repository that link is
-\emph{checked} by reading the post-reference-counting intermediate representation
-the pinned toolchain emits and asserting the shape on one executing path, failing
-the build when it does not hold.
+\emph{checked} --- structurally, and not by a theorem: the check reads the
+post-reference-counting intermediate representation the pinned toolchain emits and
+asserts the shape on one executing path, failing the build when it does not hold.
 
 \emph{The runtime's primitive.} The branch that stores in place is a runtime test
 whose meaning is documented in the runtime and not modelled here. The counted model
