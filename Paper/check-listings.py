@@ -45,6 +45,9 @@ LOOKUP = re.compile(
     r"\\expandafter\\def\\csname cf@(?P<path>.*)@(?P<lo>\d+)-(?P<hi>\d+)"
     r"\\endcsname\{(?P<key>[^}]*)\}"
 )
+# The bracket argument of a frame call, in any shape, so that a call the pattern
+# above cannot resolve is seen rather than passed over.
+SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 
 
@@ -95,6 +98,28 @@ def check_fragments(tex: Path, problems: list[str]) -> int:
     if pending is not None:
         problems.append(f"{tex.name}:{pending[0]}: trailing %!check: with no frame")
     return checked
+
+
+def check_calls(tex: Path, problems: list[str]) -> int:
+    """Frame calls in a shape no frame can be generated for.
+
+    A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
+    line. A definition such as a `\\lawframe`'s body writes
+    `\\codeframe[linerange=#2]{../#1}`, whose argument is not a range at all; a
+    range that begins with a digit and is not `lo-hi` is a call, and has no frame,
+    so the `%!check:` directive before it would be paired with whatever frame
+    follows. It is reported rather than skipped.
+    """
+    found = 0
+    for number, line in enumerate(tex.read_text(encoding="utf-8").splitlines(), 1):
+        for match in SHAPE.finditer(line):
+            arg = match.group(1)
+            if arg[:1].isdigit() and not re.fullmatch(r"\d+-\d+", arg):
+                problems.append(f"{tex.name}:{number}: not a "
+                                f"\\codeframe[linerange=lo-hi]{{path}} call: "
+                                f"{line.strip()}")
+                found += 1
+    return found
 
 
 def check_lawframes(tex: Path, problems: list[str]) -> int:
@@ -226,6 +251,7 @@ def main(argv: list[str]) -> int:
         if not tex.is_file():
             print(f"no such file: {tex}", file=sys.stderr)
             return 1
+        check_calls(tex, problems)
         fragments += check_fragments(tex, problems)
         laws += check_lawframes(tex, problems)
         frames += check_frames(here, tex, table, problems)

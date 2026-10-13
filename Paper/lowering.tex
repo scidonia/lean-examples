@@ -1,0 +1,1080 @@
+% Reference count one at the write: the counted heap, the two calculi, the
+% lowering strategy, the pair that characterises the target's write, and the
+% typing that puts the count where a write needs it.
+%
+% Build, from this directory. Highlighting is minted's, so the build needs shell
+% escape and Pygments on PATH:
+%   python3 gen-laws.py     # the law frames and counts.tex, after a library change
+%   python3 gen-frames.py   # the frames themselves: the quoted ranges, comment-free
+%   latexmk -pdf -shell-escape lowering.tex
+% Check that every frame still quotes the library, and that counts.tex holds the
+% counts the library gives:
+%   python3 check-listings.py
+%
+% pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
+% in the quoted Lean is mapped to font commands by newunicodechar below. A
+% character in a quoted range with no mapping fails the build, which is the
+% signal to add one.
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{newunicodechar}
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{·}{\ensuremath{\cdot}}
+\newunicodechar{∘}{\ensuremath{\circ}}
+\newunicodechar{α}{\ensuremath{\alpha}}
+\newunicodechar{β}{\ensuremath{\beta}}
+\newunicodechar{γ}{\ensuremath{\gamma}}
+\newunicodechar{δ}{\ensuremath{\delta}}
+\newunicodechar{ε}{\ensuremath{\varepsilon}}
+\newunicodechar{ι}{\ensuremath{\iota}}
+\newunicodechar{κ}{\ensuremath{\kappa}}
+\newunicodechar{λ}{\ensuremath{\lambda}}
+\newunicodechar{μ}{\ensuremath{\mu}}
+\newunicodechar{ν}{\ensuremath{\nu}}
+\newunicodechar{π}{\ensuremath{\pi}}
+\newunicodechar{ρ}{\ensuremath{\rho}}
+\newunicodechar{σ}{\ensuremath{\sigma}}
+\newunicodechar{τ}{\ensuremath{\tau}}
+\newunicodechar{φ}{\ensuremath{\varphi}}
+\newunicodechar{χ}{\ensuremath{\chi}}
+\newunicodechar{ω}{\ensuremath{\omega}}
+\newunicodechar{Γ}{\ensuremath{\Gamma}}
+\newunicodechar{Δ}{\ensuremath{\Delta}}
+\newunicodechar{Σ}{\ensuremath{\Sigma}}
+\newunicodechar{Φ}{\ensuremath{\Phi}}
+\newunicodechar{ℓ}{\ensuremath{\ell}}
+\newunicodechar{→}{\ensuremath{\to}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{↔}{\ensuremath{\leftrightarrow}}
+\newunicodechar{↦}{\ensuremath{\mapsto}}
+\newunicodechar{⟶}{\ensuremath{\longrightarrow}}
+\newunicodechar{∀}{\ensuremath{\forall}}
+\newunicodechar{∃}{\ensuremath{\exists}}
+\newunicodechar{∈}{\ensuremath{\in}}
+\newunicodechar{∉}{\ensuremath{\notin}}
+\newunicodechar{⊆}{\ensuremath{\subseteq}}
+\newunicodechar{∧}{\ensuremath{\wedge}}
+\newunicodechar{∨}{\ensuremath{\vee}}
+\newunicodechar{¬}{\ensuremath{\neg}}
+\newunicodechar{≠}{\ensuremath{\neq}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{⊥}{\ensuremath{\bot}}
+\newunicodechar{∅}{\ensuremath{\emptyset}}
+\newunicodechar{≃}{\ensuremath{\simeq}}
+\newunicodechar{⟨}{\ensuremath{\langle}}
+\newunicodechar{⟩}{\ensuremath{\rangle}}
+\newunicodechar{…}{\ensuremath{\ldots}}
+\newunicodechar{◾}{\ensuremath{\blacksquare}}
+\newunicodechar{₀}{\textsubscript{0}}
+\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{₂}{\textsubscript{2}}
+\newunicodechar{′}{\textsuperscript{\prime}}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{minted}
+% gruvbox-light: the most hues of the styles that stay legible on white paper.
+\usemintedstyle{gruvbox-light}
+\setminted{fontsize=\footnotesize,frame=single,rulecolor=\color{black!30},
+           framesep=4pt,breaklines=true,baselinestretch=1.0}
+% A quoted frame is written \codeframe[linerange=lo-hi]{../path}: a line range of
+% a library file, with its comments removed, generated into frames/<key>.lean by
+% gen-frames.py; frames/lookup.tex maps the range to that file. A call site
+% therefore names the source it quotes and not the frame, and a range with no
+% generated frame is a build error rather than a silently missing box. Each frame
+% is one unbreakable box, so a frame that does not fit the space left on a page
+% moves to the next one.
+\input{frames/lookup.tex}
+% counts.tex holds the numbers both papers in this directory state about the
+% library and about their own panels. This paper's panel count is generated under
+% its own name and read below under \panelcount, so the prose says "panel" and
+% the numeral comes from the file; check-listings.py fails when that file is
+% stale. The companion paper's counts keep their own names.
+\input{counts.tex}
+\let\panelcount\loweringpanelcount
+\def\codeframe[linerange=#1-#2]#3{%
+  \edef\cfkey{cf@#3@#1-#2}%
+  \ifcsname\cfkey\endcsname\else
+    \PackageError{paper}{no generated frame for #3:#1-#2}%
+      {Run python3 gen-frames.py in Paper/.}\fi
+  \edef\cffile{frames/\csname\cfkey\endcsname.lean}%
+  \par\smallskip\noindent
+  \begin{minipage}{\linewidth}%
+    \inputminted{lean}{\cffile}%
+  \end{minipage}\par}
+% A path is set with \path so that it may break at its slashes.
+\usepackage{url}\urlstyle{same}
+% A frame is labelled with the file and lines it quotes:
+\newcommand{\sourceline}[3]{\par\smallskip\noindent\textbf{#1}\hfill
+  {\footnotesize\itshape\path{#2}, lines #3}\par\nobreak}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!55!black]{hyperref}
+\usepackage{cleveref}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}[definition]{Remark}
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{lemma}[definition]{Lemma}
+
+\newcommand{\lpure}{\textup{$\lambda$Pure}}
+\newcommand{\lrc}{\textup{$\lambda$RC}}
+\newcommand{\rc}{\mathrm{rc}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\lref}[1]{\code{#1}}
+\newcommand{\rulename}[1]{\textsc{#1}}
+
+\title{Reference count one at the write\\[2pt]
+\large The counted heap, the lowering, and the typing that puts the count there}
+\author{Gavin Mendel-Gleason\\\small Scidonia}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A reference-counted runtime updates an object in place exactly when its count is
+one. Implementations decide this at run time, because one compiled body serves
+owning and borrowing call sites; but the count is determined by which references
+the term and the surrounding structure hold, so it is a static property of the
+program. This paper formalises a pure core, a reference-counted target over a
+counted heap, and the lowering between them, and proves the pair that
+characterises the target's write: an owned store is destructive and keeps its
+location, a shared store copies. That pair reads the count of a \emph{reference}
+in the term's own account of itself; a compiler reads a count of a \emph{name}.
+The second half of the paper closes the gap with a typing: the write's rule asks
+the subject's name to be owned exactly once in the store's environment and not
+borrowed, and the rules that bind a name ask a written name to be used exactly
+once in the scope that binds it and to be introduced for, or matched out of, a
+construction rather than another name. The programs a second holder of the cell
+would need --- the subject also used as the written value, an arm binding it
+twice, a use of it in a sibling position, and a binding of it to another name ---
+have no typing, each beside the same-shape program that has one. A correspondence
+between the typing's environment and the target's account reads the typing's
+count of a name into the write theorem's count of a reference, the injectivity
+that reading needs is derived rather than assumed where a run reaches it, and the
+two routes meet at one step of an accepted run. Everything is mechanised in Lean~4
+against the core library alone, with no evaluation by native decision and no
+foreign axiom. The lowering is proved total and deterministic, not correct; that
+is stated, and so is each thing measured or trusted rather than proved.
+\end{abstract}
+
+\section{Introduction: the count at a write}
+\label{sec:intro}
+
+Lean's values are immutable. The term \code{a.set! i v} denotes a new array: same
+length, same elements except at \code{i}. No term of the language can change a
+value that already exists, and no program can tell whether some other array
+happens to share a buffer with this one. The source language is pure, and the
+compiler is free to make it fast.
+
+The compiler is fast in a specific way. When the array \code{set!} is applied to
+has exactly one reference, the emitted code stores into that array's buffer and
+returns a pointer to the same buffer. When the array has two or more references,
+the emitted code allocates a copy and stores into that. Both implement the same
+value, so nothing about correctness depends on which one is chosen. What is at
+stake is allocation, and therefore speed.
+
+\paragraph{The count, and where it comes from.} A reference-counted runtime keeps
+one number per cell: the number of references to it. At a write to a cell, that
+number is the sum of two things --- the references the cell's own slots hold, plus
+the references held outside the heap by whatever is running. Those outside
+references are, at the moment of the write, the ones the term itself holds
+together with any handle the surrounding structure holds. That is a fact about the
+program and its data, not a reading taken from the machine: an implementation
+performs the same sum, per site, at run time.
+
+\paragraph{What a compiler reads per site.} One compiled body serves an owning call
+site and a borrowing one, so the decision cannot be made once and for all when the
+body is compiled. What the compiler emits is a test, and it decides the test at
+each site from what it can see there: how many times a variable is used, whether
+two names may denote one cell, and how an update is projected through a record's
+fields. The test is exact when the analysis is exact, and conservative otherwise.
+Nothing in this is specific to arrays: the same test guards any cell of a counted
+heap.
+
+\paragraph{The value.} An in-place update avoids an allocation and reuses the
+buffer. It is not an optimisation of the meaning of the program --- the meaning is
+the same either way --- it is an optimisation of the run.
+
+\paragraph{The crux.} The condition a write would like to hold --- that the cell it
+writes is the program's own, named nowhere else --- is a fact about the
+\emph{compiled code} and not about the meaning of the program. A source term has
+no way to state it: it is not a value, not a type, and not an equation. Getting it
+to hold where a programmer wants a write to land in place is therefore a
+\emph{discipline} on the source, and a discipline is what this paper builds after
+the target is characterised: a term is typed only when its writes are expressible
+on the target at all, and the typing is stated as a rule of the source so that the
+programmer can see which terms qualify. The count the target reads is still a
+count in a heap; the typing says which terms put the right count there.
+
+\paragraph{What this paper does, and how each claim is labelled.} Sections
+\ref{sec:pair} to \ref{sec:hypotheses} fix the mechanics: the counted heap, the
+pure source calculus, the lowering strategy, the reference-counted target, the
+account, and the pair of theorems that characterises the target's write. Section
+\ref{sec:typing} is the typing, with its four refusals beside their typed
+companions. Section \ref{sec:corr} reads the typing's count of a name into the
+write theorem's count of a reference, and shows why the injectivity that reading
+needs is necessary, and where it is derived rather than assumed. Section
+\ref{sec:run} reads the same statement at a configuration an accepted run reaches.
+Sections \ref{sec:trusted} and \ref{sec:future} state what is trusted and what is
+not proved, and place the work.
+
+Each claim below carries its status. \textbf{Proved} means a theorem of the
+library, quoted here as a checked line range rather than transcribed;
+\textbf{structural} means a fact the checked sources enforce without a single
+theorem stating it; \textbf{measured} means an observation taken by running
+compiled code; \textbf{trusted} means a link this development does not prove.
+
+\section{The condition, and the pair}
+\label{sec:pair}
+
+This section fixes everything the pair of theorems in \cref{sec:pair-statement}
+names. It is the mechanics the pair rests on: a counted heap with the two branches
+of its write (\cref{sec:heap}), the source calculus the lowering starts from
+(\cref{sec:source}), the lowering strategy (\cref{sec:lower}), the target's
+runtime over the same heap (\cref{sec:target}), the account that relates a term to
+the references it holds (\cref{sec:account}), and the two hypotheses the account
+cannot supply (\cref{sec:hypotheses}).
+
+\subsection{The pair}
+\label{sec:pair-statement}
+
+\noindent The write is destructive when its operand is owned once and nothing else
+names the cell; otherwise it copies. That is the pair proved here, and it is the
+only claim made about the target's write.
+
+%!check: theorem store_owned_is_destructive {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi}
+\sourceline{An owned store keeps its location}{Scidonia/RC/Ownership.lean}{559--564}
+\codeframe[linerange=559-564]{../Scidonia/RC/Ownership.lean}
+
+%!check: theorem store_shared_copies {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {y : Var}
+\sourceline{A shared store copies}{Scidonia/RC/Ownership.lean}{600--606}
+\codeframe[linerange=600-606]{../Scidonia/RC/Ownership.lean}
+
+\noindent \lref{Couple} is the coupling invariant (\cref{sec:account}),
+\lref{Owns} is the term-indexed account of the term's own references, \lref{expand
+m} is the reference list the account stands for, and \lref{update} is the heap's
+two-branch write (\cref{sec:heap}). The first theorem's conclusion is the
+destructive branch read back: the location still holds the written slots. The
+second's is the copying branch: the written slots are at a location the heap did
+not list, the old cell keeps its slots, and the old cell loses a reference. The
+two hypotheses the account cannot supply --- no slot and no run handle naming the
+cell --- are named rather than hidden (\cref{sec:hypotheses}).
+
+Read together the two theorems say: the write is in place exactly where the
+account counts the operand once. The second is what keeps the first from being
+vacuous, and \cref{sec:inj} exhibits the configuration that makes that precise: a
+subject a second reference names \emph{must} copy, or the update would be visible
+through the alias. A statement that every store is destructive is simply false,
+and the pair is the honest form of the claim.
+
+\subsection{The counted heap}
+\label{sec:heap}
+
+\noindent A cell holds the references its slots name and the count the runtime keeps
+for it; a heap lists the live cells.
+
+%!check: structure Cell where
+\sourceline{A cell, and a heap}{Scidonia/FracPerm/StateVar/RCHeap.lean}{156--172}
+\codeframe[linerange=156-172]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\noindent One reference names one cell, so the count a heap keeps at a reference is
+not a choice among cells.
+
+%!check: def CHeap.WF (c : CHeap) : Prop := (CHeap.refs c).Nodup
+\sourceline{Well-formedness, and liveness}{Scidonia/FracPerm/StateVar/RCHeap.lean}{329--337}
+\codeframe[linerange=329-337]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\noindent No live cell has count zero, because a release deallocates at zero. A
+cell's count is what it must be: its occurrences among the live cells' slots, plus
+the handles held outside the heap --- the references the running term holds.
+
+%!check: def Counted (c : CHeap) (handles : List Ref) : Prop :=
+\sourceline{What the counts mean}{Scidonia/FracPerm/StateVar/RCHeap.lean}{461--462}
+\codeframe[linerange=461-462]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\noindent The write branches on that count: at one the cell keeps its location (and
+the references its old slots held are dropped, cascading while any listed cell
+reaches zero), otherwise a fresh cell takes the written slots and the old cell
+loses a reference.
+
+%!check: def update (c : CHeap) (handles : List Ref) (r : Ref) (ks : List Ref) : CHeap × List Ref :=
+\sourceline{The heap's write, in two branches}{Scidonia/FracPerm/StateVar/RCHeap.lean}{1858--1863}
+\codeframe[linerange=1858-1863]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\noindent The two branches, as already proved of the heap: a destructive write is
+read back at the same location, a copying write at a location the heap did not list.
+
+%!check: theorem update_preserves_location_of_exclusive {c : CHeap} {handles : List Ref}
+\sourceline{The destructive branch}{Scidonia/FracPerm/StateVar/RCHeap.lean}{1945--1949}
+\codeframe[linerange=1945-1949]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+%!check: theorem update_copies_of_shared {c : CHeap} {handles : List Ref} (hc : Counted c handles)
+\sourceline{The copying branch}{Scidonia/FracPerm/StateVar/RCHeap.lean}{1973--1979}
+\codeframe[linerange=1973-1979]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\paragraph{Status.} Proved: both branches, at a heap that is well formed and at
+handles the counts are stated for.
+
+\subsection{The source calculus}
+\label{sec:source}
+
+\noindent One term type serves both calculi. Nodes are nullary, unary or binary; an
+$n$-ary node is a spine. The write is a subject, a slot index and a value.
+
+%!check: inductive Expr where
+\sourceline{One term type for both calculi}{Scidonia/RC/Syntax.lean}{110--136}
+\codeframe[linerange=110-136]{../Scidonia/RC/Syntax.lean}
+
+\noindent The source, \lref{Pure}, is the fragment with neither instruction.
+
+%!check: inductive Pure : Expr → Prop where
+\sourceline{The source fragment}{Scidonia/RC/Syntax.lean}{140--159}
+\codeframe[linerange=140-159]{../Scidonia/RC/Syntax.lean}
+
+\noindent The free-variable function and the closedness discipline are what make
+the substitution below sound: this is the discipline the source is used at.
+
+%!check: def uses : Expr → List Var
+\sourceline{Free occurrences, and closedness}{Scidonia/RC/Syntax.lean}{299--316}
+\codeframe[linerange=299-316]{../Scidonia/RC/Syntax.lean}
+
+\noindent Values are the canonical forms the reduction's rules match on.
+
+%!check: inductive Value : Expr → Prop where
+\sourceline{Values}{Scidonia/RC/Pure.lean}{151--161}
+\codeframe[linerange=151-161]{../Scidonia/RC/Pure.lean}
+
+\noindent The redexes: application of an abstraction, the two binders, a match on a
+value node, and the write read as a functional update.
+
+%!check: inductive Root : Expr → Expr → Prop where
+\sourceline{The redexes}{Scidonia/RC/Pure.lean}{698--710}
+\codeframe[linerange=698-710]{../Scidonia/RC/Pure.lean}
+
+\noindent The reduction is a redex, or a step in one of the contexts below. There
+is no rule inside a match's subject, a write's subject or a node's fields: the
+source is written so that those are values already.
+
+%!check: inductive Step : Expr → Expr → Prop where
+\sourceline{The reduction}{Scidonia/RC/Pure.lean}{716--725}
+\codeframe[linerange=716-725]{../Scidonia/RC/Pure.lean}
+
+%!check: inductive Ectx where
+\sourceline{The contexts the source steps in}{Scidonia/RC/Pure.lean}{837--845}
+\codeframe[linerange=837-845]{../Scidonia/RC/Pure.lean}
+
+\noindent Substitution is naive, and therefore capture free only on closed
+arguments.
+
+%!check: theorem uses_subst_of_closed : ∀ (e : Expr) (x : Var) (v : Expr), Pure e → Closed v →
+\sourceline{Substitution on closed arguments}{Scidonia/RC/Pure.lean}{538--539}
+\codeframe[linerange=538-539]{../Scidonia/RC/Pure.lean}
+
+\noindent The reduction is a function, which is what lets the lowering be one too.
+
+%!check: theorem step_deterministic : ∀ {e e₁ : Expr}, Step e e₁ →
+\sourceline{The contractum is unique}{Scidonia/RC/Pure.lean}{781--782}
+\codeframe[linerange=781-782]{../Scidonia/RC/Pure.lean}
+
+\paragraph{Status.} Proved: determinism, and that a step preserves closedness
+(\lref{step_preserves_closed}, beside the substitution law above).
+
+\subsection{The lowering}
+\label{sec:lower}
+
+\noindent A derivation relates a source term to its target under a borrowed and an
+owned multiset of occurrences. Availability is about names, not multiplicities: a
+name used twice may be fitting at one owned occurrence, and the strategy supplies
+the second use with a duplication.
+
+%!check: def Fits (Δ Γ : Occs) (e : Expr) : Prop := ∀ x ∈ uses e, x ∈ Γ ∨ x ∈ Δ
+\sourceline{Availability is about names}{Scidonia/RC/Lower.lean}{158}
+\codeframe[linerange=158-158]{../Scidonia/RC/Lower.lean}
+
+\noindent The relation: one rule per source construct. The splits are the functions
+\lref{claimEnv}, \lref{bindEnv} and \lref{armEnv} rather than an existential, and
+each rule's conclusion wraps its translation in \lref{wrap}, the prologue that
+duplicates and releases.
+
+%!check: inductive Lower : Occs → Occs → Expr → Expr → Prop where
+\sourceline{The lowering, one rule per construct}{Scidonia/RC/Lower.lean}{232--272}
+\codeframe[linerange=232-272]{../Scidonia/RC/Lower.lean}
+
+\noindent The relation is exactly the graph of the computable strategy
+\lref{lowerB} --- \lref{lowerB_sound} and \lref{lowerB_complete} are its two
+directions --- so the strategy's own properties are the relation's. It is total on
+the fragment and deterministic, and the second is why the splits are canonical:
+with an arbitrary split of a binding's environment the one required duplication
+could be placed in either subterm and the targets would differ.
+
+%!check: theorem lower_total {Δ Γ : Occs} {e : Expr} (hp : Pure e) (hfit : Fits Δ Γ e) :
+\sourceline{Totality}{Scidonia/RC/Lower.lean}{514--515}
+\codeframe[linerange=514-515]{../Scidonia/RC/Lower.lean}
+
+%!check: theorem lower_deterministic {Δ Γ : Occs} {e e₁ e₂ : Expr} (h₁ : Lower Δ Γ e e₁)
+\sourceline{Determinism}{Scidonia/RC/Lower.lean}{524--526}
+\codeframe[linerange=524-526]{../Scidonia/RC/Lower.lean}
+
+\paragraph{Status.} Proved. These are properties of the translation. Nothing here
+says the target computes what the source computes; that is
+\cref{sec:trusted}.
+
+\subsection{The target and its runtime}
+\label{sec:target}
+
+\noindent A configuration carries the heap, the handles the run holds, an
+environment from variables to references, the term's own account of its
+references, and the term. The environment is a list whose first pair for a name is
+the one the name names.
+
+%!check: abbrev TEnv := List (Var × Ref)
+\sourceline{The runtime environment}{Scidonia/RC/Target.lean}{102}
+\codeframe[linerange=102-102]{../Scidonia/RC/Target.lean}
+
+\noindent The term's own account is one pair per occurrence the term itself holds,
+and \lref{expand} projects the references it stands for --- the tags are not read
+by the counts.
+
+%!check: abbrev Multi := List (Var × Ref)
+\sourceline{The term's own account}{Scidonia/RC/Target.lean}{178--182}
+\codeframe[linerange=178-182]{../Scidonia/RC/Target.lean}
+
+\noindent Each instruction moves the account in step with the heap: a duplication
+increments the count and adds an occurrence, a release decrements, or deallocates
+at a count of one.
+
+%!check: inductive TStep :
+\sourceline{The count operations, as steps}{Scidonia/RC/Target.lean}{541--558}
+\codeframe[linerange=541-558]{../Scidonia/RC/Target.lean}
+
+\noindent The write is the heap's own \lref{update}, given the account as outside
+handles in addition to the run's. Its two rules are the two branches of
+\lref{update}, and the only difference between them is the count.
+
+%!check: | storeExclusive {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {y : Var} {i : Nat}
+\sourceline{The two store rules}{Scidonia/RC/Target.lean}{603--625}
+\codeframe[linerange=603-625]{../Scidonia/RC/Target.lean}
+
+\noindent Each of the two reads the subject's occurrence out of the term's own
+account (\lref{hsub}), so an account that does not hold it cannot step. The
+position of the write in the tree arrives through the context, not through the
+typing: the positions the runtime steps in are the contexts below.
+
+%!check: inductive TCtx where
+\sourceline{The positions the target steps in}{Scidonia/RC/Target.lean}{671--685}
+\codeframe[linerange=671-685]{../Scidonia/RC/Target.lean}
+
+%!check: theorem tstep_of_plug : ∀ {E : TCtx} {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi}
+\sourceline{A step inside a well-formed context is a step}{Scidonia/RC/Target.lean}{719--722}
+\codeframe[linerange=719-722]{../Scidonia/RC/Target.lean}
+
+\paragraph{Status.} Proved: that the congruence rules are these contexts one by
+one, which \lref{tstep_of_plug} states for a well-formed context.
+
+\subsection{The account}
+\label{sec:account}
+
+\noindent Exact tagging: each pair names the reference its variable is bound to,
+not merely some reference. The weaker reading admits a mis-tagged pair and makes
+the theorems below arithmetic.
+
+%!check: def Bound (ρ : TEnv) (m : Multi) : Prop := ∀ p ∈ m, ρ.lookup p.1 = some p.2
+\sourceline{Exact tagging}{Scidonia/RC/Ownership.lean}{116}
+\codeframe[linerange=116-116]{../Scidonia/RC/Ownership.lean}
+
+\noindent The account is of the term: each consuming instruction reads its
+occurrence out of it, and a store reads the occurrence its subject names.
+
+%!check: inductive Owns (ρ : TEnv) : Multi → Expr → Prop where
+\sourceline{The account is of the term}{Scidonia/RC/Target.lean}{417--435}
+\codeframe[linerange=417-435]{../Scidonia/RC/Target.lean}
+
+\noindent The coupling invariant: the term's own references are handles. That is
+the whole content of the middle conjunct.
+
+%!check: def Couple (c : CHeap) (hs : List Ref) (ρ : TEnv) (m : Multi) : Prop :=
+\sourceline{The coupling invariant}{Scidonia/RC/Ownership.lean}{161--162}
+\codeframe[linerange=161-162]{../Scidonia/RC/Ownership.lean}
+
+\noindent Every step preserves it, contexts included.
+
+%!check: theorem couple_step {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {e : Expr}
+\sourceline{The invariant is preserved}{Scidonia/RC/Ownership.lean}{489--491}
+\codeframe[linerange=489-491]{../Scidonia/RC/Ownership.lean}
+
+\paragraph{Status.} Proved, for the relation's steps.
+
+\subsection{The two hypotheses, and where they come from}
+\label{sec:hypotheses}
+
+\noindent \lref{store_owned_is_destructive} cannot derive, from the account, that
+no heap slot and no run handle names the cell. Both are what a nested update's
+take-out provides: at a write the run resolves a cell, takes the element out of
+the slot the write lands at, holds it as a handle, and checks that cell before
+recursing --- so the addressed cell has no slot naming it, and the run's own
+handle is the only name on it.
+
+%!check: theorem exclusive_head {c : CHeap} {hs : List Ref} {r : Ref}
+\sourceline{The focus check is what the pair names}{Scidonia/FracPerm/StateVar/Run.lean}{1019--1021}
+\codeframe[linerange=1019-1021]{../Scidonia/FracPerm/StateVar/Run.lean}
+
+\noindent The take-out also pairs the extracted occurrence with a handle and drops
+that handle before the focus check, which is what leaves the cell exclusive again
+at the count of one the write needs.
+
+%!check: theorem takeout_dropped_count_one {c : CHeap} {e : Ref} (hc : Counted c [e, e])
+\sourceline{The take-out's own arithmetic}{Scidonia/FracPerm/StateVar/RCHeap.lean}{2082--2085}
+\codeframe[linerange=2082-2085]{../Scidonia/FracPerm/StateVar/RCHeap.lean}
+
+\noindent The mechanisation names the two surviving facts among the theorem's
+hypotheses rather than deriving them, and cites the take-out lemmas that supply
+them. \cref{sec:run} reads the same two facts off a write step of an accepted run.
+
+\section{The typing}
+\label{sec:typing}
+
+The pair of \cref{sec:pair-statement} counts a \emph{reference} in the term's own
+account. A compiler counting at a site counts the occurrences of a \emph{name} in
+the environment that site is compiled in. The two agree only because the target's
+accounts happen to be injective on references, and nothing in the source language
+says they are. What the source needs, and what this section builds, is a judgement
+that admits a write only where the environment gives its subject exactly one
+occurrence, and that refuses the shapes where a second holder of the cell exists.
+
+\noindent The judgement is the lowering's own environment discipline read as a
+typing: the same clauses over the same canonical splits, one rule per source
+construct, no target term, the write's clause strengthened to what a destructive
+write needs, and two further conditions on the name a write's subject carries.
+
+\subsection{The write's clause}
+\label{sec:clause}
+
+\noindent The write's rule is the only place where multiplicity and not membership
+is read. It requires the subject's variable to be owned exactly once in the
+environment of the store and not borrowed.
+
+%!check: | var {Δ Γ : Occs} {x : Var} (h : x ∈ Γ ∨ x ∈ Δ) : Typed Δ Γ (.var x)
+\sourceline{A variable is typed where an environment supplies it}{Scidonia/RC/Typing.lean}{255--264}
+\codeframe[linerange=255-264]{../Scidonia/RC/Typing.lean}
+
+%!check: | store {Δ Γ : Occs} {y : Var} {i : Nat} {v : Expr} (hown : Γ.count y = 1)
+\sourceline{The write's clause}{Scidonia/RC/Typing.lean}{299--301}
+\codeframe[linerange=299-301]{../Scidonia/RC/Typing.lean}
+
+\noindent \lref{Γ.count y = 1} is a count of the subject's \emph{name} in the
+store's environment, and \lref{y ∉ Δ} says the name is not borrowed there. Three
+readings of one judgement follow from it, and the first is the one the theorems
+above are read through: every write in a typed term has, at the environment the
+typing assigns its position, a subject owned exactly once there and not borrowed.
+That is the traversal \lref{WriteOwned}, whose recursion is the typing's own.
+
+%!check: def WriteOwned (Δ Γ : Occs) : Expr → Prop
+\sourceline{Every write's subject is owned once, carried by a traversal}{Scidonia/RC/Typing.lean}{313--331}
+\codeframe[linerange=313-331]{../Scidonia/RC/Typing.lean}
+
+\paragraph{Status.} Proved. \lref{typed_write_owned} carries the traversal over a
+typed term, and \lref{typed_lowers} shows a typed term is one the lowering strategy
+answers from the same environments: the typing is a restriction of the discipline
+the lowering walks, and not a second discipline beside it.
+
+\subsection{The two conditions a written name carries}
+\label{sec:names}
+
+\noindent The clause above reads the environment \emph{at the store}, and an
+environment is a filter of its parent's, so a name's occurrences are claimed
+separately by each position that uses them: shares overlap, and a sibling's use of
+the subject's name is not counted at the store. A term whose write's subject is
+also used in a sibling position therefore meets the write's clause --- the store's
+own occurrence is the subject's --- while the program as a whole uses the subject's
+name twice, and the lowering supplies the sibling's use with a duplication. Read at
+the store's environment alone, the typing cannot see the program's multiplicity, so
+two further conditions are needed, and both are side conditions of the rules that
+\emph{bind} the name.
+
+\noindent The first: a written name is used exactly once in the scope that binds
+it, and it is introduced for, or matched out of, a construction rather than another
+name. For a binding, both conditions sit on the rule.
+
+%!check: | bind {Δ Γ : Occs} {x : Var} {e₁ e₂ : Expr}
+\sourceline{Both conditions, on a binding}{Scidonia/RC/Typing.lean}{273--277}
+\codeframe[linerange=273-277]{../Scidonia/RC/Typing.lean}
+
+\noindent For a matching arm, they are carried for each of the arm's binders, and
+the construction the name is matched out of is the matched subject.
+
+%!check: | matchC {Δ Γ : Occs} {s : Expr} {c : Ctor} {ys : List Var} {body : Expr}
+\sourceline{Both conditions, on an arm}{Scidonia/RC/Typing.lean}{282--287}
+\codeframe[linerange=282-287]{../Scidonia/RC/Typing.lean}
+
+\noindent The first condition is what makes the \emph{program} use the bound name
+once in the scope that binds it, rather than counting only the store's share of the
+environment; \lref{writes} is the traversal the condition reads, true at a write
+whose subject is the free variable \lref{x} and stopped by a binder of \lref{x}.
+The second says the written name comes from a construction rather than another
+name: a binding's written name is bound to a node the program built and never to a
+variable, which would make the written name a second name beside that variable
+whatever cell it names. \lref{typed_write_linear} and \lref{typed_write_built}
+carry the two conditions over a typed term, as traversals in the style of
+\lref{WriteOwned}.
+
+\paragraph{Status.} Proved: the conditions are side conditions of the binding
+rules and are carried over typed terms, so the write's own clause and the two name
+conditions are three readings of one judgement.
+
+\subsection{The refusals, and their typed companions}
+\label{sec:refusals}
+
+\noindent Each shape in which a second holder of the cell exists has no typing, and
+each sits beside the same-shape program that has one. The eight programs are these.
+
+%!check: def siblingUse : Expr := .lam 0 (.con1 7 (.con2 8 (.store (.var 0) 0 (.con0 9)) (.var 0)))
+\sourceline{The eight programs}{Scidonia/RC/Typing.lean}{541--572}
+\codeframe[linerange=541-572]{../Scidonia/RC/Typing.lean}
+
+\paragraph{The subject is also the written value.} The store's environment carries
+two occurrences of the subject's name, and the write's clause asks for one.
+
+%!check: theorem dupValue_no_typing : ¬ Typed [] [] dupValue := by
+\sourceline{The subject used twice: no typing}{Scidonia/RC/Typing.lean}{577}
+\codeframe[linerange=577-577]{../Scidonia/RC/Typing.lean}
+
+%!check: theorem ownedValue_typed : Typed [] [] ownedValue := by
+\sourceline{The same shape, the subject used once}{Scidonia/RC/Typing.lean}{597}
+\codeframe[linerange=597-597]{../Scidonia/RC/Typing.lean}
+
+\paragraph{An arm binds the subject twice.} The subject is supplied twice by the
+binder list, so the body uses the bound name twice.
+
+%!check: theorem dupArm_no_typing : ¬ Typed [] [] dupArm := by
+\sourceline{The arm binding it twice: no typing}{Scidonia/RC/Typing.lean}{588}
+\codeframe[linerange=588-588]{../Scidonia/RC/Typing.lean}
+
+%!check: theorem ownedArm_typed : Typed [] [] ownedArm := by
+\sourceline{The same arm, binding it once}{Scidonia/RC/Typing.lean}{605}
+\codeframe[linerange=605-605]{../Scidonia/RC/Typing.lean}
+
+\paragraph{A sibling use.} The store's own clause is met --- the sibling's use is
+not counted at the store --- and the program still uses the subject's name twice,
+so the first name condition refuses it. This is the refutation that the store's own
+environment alone cannot give, and its companion writes through the name and does
+not use it elsewhere.
+
+%!check: theorem sibling_use_no_typing : ¬ Typed [] [] siblingUse := by
+\sourceline{A sibling use: no typing}{Scidonia/RC/Typing.lean}{626}
+\codeframe[linerange=626-626]{../Scidonia/RC/Typing.lean}
+
+%!check: theorem sibling_use_owned : Typed [] [] siblingOwned := by
+\sourceline{The same program, using the name once}{Scidonia/RC/Typing.lean}{642}
+\codeframe[linerange=642-642]{../Scidonia/RC/Typing.lean}
+
+\paragraph{An alias binding.} A binding's written name is bound to another name, so
+the written name is a second name beside it whatever cell it names. The refutation
+is at every environment, because the condition is a statement about the term, and
+its companion binds the name to a node the program built.
+
+%!check: theorem alias_bind_no_typing {Δ Γ : Occs} {x z : Var} {i : Nat} {v : Expr} :
+\sourceline{A binding to another name: no typing}{Scidonia/RC/Typing.lean}{655--656}
+\codeframe[linerange=655-656]{../Scidonia/RC/Typing.lean}
+
+%!check: theorem built_bind_typed : Typed [] [] builtBind := by
+\sourceline{The same binding, to a construction}{Scidonia/RC/Typing.lean}{667}
+\codeframe[linerange=667-667]{../Scidonia/RC/Typing.lean}
+
+\paragraph{The reading.} The shapes where a second holder of the cell exists have
+\emph{no} typing, and each beside its companion shows why: the companions differ
+from the refuted programs in nothing but the multiplicity of the subject's name or
+the shape of what binds it. A write is therefore only expressible where the cell is
+the program's own --- which is exactly the condition the target's destructive branch
+asks the account for, in the source's own vocabulary. \lref{dup_no_typing} and
+\lref{drop_no_typing} record the other half: a resource instruction has no rule, so
+a typed term mentions neither.
+
+\subsection{What the conditions do not reach}
+\label{sec:reach}
+
+\noindent The two conditions are stated of the rules that bind a name \emph{within}
+the term, and a written name may be one the term binds nowhere. As the module says
+of its own limitation: a subject that is a free variable of the term is the
+environment's, and the store rule admits it wherever the environment holds it once
+and it is not borrowed; an abstraction's name is bound to the argument an
+application supplies, and no side condition of an abstraction or an application can
+see that argument's shape; and a matching arm's binder names a \emph{field} of the
+matched cell, and a field that is itself a name is a second name for that name's
+cell. Those cases --- together with the write reached through a nested update, where
+the cell's count of one and the absence of any other name for it are facts the
+take-out provides and \lref{store_owned_is_destructive} names among its hypotheses
+rather than deriving --- remain outside the judgement.
+
+What is proved is the name side of the write: where the term itself binds the name
+a subject carries, that name is used exactly once in the scope that binds it and is
+introduced for, or matched out of, a construction.
+
+\paragraph{Status.} Proved, of the rules the term itself carries, and explicitly
+not of the three cases above.
+
+\subsection{The typing is a statement about the source}
+\label{sec:at-source}
+
+\noindent A target-side sufficient condition --- a judgement over the target's own
+relation, asking at a store for the two hypotheses the write theorem needs --- is
+the obvious other route, and it is not the one taken. It is refuted by the
+lowering's own prologue: \lref{Runs} demands of a binding whose bound term is a
+value that the continuation run at every reference the binder could take, and at
+the well-built reference the account counts that reference three times.
+
+%!check: theorem runs_store_owned {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
+\sourceline{A target-side condition, and what it costs}{Scidonia/RC/Discipline.lean}{403--405}
+\codeframe[linerange=403-405]{../Scidonia/RC/Discipline.lean}
+
+\noindent A source term the strategy walks and its canonical lowering are one pair
+of witnesses to that:
+
+%!check: def source : Expr := .bind 0 (.con2 7 (.var 1) (.var 2)) (.store (.var 0) 0 (.var 2))
+\sourceline{A source term and its canonical lowering}{ScidoniaTest/Target.lean}{505--510}
+\codeframe[linerange=505-510]{../ScidoniaTest/Target.lean}
+
+%!check: theorem source_typed : Typed [] [0, 1, 2] source := by
+\sourceline{The source is typed}{ScidoniaTest/Target.lean}{597}
+\codeframe[linerange=597-597]{../ScidoniaTest/Target.lean}
+
+%!check: theorem lowered_not_runs : ¬ Runs env0 [(0, 0), (1, 1), (2, 2)] lowered := by
+\sourceline{The lowering is not judged}{ScidoniaTest/Target.lean}{666}
+\codeframe[linerange=666-666]{../ScidoniaTest/Target.lean}
+
+\noindent The typing holds at the environments the strategy walks, and the
+target-side judgement does not hold at the lowering --- which is why the typing is
+stated at the source, where the rules that bind a written name are visible, rather
+than at the target, where the prologue's duplication has already hidden the
+program's multiplicity behind an account.
+
+\section{From names to the count}
+\label{sec:corr}
+
+The typing counts names in an environment; the write theorem of
+\cref{sec:pair-statement} counts a reference in the term's own account. The link
+between them is a correspondence between the target's environment \lref{ρ}, the
+term's own account \lref{m} and the typing's environment \lref{Γ}.
+
+\subsection{The correspondence}
+\label{sec:bridge}
+
+\noindent The correspondence has three clauses: every pair of the account names
+the reference the environment binds its name to, the account's multiplicity at each
+name is the typing's count of that name, and the account's tags are injective on
+references.
+
+%!check: structure Corr (ρ : TEnv) (m : Multi) (Γ : Occs) : Prop where
+\sourceline{The correspondence}{Scidonia/RC/Correspondence.lean}{129--136}
+\codeframe[linerange=129-136]{../Scidonia/RC/Correspondence.lean}
+
+\noindent The first two clauses are already enough for half of the write theorem's
+premises: the account's occurrence of the subject's name and the environment's
+reading of it give the term-indexed account \lref{Owns}. This half needs no
+injectivity, and it is why the countermodel of \cref{sec:inj} separates on the
+count of the reference and not on the occurrence.
+
+%!check: theorem owns_of_correspondence {ρ : TEnv} {m : Multi} {Γ : Occs} {y : Var} {r : Ref}
+\sourceline{Half the bridge, without injectivity}{Scidonia/RC/Correspondence.lean}{292--295}
+\codeframe[linerange=292-295]{../Scidonia/RC/Correspondence.lean}
+
+\noindent The third clause is what turns the typing's count of a \emph{name} into
+the write theorem's count of a \emph{reference}: the account has one pair for the
+name, and an injective account puts no second name on that pair's reference.
+
+%!check: theorem bridge {ρ : TEnv} {m : Multi} {Γ : Occs} {y : Var} {r : Ref} {i : Nat} {v : Expr}
+\sourceline{The bridge}{Scidonia/RC/Correspondence.lean}{305--307}
+\codeframe[linerange=305-307]{../Scidonia/RC/Correspondence.lean}
+
+\noindent Composed with the write theorem, a store typed at \lref{Γ} whose
+environment counts its subject once, at a configuration corresponding in the sense
+of \lref{Corr}, is destructive.
+
+%!check: theorem store_destructive_of_typed {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi}
+\sourceline{A typed store is destructive}{Scidonia/RC/Correspondence.lean}{435--440}
+\codeframe[linerange=435-440]{../Scidonia/RC/Correspondence.lean}
+
+\noindent Its hypotheses \lref{hslot}, \lref{hrun} and \lref{hks} are the write
+theorem's own, named there as what the discipline's take-out provides and what the
+write rule's check demands; the conclusion is that theorem's. \lref{bridge} reads
+the typing's own write clause off the derivation (\lref{Typed.store_count}), so no
+injectivity is an input of this theorem's either --- it is supplied by \lref{Corr},
+and \cref{sec:takeout} is where that clause comes from at a run.
+
+\paragraph{Status.} Proved.
+
+\subsection{The injectivity is necessary}
+\label{sec:inj}
+
+\noindent The injectivity clause is the one neither the typing nor the coupling
+supplies, and the configuration that separates them is two names naming one
+reference: the store is typed there, the account is \lref{Bound} and inside
+\lref{Couple}, the account's multiplicity at the subject's name is the typing's
+count of it, and the reference is still counted twice. So the count of one does not
+follow from the judgement and the invariant together.
+
+%!check: theorem couple_does_not_give_count_one :
+\sourceline{The whole invariant, and the count of two}{Scidonia/RC/Correspondence.lean}{404--408}
+\codeframe[linerange=404-408]{../Scidonia/RC/Correspondence.lean}
+
+\noindent Only \lref{RefInj} refuses that configuration, and the module exhibits
+the refusal beside the three facts that do not (\lref{alias_typed},
+\lref{alias_couple}, \lref{alias_not_inj}, with the reference count of two read at
+\lref{alias_ref_count_two}). What would supply the clause on the environment's side
+is a distinctness or freshness condition on the environment the program starts
+from; the next subsection is where the run supplies it instead.
+
+\paragraph{Status.} Proved: the countermodel is a theorem, and so is the failure
+of the count of one at it.
+
+\subsection{The injectivity at a take-out}
+\label{sec:takeout}
+
+\noindent At a nested write the injectivity is not an input. The run's counting at
+the take-out's level, beside the coupling's own counting of one heap, forces the
+account's references to be the one occurrence the take-out extracted.
+
+%!check: theorem expand_eq_singleton_of_counted {c : CHeap} {hs : List Ref} {m : Multi} {e : Ref}
+\sourceline{Two countings force the account's references}{Scidonia/RC/Transfer.lean}{233--235}
+\codeframe[linerange=233-235]{../Scidonia/RC/Transfer.lean}
+
+\noindent And an account whose references are a single occurrence is injective
+whatever names its pairs carry.
+
+%!check: theorem refInj_of_counted {c : CHeap} {hs : List Ref} {m : Multi} {e : Ref}
+\sourceline{And one occurrence is injective}{Scidonia/RC/Transfer.lean}{264--265}
+\codeframe[linerange=264-265]{../Scidonia/RC/Transfer.lean}
+
+\noindent So at a take-out the injectivity is \emph{derived}, not assumed: the
+take-out pins the account's size, and a one-pair account cannot name a reference
+twice. The boundary is sharp, and the library states it too: two accounts with the
+same references are one configuration to the run's side --- the same count at every
+heap and handle list --- and one of them names a reference twice.
+
+%!check: theorem refInj_not_determined :
+\sourceline{The run's side does not determine the injectivity}{Scidonia/RC/Transfer.lean}{338--340}
+\codeframe[linerange=338-340]{../Scidonia/RC/Transfer.lean}
+
+\paragraph{Status.} Proved. The reading is exact in both directions: injectivity is
+necessary (\cref{sec:inj}) and it is not a function of the references alone.
+
+\section{Reading a run through it}
+\label{sec:run}
+
+The composition above is a statement about a configuration, and a run is a sequence
+of them. This section reads the two routes at one step: the typing's route to the
+write theorem, and the run model's own write step.
+
+\noindent At a nested write the take-out has emptied the slot the write lands at and
+holds the extracted occurrence as a handle, so the run's handle list is that
+occurrence followed by the outer handles while the coupling's split is the outer
+handles followed by the account's references. The two read the same references
+exactly when the account is the extracted occurrence, and that is the coupling the
+take-out hands the nested write.
+
+%!check: theorem couple_of_takeout {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {r : Ref}
+\sourceline{The coupling the take-out hands the nested write}{Scidonia/RC/Transfer.lean}{415--420}
+\codeframe[linerange=415-420]{../Scidonia/RC/Transfer.lean}
+
+\noindent The account is read \emph{out of} the run's handle list rather than added
+beside it, which is why the coupling's handles are the run's own
+(\lref{couple_at_run_handles_is_empty} at the coupling's split). The account's
+identity is that theorem's hypothesis, since it is the coupling being built; where
+an already-built coupling is at hand the identity is derived instead, from that
+coupling's own counting beside the run's (\cref{sec:takeout}).
+
+%!check: theorem writeStep_nested_destructive_of_couple {root : Ref} {c : CHeap} {hs : List Ref}
+\sourceline{A write step of an accepted run, read through the coupling}{Scidonia/RC/Transfer.lean}{507--519}
+\codeframe[linerange=507-519]{../Scidonia/RC/Transfer.lean}
+
+\noindent A write step of an accepted configuration, its take-out, the account
+through the coupling, and the schema's own checks are the write theorem's two
+premises, so the destructive branch at the nested subject is a statement about that
+step, with \lref{Run.writeStep_spec}'s own result beside it. The correspondence's
+injectivity clause is built from the two countings rather than carried
+(\lref{store_destructive_of_corr}). At a write whose path's level is its last, the
+recursion's entry is the write's own subject and the leaf's check supplies the write
+rule's premise on the written slots, so the two routes' conclusions are about one
+cell.
+
+%!check: theorem writeStep_subject_destructive_of_couple {root : Ref} {c : CHeap} {hs : List Ref}
+\sourceline{The two routes at one cell}{Scidonia/RC/Transfer.lean}{540--552}
+\codeframe[linerange=540-552]{../Scidonia/RC/Transfer.lean}
+
+\paragraph{What this does, and what it does not.} It links the typing's route to the
+run's route at one step of an accepted run. The induction over a whole program's
+steps is the run model's own (\lref{Run.every_write_step_keeps_its_address}, the
+per-run statement that a write's address holds the written slots afterwards, and
+\lref{Run.writeStep_lands}, its per-step form), and neither of those is read through
+the coupling. What is not built is that induction \emph{carrying the coupling}: the
+run model's configurations carry no term, so the account the coupling relates to is
+the caller's, and its term-side facts --- that the account's pairs name what the
+environment binds them to, and that the account is the extracted occurrence --- are
+supplied at the step rather than carried through the run.
+
+\section{What is trusted, and what is not proved}
+\label{sec:trusted}
+
+\noindent \textbf{What is trusted.} Three links, each with an exact boundary.
+
+\emph{The take-out's contribution.} That a nested update's cell has no slot and no
+handle naming it is a property of the nesting, and is taken here as the two named
+hypotheses of \lref{store_owned_is_destructive}; \cref{sec:hypotheses} is where the
+run supplies them, and \cref{sec:run} is where they are read off a step.
+
+\emph{The compiler's lowering.} That a compiler turns a language's write paths into
+the shape modelled here is not proved. In the accompanying repository that link is
+\emph{checked} by reading the post-reference-counting intermediate representation
+the pinned toolchain emits and asserting the shape on one executing path, failing
+the build when it does not hold.
+
+\emph{The runtime's primitive.} The branch that stores in place is a runtime test
+whose meaning is documented in the runtime and not modelled here. The counted model
+states the predicate a write tests.
+
+%!check: def IsExclusive (rc : Int32) : Prop := isSt rc ∧ rc = 1
+\sourceline{The predicate a write tests, at a count}{Scidonia/FracPerm/StateVar/RefCount.lean}{720}
+\codeframe[linerange=720-720]{../Scidonia/FracPerm/StateVar/RefCount.lean}
+
+\noindent The model's count of one is not the machine's test in either direction,
+and the difference is stated where it matters: the count's module says of the
+store's run-time primitive that its effect on the count is an \emph{assumption} at
+the one place the development needs it, labelled as such, and its write-path
+theorem carries exactly those assumptions as hypotheses.
+
+%!check: theorem takeOut_refCount_eq_one (rc0 rc1 rc2 : Int32)
+\sourceline{The write path's hypotheses are assumptions}{Scidonia/FracPerm/StateVar/RefCount.lean}{819--823}
+\codeframe[linerange=819-823]{../Scidonia/FracPerm/StateVar/RefCount.lean}
+
+\noindent \emph{The in-place check.} The check a client can turn on is instrumented
+and measured, not proved. In the logic it is the identity, so no specification
+mentions it; its compiled implementation reports and exits when the object it is
+given is not exclusively owned.
+
+%!check: @[implemented_by assertExclusiveImpl]
+\sourceline{The in-place check: the identity in the logic}{Scidonia/FracPerm/InPlace.lean}{92--93}
+\codeframe[linerange=92-93]{../Scidonia/FracPerm/InPlace.lean}
+
+\noindent It is measured on compiled code by the repository's own harness, which
+runs a program under the check and reports the sites where an update would have
+copied. That an update copies at such a site is a fact about the run that was
+observed, not a theorem about the program.
+
+\paragraph{The access-shape limit.} The store of \cref{sec:source} addresses one
+index into a cell, and depth arrives through the term: the target's write rules are
+read at the cell a variable names, and a nested write's path is a context over the
+relation rather than a form of the term. A nested write's uniqueness is therefore
+supplied by the take-out (\cref{sec:hypotheses}) and not by the typing, which is the
+honest scope of \cref{sec:typing}: the typing speaks of the writes the term
+addresses directly.
+
+\noindent \textbf{What is not proved.} The lowering's semantic correctness: no
+theorem says the target computes what the source computes, or that it is garbage
+free. What is proved of the lowering is totality and determinism. The declarative
+relation of the literature is not the one formalised here: the strategy's splits
+are canonical, for determinism, so the results are properties of \emph{this}
+strategy, which is what a compiler implements. And nothing here is about a
+compiled program: the references are names in a list, not addresses.
+
+\section{Mechanisation, and related work}
+\label{sec:future}
+
+\noindent The library publishes \theoremcount{} public theorems under
+\code{Scidonia/}, of which \vendoredtheoremcount{} are vendored from Lean's own
+model of the count. This paper quotes \panelcount{} panels of it, and every one is
+a line range of the source rather than a transcription: the range is generated into
+a frame with its comments removed, a \code{\%!check:} directive names a fragment
+the range must contain, and \code{check-listings.py} fails when either has drifted.
+The counts the prose states are read from a generated file, so a count that moves
+with the library is regenerated rather than corrected by hand.
+
+The development is a few thousand lines of Lean~4 against the core library only,
+with no mathematics library dependency. There is no \code{sorry}, no evaluation by
+native decision, and every representative theorem's axiom list is asserted, so a
+proof that acquired a foreign axiom fails the build. Two design facts the
+formalisation forced are recorded as toolchain facts: terms are a flat inductive,
+because a nested one cannot be inducted on or derive decidable equality; and an
+evaluated check needs a structural recursion, because the kernel does not reduce a
+well-founded one.
+
+\noindent \textbf{Reference counting with reuse.} In-place update of a shared value,
+and the precise counting with ownership that makes it possible, is the design of
+Lean~4's runtime \cite{ullrich19counting} and is formalised as the linear resource
+calculus $\lambda^1$ in the Pe\TeX{} paper \cite{reinking21perceus}, which proves
+the counting sound and garbage free. This development follows that shape and
+differs where this paper's subject differs: the deliverable is the count at the
+write, as a pair, with the hypotheses the account cannot supply named; a typing that
+puts the count where a write needs it, with the shapes a second holder would need
+refuted; and the translation is a canonical strategy rather than the declarative
+relation.
+
+\noindent \textbf{Linearity, and formal models of counting.} An ordinary type system
+does not track uniqueness: Linear Haskell \cite{bernardy18linear} gives a linear
+arrow, and its guarantee is about the use of a value, not about a count in a heap.
+A formal model of reference counting for code generation appears in F\'erey and
+Shankar \cite{ferrey16codegen}. Neither is a count-one guarantee for a write, and
+neither is stated as a condition on the name a write's subject carries.
+
+\noindent \textbf{Future work.} Three steps: the lowering's semantic correctness
+(result agreement and garbage freedom); carrying the coupling through a run's steps,
+which needs the run model's configurations to carry the term, so that the two
+routes of \cref{sec:run} compose over a whole program rather than at one step; and
+a verified account, or a soundness theorem for the check, of the compiler's pass.
+
+\begin{thebibliography}{9}
+
+\bibitem{ullrich19counting}
+Sebastian Ullrich and Leonardo de Moura.
+\newblock Counting immutable beans: reference counting optimized for purely
+functional programming.
+\newblock In \emph{Proceedings of the 31st Symposium on Implementation and
+Application of Functional Languages (IFL '19)}, 2019. arXiv:1908.05647.
+
+\bibitem{reinking21perceus}
+Alex Reinking, Ningning Xie, Leonardo de Moura, and Daan Leijen.
+\newblock Pe\TeX{}: garbage free reference counting with reuse.
+\newblock In \emph{Proceedings of the 42nd ACM SIGPLAN International Conference on
+Programming Language Design and Implementation (PLDI '21)}, 2021.
+\newblock Extended version: Microsoft Research Technical Report MSR-TR-2020-42,
+which contains the proofs.
+
+\bibitem{bernardy18linear}
+Jean-Philippe Bernardy, Mathieu Boespflug, Ryan R. Newton, Simon Peyton Jones, and
+Arnaud Spiwack.
+\newblock Linear Haskell: practical linearity in a higher-order polymorphic
+language.
+\newblock In \emph{Proceedings of the 45th ACM SIGPLAN Symposium on Principles of
+Programming Languages (POPL '18)}, 2018.
+
+\bibitem{ferrey16codegen}
+Gaspard F\'erey and Natarajan Shankar.
+\newblock Code generation using a formal model of reference counting.
+\newblock In \emph{NASA Formal Methods (NFM 2016)}, pages 150--165, 2016.
+
+\bibitem{demoura21lean4}
+Leonardo de Moura and Sebastian Ullrich.
+\newblock The Lean 4 theorem prover and programming language.
+\newblock In \emph{Automated Deduction (CADE-28)}, 2021.
+
+\bibitem{scidonia-lean}
+Gavin Mendel-Gleason.
+\newblock The mechanisation of this paper, in the Scidonia \code{lean} repository:
+\code{Scidonia/RC/}, the counted heap in
+\code{Scidonia/FracPerm/StateVar/RCHeap.lean}, the run model in
+\code{Scidonia/FracPerm/StateVar/Run.lean}, the check in
+\code{Scidonia/FracPerm/InPlace.lean}, and the checks in
+\code{ScidoniaTest/Typing.lean}, \code{ScidoniaTest/Correspondence.lean},
+\code{ScidoniaTest/Transfer.lean} and \code{ScidoniaTest/Target.lean}.
+\newblock \url{https://github.com/scidonia/lean-examples}.
+
+\end{thebibliography}
+
+\end{document}

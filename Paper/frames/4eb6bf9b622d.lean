@@ -1,0 +1,11 @@
+inductive Pure : Expr → Prop where
+  | var (x : Var) : Pure (.var x)
+  | lam {x : Var} {body : Expr} (h : Pure body) : Pure (.lam x body)
+  | app {f a : Expr} (hf : Pure f) (ha : Pure a) : Pure (.app f a)
+  | bind {x : Var} {e₁ e₂ : Expr} (h₁ : Pure e₁) (h₂ : Pure e₂) : Pure (.bind x e₁ e₂)
+  | matchC {s : Expr} {c : Ctor} {ys : List Var} {body : Expr} (hs : Pure s)
+      (h : Pure body) : Pure (.matchC s c ys body)
+  | con0 (c : Ctor) : Pure (.con0 c)
+  | con1 {c : Ctor} {a : Expr} (h : Pure a) : Pure (.con1 c a)
+  | con2 {c : Ctor} {a b : Expr} (h₁ : Pure a) (h₂ : Pure b) : Pure (.con2 c a b)
+  | store {s : Expr} {i : Nat} {v : Expr} (hs : Pure s) (h : Pure v) : Pure (.store s i v)

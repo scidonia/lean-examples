@@ -37,13 +37,30 @@ CALL = re.compile(
 LAW = re.compile(
     r"\\lawframe\{(?P<path>[^}]*)\}\{(?P<lo>\d+)-(?P<hi>\d+)\}\{(?P<name>[^}]*)\}"
 )
+# The bracket argument of a frame call, in any shape, so that a call the pattern
+# above cannot resolve is seen rather than passed over.
+SHAPE = re.compile(r"\\codeframe\[linerange=([^\]]*)\]")
 
 
 def calls():
-    """Every frame the paper asks for, in source order and deduplicated."""
-    found = []
+    """Every frame the paper asks for, in source order and deduplicated, and every
+    frame call the generator cannot resolve.
+
+    A call is `\\codeframe[linerange=lo-hi]{path}`, with `lo == hi` for a single
+    line.  A shape-and-colour definition such as a `\\lawframe`'s body writes
+    `\\codeframe[linerange=#2]{../#1}`, whose argument is not a range at all, and
+    is not a call; a range that begins with a digit and is not `lo-hi` is one, and
+    has no frame.  The paper would meet it as a LaTeX error at best and a silently
+    missing box at worst, so it is reported here rather than skipped.
+    """
+    found, malformed = [], []
     for tex in sorted(HERE.glob("*.tex")):
         text = tex.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            for match in SHAPE.finditer(line):
+                arg = match.group(1)
+                if arg[:1].isdigit() and not re.fullmatch(r"\d+-\d+", arg):
+                    malformed.append(f"{tex.name}:{number}: {line.strip()}")
         for match in CALL.finditer(text):
             key = (match.group("path"), int(match.group("lo")), int(match.group("hi")))
             if key not in found:
@@ -53,7 +70,7 @@ def calls():
                    int(match.group("lo")), int(match.group("hi")))
             if key not in found:
                 found.append(key)
-    return found
+    return found, malformed
 
 
 def key_of(path: str, lo: int, hi: int) -> str:
@@ -65,8 +82,10 @@ def main(argv):
     out = HERE / "frames"
     out.mkdir(exist_ok=True)
 
-    wanted = calls()
+    wanted, malformed = calls()
     table, report, empty = [], [], []
+    for where in malformed:
+        report.append(f"MALFORMED FRAME CALL {where}")
     for path, lo, hi in wanted:
         module = (HERE / path).resolve()
         if not module.is_file():
@@ -98,6 +117,16 @@ def main(argv):
             f"\\expandafter\\def\\csname cf@{path}@{lo}-{hi}\\endcsname{{{key}}}"
             for path, lo, hi, key in table)
         (out / "lookup.tex").write_text(header + table_tex + "\n", encoding="utf-8")
+        # The directory is this script's output, so it holds the frames the papers
+        # ask for and nothing else: a frame no call names is a leftover from a range
+        # that has since moved, and leaving it would let an unread quote sit in the
+        # tree.  A moved range is therefore a deletion and an addition, not a second
+        # copy beside the first.
+        wanted = {f"{key}.lean" for _, _, _, key in table} | {"lookup.tex"}
+        for stale in sorted(out.glob("*.lean")):
+            if stale.name not in wanted:
+                stale.unlink()
+                report.append(f"  removed frames/{stale.name} (no call names it)")
 
     print(f"{len(table)} frames from {len({p for p, _, _, _ in table})} modules")
     for line in report:
@@ -106,7 +135,8 @@ def main(argv):
         print("EMPTY FRAMES:", empty)
     if dry:
         print("(dry run: nothing written)")
-    return 1 if empty or any("MISSING" in r or "PAST" in r for r in report) else 0
+    return 1 if empty or malformed or any(
+        "MISSING" in r or "PAST" in r for r in report) else 0
 
 
 if __name__ == "__main__":

@@ -23,6 +23,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PAPER = Path(__file__).resolve().parent
+# The two papers in this directory.  Each states its own panel count, so the
+# counts below are computed per source rather than over both at once.
+COMPANION = "unobservable-effects.tex"
+LOWERING = "lowering.tex"
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 ATTR = r"(?:@\[[^\]]*\]\s*)?"
 OPEN, CLOSE = "([{", ")]}"
@@ -249,35 +253,37 @@ def vendored_theorems():
                      f"vendored block at")
 
 
-def panel_counts():
-    """(panels in the body, panels in the appendix) the paper's sources ask for.
+def panel_counts(tex_name):
+    """(panels in the body, panels in the appendix) one paper's sources ask for.
 
     A panel is a `\\codeframe` call naming a range of the library; the body's are
-    the ones above `\\appendix`, and the appendix's are the ones below it.
+    the ones above `\\appendix`, and the appendix's are the ones below it. Each
+    paper's count is its own: two papers quote the library here, and a count that
+    mixed them would be a numeral neither paper could state.
     """
-    body = appendix = 0
-    for tex in sorted(PAPER.glob("*.tex")):
-        lines = tex.read_text(encoding="utf-8").splitlines()
-        end = next((i for i, line in enumerate(lines)
-                    if line.strip() == "\\appendix"), len(lines))
-        calls = [i for i, line in enumerate(lines) if CALL.search(line)]
-        body += sum(1 for i in calls if i <= end)
-        appendix += sum(1 for i in calls if i > end)
+    lines = (PAPER / tex_name).read_text(encoding="utf-8").splitlines()
+    end = next((i for i, line in enumerate(lines)
+                if line.strip() == "\\appendix"), len(lines))
+    calls = [i for i, line in enumerate(lines) if CALL.search(line)]
+    body = sum(1 for i in calls if i <= end)
+    appendix = sum(1 for i in calls if i > end)
     return body, appendix
 
 
 def counts():
-    """The numbers the paper's prose states, in the order the file writes them."""
-    body, appendix = panel_counts()
+    """The numbers the papers' prose states, in the order the file writes them."""
+    body, appendix = panel_counts(COMPANION)
+    lowering, _ = panel_counts(LOWERING)
     return [
         ("theoremcount", "public theorems under Scidonia/", published_theorems()),
         ("vendoredtheoremcount", "of them vendored from Lean's own model",
          vendored_theorems()),
         ("lawcount", "law statements the appendix reproduces", quoted_laws()),
-        ("panelcount", "panels the paper quotes", body + appendix),
+        ("panelcount", "panels the permission paper quotes", body + appendix),
         ("appendixpanelcount", "of them in the appendix", appendix),
         ("refcountframecount", "frames of the reference-count section",
          frames_from(REFCOUNT)),
+        ("loweringpanelcount", "panels the lowering paper quotes", lowering),
     ]
 
 
