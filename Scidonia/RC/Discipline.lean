@@ -1,62 +1,130 @@
 /-
-The discipline the target's write needs: what a term's own references *are*, the clause a
-write's subject has to satisfy, and the condition on the environment under which "once in
-the term" means "once in the account".
+The discipline the target's write needs: what it is for a term to be *run at an
+account*, the clause a write's subject has to satisfy under it, and the condition
+on the environment under which the account's count at the subject's cell is one.
 
-`Scidonia.RC.Ownership` states what the target's write does at a subject the term owns
-once and what it does otherwise, but its two premises --- the term's own occurrence of the
-subject (`Owns`) and the account counting that occurrence once --- are premises nothing in
-the development supplies. This module supplies them. It fixes what a term's account *is*:
-the term's free occurrences, read through the environment (`AccountOf`); the clause a
-write's subject has to satisfy (`WritesOwned`: the subject is a variable, and it occurs
-exactly once among the term's free variables); and the condition on the environment under
-which "once in the term" means "once in the account" (`InjectiveOn`: distinct free
-variables of the term name distinct references). `WellFormed` is the three together.
+`Scidonia.RC.Ownership` states what the target's write does at a subject the term
+owns once and what it does otherwise, but its two premises --- the term's own
+occurrence of the subject (`Owns`) and the account counting that occurrence once
+--- are premises nothing in the development supplies. This module supplies them, as
+a *judgement* of the term against the account rather than as an identity between
+the account and a computation on the term's free variables.
 
-**The account is the term's own references.** `Scidonia.RC.uses` gives the term's free
-occurrences as a multiset in list form; `refsOf` reads a list of names at the references
-the environment binds them to, and `pairsOf` reads the same list at the pairs --- the name
-and its reference --- which is what makes a *pair*, and not merely a count, readable out
-of the account. `AccountOf` says the account's references are the term's free occurrences
-read through the environment (the clause `Ownership`'s store theorems are stated about),
-that the account's pairs are pairs the term's own occurrences name (so the account's tags
-are the term's names, and `Ownership`'s `Bound` follows), and that the environment reads
-every free variable of the term. A count alone is not enough for a store: it says how many
-occurrences name a reference, not which variable holds it, and `Owns` needs the pair.
+**Why a judgement, and not an identity.** The reading this module replaces fixes
+the account as the term's free occurrences read through the environment: `uses`
+gives the term's free occurrences, `refsOf` reads a list of names at the references
+the environment binds them to, and the account is required to *be* that list. The
+runtime's own rules refute it. A `dup y; e` *supplies* an occurrence: the rule
+leaves the account one occurrence above the body's own, because `uses` had already
+counted the instruction's own name besides the body's occurrences, and
+`dup_step_overtakes_own` below is that refutation, kept here as the reason for the
+change. A rule that *consumes a value* leaves the value's own occurrences in the
+account while the result's free occurrences have none of them, so the account the
+rule leaves is wider than the result's own. And a binding moves the value's
+occurrence onto the binder, which an identity preserves only when the binder occurs
+exactly once in the body --- a linearity the identity does not supply and the rules
+do not ask for. An identity with a free-variable computation cannot survive the
+rules; a judgement whose every clause *is* the rule's premise and movement survives
+them at its instructions, which is what the theorems below state.
 
-**The account of a construct, and the moves of the rules.** The account of a term is read
-off its subterms, one lemma per constructor (`accountOf_var`, `accountOf_con0`,
-`accountOf_of_closed` for the leaves; `accountOf_app`, `accountOf_con1`, `accountOf_con2`,
-`accountOf_store`, `accountOf_dup`, `accountOf_drop`). The runtime's own rules move the
-account where they move one occurrence with the term: the release's two rules
-(`accountOf_dropStep`, and `wellFormed_drop` for the discipline) and the binding of a
-variable (`accountOf_bindVar` and `accountOf_appVar`), the latter under the binder's own
-linearity --- the binder occurring once in the body, and the value's variable occurring
-nowhere in it --- which the account relation does not itself supply and the theorems name.
+**The judgement.** `Runs ρ m e` reads "the term `e` is run at the account `m`", with
+one clause per construct, each clause the premise of the target rule that construct
+takes together with the account movement that rule makes, read root-first:
 
-**Where the account does not move with the term.** Three instructions move the account
-*against* the term, and the module states each rather than assuming it away. A `dup`
-*supplies* an occurrence: the term's free occurrences lose the instruction's own name
-while the account gains the occurrence, so the account the rule leaves is one occurrence
-above the body's own (`accountOf_dupStep`). The instructions that *consume a value* ---
-`val x = v; e₂` with an allocated `v`, `(λx. body) v` with an allocated argument, and
-`store` --- leave the value's own occurrences in the account while the result's free
-occurrences have none of them, so the account the rule leaves is wider than the result's
-own (`accountOf_storeStep`). `TStep` therefore does not preserve `WellFormed` in general:
-it preserves it exactly where the rules move one occurrence with the term, which is what
-the theorems above state, and the check module exhibits each instruction that does not.
+* a variable's clause is that the environment binds it and the account holds the
+  pair of its name and that reference;
+* an abstraction's, a nullary node's, a unary node's and a binary node's clauses are
+  the value's own occurrences: a closure holds none and its body's free variables are
+  read from the environment when it is applied, a node's fields run, and a binary
+  node's first field is a value --- the order the realization of its fields reads
+  them in;
+* a `dup`'s clause is that the environment binds its name and the *continuation*
+  runs at the account with one more occurrence;
+* a `drop`'s clause is that the environment binds its name, the account holds the
+  occurrence, and the continuation runs at the account with that occurrence removed;
+* a binding's clause is that the occurrence its bound variable names moves as the
+  rule moves it --- onto the binder, off the value's variable --- and the body runs
+  at the environment and account the rule leaves; at an allocated value the binder
+  takes the reference over and the body runs at the account with the binder's
+  occurrence added;
+* an application's clauses are the same moves at the abstraction's parameter;
+* a match's clause is that the environment binds its subject's name, the account
+  holds that occurrence, and the arm's body runs at the same account once the arm's
+  binders name references the account pairs with them;
+* a store's clause carries the discipline's own requirement: the account holds the
+  store's occurrence (`Owns`), the environment's reference for the subject's name is
+  counted once in the account, and the value and the rest of the term run;
+* a term whose position holds a computation runs when that position runs and the
+  rest of the term is what the position's clause asks for.
 
-**The composition.** With the two facts a session root satisfies by its shape --- no slot
-of the heap and no handle the run holds names it (`Rooted`) --- a disciplined write at the
-root of a coupled configuration takes the destructive branch with no further assumption
-(`rooted_store_destructive`): the discipline supplies the two premises
-`Ownership.store_owned_is_destructive` cannot derive, and the root's shape supplies the
-two hypotheses that theorem names.
+The clauses of a construct are exclusive by the shape they name --- a function
+position is an abstraction, another value or a computation, and each shape has its
+own clause --- so a derivation says which rule it is about, which is what makes the
+preservation proofs below case analyses on the derivation's clause.
 
-**What is modelled, and what is trusted.** The account is a logical reading of the
-configuration, not a machine count: it lists the term's own occurrences as pairs, and its
-reference reading is `expand`. The write's branch is `RCHeap.update`'s, as `Ownership`
-states it, and nothing here is about compiled code.
+**The distinctness is an explicit conjunct.** The store's clause carries
+`(expand m).count r = 1` for the reference the environment names for its subject,
+rather than deriving that count from a condition on the term's free variables. That
+is the distinctness `Ownership.store_owned_is_destructive` needs beside the
+occurrence --- its `hm` beside its `hown` --- and making it a conjunct of the
+judgement is what lets `runs_store_owned` read the two hypotheses off a derivation
+directly.
+
+**What is preserved.** Every instruction of the relation preserves the judgement, each
+by its own clause: `runs_dup`, `runs_drop` (the release's two branches are one move of
+the account, since the cell's count decides the heap's move and not the account's),
+`runs_bindVar`, `runs_bindVal`, `runs_appVar`, `runs_appVal`, `runs_storeExclusive` and
+`runs_storeShared` (the write's two branches likewise). Of the congruence rules --- the
+steps that reach a term's positions --- three preserve it once the position's own
+preservation is at hand, and they are stated with that preservation as a hypothesis,
+because that is exactly what the induction over the relation gives a congruence rule
+about its position's step: `runs_con1Field`, `runs_con2FieldL` (whose case is vacuous:
+the clause asks a binary node's first field to be a value, and `value_does_not_step`)
+and `runs_con2FieldR`.
+
+**Where the target's rules do not preserve it.** Four rules do not, and they are a
+finding about the relation's own shape rather than about a missing clause: the
+judgement's positional clauses read a term's positions at the *whole*
+configuration's account and environment, and these rules step a position there while
+leaving its sibling in place.
+
+* `appFun` and the first family of `appArg`: a clause reads the sibling position's
+  own judgement at the configuration the step starts from, and the step may move the
+  environment or consume an occurrence the sibling's clause rests on. The judgement
+  admits the state where two positions' requirements rest on one occurrence --- its
+  clauses are the rules' premises, and the rules' premises are membership in the
+  configuration's account --- and a step in one position then removes the ground
+  under the other's clause.
+* the second family of `appArg`, and `bindRhs`: a position whose step produces a
+  *value* meets the clause for a term whose position is that value, and that clause
+  carries the continuation the rule runs --- the body's own judgement at the moved
+  environment and account. A clause for a position that holds a computation carries
+  the position's judgement and not that continuation, so the value-shaped conclusion
+  asks for something the computation-shaped configuration never supplied.
+* `matchC`: the rule binds the arm's binders to the *cell's slots*, which are the
+  heap's, and leaves the account unchanged; a heap-free judgement can only ask the
+  body to run at bindings the account pairs with the binders, and the rule's own
+  premise that the binders shadow none of the account's names makes that demand
+  vacuous on the configurations the rule fires at, so the body's own clause is not
+  re-established at the arm it leaves.
+
+The exact goals and the counterexamples are `ScidoniaTest/Discipline`'s
+`appFun_account_shared`, `appArg_value_not_reached`, `bindRhs_value_not_reached` and
+`matchC_arm_not_paired`. Each failing goal is stated with the account and
+environment the step starts from and leaves; none of them is a clause the judgement
+is missing, and none is hidden by restricting the judgement.
+
+**What is modelled, and what is trusted.** The judgement is a static reading of a
+configuration: the environment, the term's own multiplicities and the term, with no
+reference to the heap, so its clauses are the rules' *logical* premises and not the
+heap's own operations. A derivation is evidence of the discipline, not of the rules
+having fired: the judgement says what a term run at an account needs, and the
+theorems say what each rule's move costs it. A closure is judged holding no
+occurrence --- the model's closures capture nothing --- so its body is judged where
+an application or a binding resumes it, and an abstraction never applied is judged
+without its body. The account is read as a multiset in list form, and the write's
+branch is `RCHeap.update`'s, as `Ownership` states it. Nothing here is about
+compiled code.
 -/
 import Scidonia.RC.Ownership
 
@@ -69,7 +137,9 @@ open Scidonia.FracPerm.StateVar.RCHeap
 
 A list of names is read two ways: at the references the environment binds them to
 (`refsOf`), and at the pairs of a name and its reference (`pairsOf`). A name the
-environment binds nowhere contributes to neither. -/
+environment binds nowhere contributes to neither. The readings are what the checks
+compare an account against; the judgement below does not compute the account out of
+the term, and `dup_step_overtakes_own` is the reason. -/
 
 /-- The references a list of names is read at, in order. -/
 def refsOf (rho : TEnv) (us : List Var) : List Ref := us.filterMap (fun x => rho.lookup x)
@@ -79,12 +149,13 @@ reference the environment binds it to. -/
 def pairsOf (rho : TEnv) (us : List Var) : Multi :=
   us.filterMap (fun x => (rho.lookup x).map (fun r => (x, r)))
 
-/-- The pairs the term's free occurrences name: the term's own occurrences, one pair per
-occurrence, each occurrence's variable and the reference the environment binds it to. -/
+/-- The pairs the term's free occurrences name: the term's own occurrences, one pair
+per occurrence, each occurrence's variable and the reference the environment binds
+it to. -/
 def occsOf (rho : TEnv) (e : Expr) : Multi := pairsOf rho (uses e)
 
-/-- A term's account is the pairs its free occurrences name: the two spellings are the
-same list, which is what lets a statement about one be read at the other. -/
+/-- A term's own occurrences are its free occurrences read at the pairs: the two
+spellings are the same list. -/
 theorem occsOf_pairsOf (rho : TEnv) (e : Expr) : occsOf rho e = pairsOf rho (uses e) := rfl
 
 /-- An empty list names nothing. -/
@@ -93,413 +164,16 @@ theorem occsOf_pairsOf (rho : TEnv) (e : Expr) : occsOf rho e = pairsOf rho (use
 /-- An empty list names no pair. -/
 @[simp] theorem pairsOf_nil (rho : TEnv) : pairsOf rho [] = ([] : Multi) := rfl
 
-/-- Reading a concatenation is reading each part. -/
-theorem refsOf_append (rho : TEnv) (us vs : List Var) :
-    refsOf rho (us ++ vs) = refsOf rho us ++ refsOf rho vs := by
-  simp [refsOf, List.filterMap_append]
-
-/-- Reading a concatenation at the pairs is reading each part at the pairs. -/
-theorem pairsOf_append (rho : TEnv) (us vs : List Var) :
-    pairsOf rho (us ++ vs) = pairsOf rho us ++ pairsOf rho vs := by
-  simp [pairsOf, List.filterMap_append]
-
-/-- A name the environment binds contributes its reference. -/
-@[simp] theorem refsOf_cons_some {rho : TEnv} {x : Var} {r : Ref} (h : rho.lookup x = some r)
-    (us : List Var) : refsOf rho (x :: us) = r :: refsOf rho us := by
-  simp [refsOf, h]
-
-/-- A name the environment binds contributes its pair. -/
-@[simp] theorem pairsOf_cons_some {rho : TEnv} {x : Var} {r : Ref} (h : rho.lookup x = some r)
-    (us : List Var) : pairsOf rho (x :: us) = (x, r) :: pairsOf rho us := by
+/-- A list of names the environment binds contributes its first pair. -/
+@[simp] theorem pairsOf_cons_some {rho : TEnv} {x : Var} {r : Ref}
+    (h : rho.lookup x = some r) (us : List Var) :
+    pairsOf rho (x :: us) = (x, r) :: pairsOf rho us := by
   simp [pairsOf, h]
-
-/-- A name the environment binds nowhere contributes nothing. -/
-@[simp] theorem refsOf_cons_none {rho : TEnv} {x : Var} (h : rho.lookup x = none)
-    (us : List Var) : refsOf rho (x :: us) = refsOf rho us := by
-  simp [refsOf, h]
 
 /-- A name the environment binds nowhere contributes no pair. -/
 @[simp] theorem pairsOf_cons_none {rho : TEnv} {x : Var} (h : rho.lookup x = none)
     (us : List Var) : pairsOf rho (x :: us) = pairsOf rho us := by
   simp [pairsOf, h]
-
-/-- A reference a list names is the reference its variable is bound to. -/
-theorem mem_refsOf {rho : TEnv} {us : List Var} {r : Ref} (h : r ∈ refsOf rho us) :
-    ∃ x ∈ us, rho.lookup x = some r := by
-  rw [refsOf, List.mem_filterMap] at h
-  obtain ⟨x, hx, hlook⟩ := h
-  exact ⟨x, hx, hlook⟩
-
-/-- A variable of a list the environment binds contributes its reference. -/
-theorem mem_refsOf_of {rho : TEnv} {us : List Var} {x : Var} {r : Ref} (hx : x ∈ us)
-    (h : rho.lookup x = some r) : r ∈ refsOf rho us := by
-  rw [refsOf, List.mem_filterMap]
-  exact ⟨x, hx, h⟩
-
-/-- A pair a list names is a pair of a variable of the list and the reference the
-environment binds it to. -/
-theorem mem_pairsOf {rho : TEnv} {us : List Var} {p : Var × Ref}
-    (h : p ∈ pairsOf rho us) : ∃ x ∈ us, rho.lookup x = some p.2 ∧ p.1 = x := by
-  rw [pairsOf, List.mem_filterMap] at h
-  obtain ⟨x, hx, hlook⟩ := h
-  rw [Option.map_eq_some_iff] at hlook
-  obtain ⟨r, hlook', hr⟩ := hlook
-  exact ⟨x, hx, by rw [← hr]; exact hlook', (congrArg Prod.fst hr).symm⟩
-
-/-! ## The account of a list of names, and of a term
-
-The account of a term is the account of its free occurrences: the reference reading, the
-pair reading, and the environment's own reading of the term's names. -/
-
-/-- The account of a list of names in an environment: the references the account holds are
-the ones the names are read at, the account's pairs are pairs of the names, and the
-environment binds every name of the list. -/
-def AcctOf (rho : TEnv) (us : List Var) (m : Multi) : Prop :=
-  (∀ r, (expand m).count r = (refsOf rho us).count r)
-    ∧ (∀ p : Var × Ref, m.count p ≤ (pairsOf rho us).count p)
-    ∧ (∀ x ∈ us, ∃ r, rho.lookup x = some r)
-
-/-- An account's references are the names it was handed, read at their variables. -/
-theorem AcctOf.refs {rho : TEnv} {us : List Var} {m : Multi} (h : AcctOf rho us m) :
-    ∀ r, (expand m).count r = (refsOf rho us).count r := h.1
-
-/-- An account's pairs are pairs of the names it was handed. -/
-theorem AcctOf.pairs {rho : TEnv} {us : List Var} {m : Multi} (h : AcctOf rho us m) :
-    ∀ p : Var × Ref, m.count p ≤ (pairsOf rho us).count p := h.2.1
-
-/-- The environment reads every name the account was handed. -/
-theorem AcctOf.dom {rho : TEnv} {us : List Var} {m : Multi} (h : AcctOf rho us m) :
-    ∀ x ∈ us, ∃ r, rho.lookup x = some r := h.2.2
-
-/-- The account of a term in an environment, read at the term's own occurrences: the
-account *is* the term's free occurrences, each read at the reference the environment binds
-its variable to. The first conjunct is the reference reading `Ownership`'s store theorems
-are stated about; the second is what makes a pair --- and not merely a count --- readable
-out of the account, and implies that every pair the account holds names one of the term's
-free variables at the reference the environment binds it to (`Bound`); the third is what
-makes "read through the environment" mean something, and is the only clause that says the
-environment binds the term's names at all. -/
-def AccountOf (rho : TEnv) (e : Expr) (m : Multi) : Prop := AcctOf rho (uses e) m
-
-/-- The account's references are the term's free occurrences read at their variables. -/
-theorem AccountOf.refs {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m) :
-    ∀ r, (expand m).count r = (refsOf rho (uses e)).count r := h.1
-
-/-- The account's pairs are pairs the term's own occurrences name: the account holds no
-occurrence the term does not have. -/
-theorem AccountOf.pairs {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m) :
-    ∀ p : Var × Ref, m.count p ≤ (occsOf rho e).count p := h.2.1
-
-/-- The environment reads every free variable of the term. -/
-theorem AccountOf.dom {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m) :
-    ∀ x ∈ uses e, ∃ r, rho.lookup x = some r := h.2.2
-
-/-- A pair of the account is the term's own occurrence read at its variable: its tag is a
-free variable of the term and the environment binds that variable to the pair's
-reference. The pair reading is what makes this readable. -/
-theorem AccountOf.bound {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m) :
-    Bound rho m := by
-  intro p hp
-  have hpos : 0 < m.count p := List.count_pos_iff.mpr hp
-  have hle := h.pairs p
-  have hmem : p ∈ occsOf rho e := List.count_pos_iff.mp (by omega)
-  obtain ⟨x, hx, hlook, hfst⟩ := mem_pairsOf hmem
-  rw [hfst]
-  exact hlook
-
-/-- The account's tags are the term's free variables. -/
-theorem AccountOf.names {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m) :
-    ∀ p ∈ m, p.1 ∈ uses e := by
-  intro p hp
-  have hpos : 0 < m.count p := List.count_pos_iff.mpr hp
-  have hmem : p ∈ occsOf rho e := List.count_pos_iff.mp (by have := h.pairs p; omega)
-  obtain ⟨x, hx, _, hfst⟩ := mem_pairsOf hmem
-  rw [hfst]
-  exact hx
-
-/-- An account holds no pair the term's occurrences do not name, so a reference outside
-the term's own references is counted zero. -/
-theorem AccountOf.count_eq_zero {rho : TEnv} {e : Expr} {m : Multi} (h : AccountOf rho e m)
-    {r : Ref} (hr : r ∉ refsOf rho (uses e)) : (expand m).count r = 0 := by
-  rw [h.refs r]
-  exact List.count_eq_zero.mpr hr
-
-/-! ## The discipline -/
-
-/-- Distinct free variables of the term name distinct references: the condition under
-which "once in the term" means "once in the account", since without it two distinct names
-bound to one reference would count twice. -/
-def InjectiveOn (rho : TEnv) (e : Expr) : Prop :=
-  ∀ x ∈ uses e, ∀ z ∈ uses e, rho.lookup x = rho.lookup z → x = z
-
-/-- Every write in the term has a subject variable, and that variable occurs exactly once
-among the term's free variables: a traverse of the term, one clause per constructor, in
-the style of `uses`. A write whose subject is not a variable, and one whose subject's name
-occurs more than once among the term's free occurrences, are not disciplined. -/
-def WritesOwned : Expr → Prop
-  | .var _ => True
-  | .lam _ body => WritesOwned body
-  | .app f a => WritesOwned f ∧ WritesOwned a
-  | .bind _ e₁ e₂ => WritesOwned e₁ ∧ WritesOwned e₂
-  | .matchC s _ _ body => WritesOwned s ∧ WritesOwned body
-  | .dup _ e => WritesOwned e
-  | .drop _ e => WritesOwned e
-  | .con0 _ => True
-  | .con1 _ a => WritesOwned a
-  | .con2 _ a b => WritesOwned a ∧ WritesOwned b
-  | .store s i v =>
-      (match s with
-        | .var y => (uses (.store (.var y) i v)).count y = 1
-        | _ => False) ∧ WritesOwned v
-
-/-- A write whose subject is a variable is disciplined exactly when that variable occurs
-once among the write's free occurrences and the value is disciplined. -/
-theorem writesOwned_store_var (y : Var) (i : Nat) (v : Expr) :
-    WritesOwned (.store (.var y) i v)
-      ↔ ((uses (.store (.var y) i v)).count y = 1 ∧ WritesOwned v) := by
-  simp only [WritesOwned]
-
-/-- The discipline: the account is the term's own references (`AccountOf`), distinct free
-variables name distinct references (`InjectiveOn`), and every write's subject is a
-variable occurring exactly once among the term's free variables (`WritesOwned`). -/
-def WellFormed (rho : TEnv) (m : Multi) (e : Expr) : Prop :=
-  AccountOf rho e m ∧ InjectiveOn rho e ∧ WritesOwned e
-
-/-- A disciplined configuration's account is the term's own references. -/
-theorem WellFormed.account {rho : TEnv} {m : Multi} {e : Expr} (h : WellFormed rho m e) :
-    AccountOf rho e m := h.1
-
-/-- A disciplined configuration's environment names distinct references for the term's
-distinct free variables. -/
-theorem WellFormed.injective {rho : TEnv} {m : Multi} {e : Expr} (h : WellFormed rho m e) :
-    InjectiveOn rho e := h.2.1
-
-/-- A disciplined configuration's term is a term every write of which has a subject
-variable owned once. -/
-theorem WellFormed.writes {rho : TEnv} {m : Multi} {e : Expr} (h : WellFormed rho m e) :
-    WritesOwned e := h.2.2
-
-/-! ## The account of a construct
-
-The account of a term is read off its subterms: the leaves are the base cases, and a
-compound term's account is its subterms' accounts glued the way the term's own
-occurrences are glued. -/
-
-/-- Prepending one reference to two lists whose counts agree keeps their counts
-agreeing. -/
-theorem count_cons_of_count_eq {r : Ref} {l l' : List Ref}
-    (h : ∀ s, l.count s = l'.count s) (s : Ref) :
-    (r :: l).count s = (r :: l').count s := by
-  by_cases hs : s = r
-  · subst hs
-    rw [List.count_cons_self, List.count_cons_self, h s]
-  · rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm),
-      List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm), h s]
-
-/-- A pair a `dup` or a `drop` supplies is the first the list it builds holds. -/
-@[simp] theorem count_insert_self (m : Multi) (y : Var) (r : Ref) :
-    (Multi.insert m y r).count (y, r) = m.count (y, r) + 1 := by
-  simp [Multi.insert]
-
-/-- A pair another one is not is counted as the list it was built from counts it. -/
-theorem count_insert_of_ne {m : Multi} {y : Var} {r : Ref} {p : Var × Ref}
-    (h : p ≠ (y, r)) : (Multi.insert m y r).count p = m.count p :=
-  List.count_cons_of_ne (b := (y, r)) (a := p) (fun hh => h hh.symm)
-
-/-- The occurrence a `drop` consumes is the first pair equal to the pair the instruction
-reads, so the account the rule leaves is the account the term held with that pair
-removed. -/
-theorem dropOcc_eq_erase (m : Multi) (y : Var) (r : Ref) :
-    Multi.dropOcc m y r = m.erase (y, r) := by
-  induction m with
-  | nil => rfl
-  | cons p t ih =>
-      obtain ⟨x, s⟩ := p
-      by_cases h : (x, s) = (y, r)
-      · rw [show Multi.dropOcc ((x, s) :: t) y r = t from by simp [Multi.dropOcc, h]]
-        rw [h, List.erase_cons_head]
-      · rw [show Multi.dropOcc ((x, s) :: t) y r = (x, s) :: Multi.dropOcc t y r from by
-          simp [Multi.dropOcc, h], ih]
-        rw [List.erase_cons_tail (by simpa using h)]
-
-/-- A `drop` removes exactly one pair: the count of the pair it reads falls by one and
-every other pair's count is the one the account held. The condition is written with the
-pair the instruction reads on the left, the orientation the list's own count lemmas
-write. -/
-theorem count_dropOcc (m : Multi) {y : Var} {r : Ref} (h : (y, r) ∈ m) (p : Var × Ref) :
-    (Multi.dropOcc m y r).count p + (if (y, r) = p then 1 else 0) = m.count p := by
-  rw [dropOcc_eq_erase]
-  by_cases hp : (y, r) = p
-  · have hm : p ∈ m := hp ▸ h
-    rw [ite_eq_left hp, hp, List.count_erase_self]
-    have hpos : 1 ≤ m.count p := List.count_pos_iff.mpr hm
-    omega
-  · rw [ite_eq_right hp, List.count_erase_of_ne (fun hh => hp hh.symm)]
-    omega
-
-/-- Reading a list at the environment that binds a name to a reference splits into reading
-it at the old environment off that name, plus the name's own occurrences read at the new
-reference. -/
-theorem refsOf_set_count (rho : TEnv) (x : Var) (r : Ref) (us : List Var) (s : Ref) :
-    (refsOf (TEnv.set rho x r) us).count s
-      = (refsOf rho (us.filter (fun y => decide (y ≠ x)))).count s
-        + (if r = s then us.count x else 0) := by
-  induction us with
-  | nil => simp [refsOf]
-  | cons y t ih =>
-      by_cases hy : y = x
-      · have hf : (x :: t).filter (fun y' => decide (y' ≠ x))
-            = t.filter (fun y' => decide (y' ≠ x)) := by simp
-        rw [hy, hf, refsOf_cons_some (TEnv.lookup_set_self rho x r) t]
-        by_cases hs : s = r
-        · rw [ite_eq_left hs.symm] at ih ⊢
-          rw [hs] at ih ⊢
-          rw [List.count_cons_self, ih, List.count_cons_self]
-          omega
-        · rw [ite_eq_right (fun hh => hs hh.symm)] at ih ⊢
-          rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm)]
-          rw [ih]
-      · have hf : (y :: t).filter (fun y' => decide (y' ≠ x))
-            = y :: t.filter (fun y' => decide (y' ≠ x)) := by
-          rw [List.filter_cons_of_pos (p := fun y' => decide (y' ≠ x)) (a := y) (l := t)]
-          simp [hy]
-        rw [hf, List.count_cons_of_ne (b := y) (a := x) hy]
-        have hlook : (TEnv.set rho x r).lookup y = rho.lookup y :=
-          TEnv.lookup_set_of_ne (x := x) (y := y) (fun hh => hy hh.symm) r
-        cases hly : rho.lookup y with
-        | none =>
-            rw [refsOf_cons_none (by rw [hlook, hly]) t, refsOf_cons_none hly, ih]
-        | some s' =>
-            rw [refsOf_cons_some (by rw [hlook, hly]) t, refsOf_cons_some hly]
-            by_cases hs : s = s'
-            · rw [hs] at ih ⊢
-              rw [List.count_cons_self, ih, List.count_cons_self]
-              omega
-            · rw [List.count_cons_of_ne (b := s') (a := s) (fun hh => hs hh.symm)]
-              rw [List.count_cons_of_ne (b := s') (a := s) (fun hh => hs hh.symm)]
-              rw [ih]
-
-/-- Reading a list at the environment that binds a name to a reference splits at the
-pairs the same way. -/
-theorem pairsOf_set_count (rho : TEnv) (x : Var) (r : Ref) (us : List Var) (p : Var × Ref) :
-    (pairsOf (TEnv.set rho x r) us).count p
-      = (pairsOf rho (us.filter (fun y => decide (y ≠ x)))).count p
-        + (if (x, r) = p then us.count x else 0) := by
-  induction us with
-  | nil => simp [pairsOf]
-  | cons y t ih =>
-      by_cases hy : y = x
-      · have hf : (x :: t).filter (fun y' => decide (y' ≠ x))
-            = t.filter (fun y' => decide (y' ≠ x)) := by simp
-        rw [hy, hf, pairsOf_cons_some (TEnv.lookup_set_self rho x r) t]
-        by_cases hp : p = (x, r)
-        · rw [ite_eq_left hp.symm] at ih ⊢
-          rw [hp] at ih ⊢
-          rw [List.count_cons_self, ih, List.count_cons_self]
-          omega
-        · rw [ite_eq_right (fun hh => hp hh.symm)] at ih ⊢
-          rw [List.count_cons_of_ne (b := (x, r)) (a := p) (fun hh => hp hh.symm), ih]
-      · have hf : (y :: t).filter (fun y' => decide (y' ≠ x))
-            = y :: t.filter (fun y' => decide (y' ≠ x)) := by
-          rw [List.filter_cons_of_pos (p := fun y' => decide (y' ≠ x)) (a := y) (l := t)]
-          simp [hy]
-        rw [hf, List.count_cons_of_ne (b := y) (a := x) hy]
-        have hlook : (TEnv.set rho x r).lookup y = rho.lookup y :=
-          TEnv.lookup_set_of_ne (x := x) (y := y) (fun hh => hy hh.symm) r
-        cases hly : rho.lookup y with
-        | none =>
-            rw [pairsOf_cons_none (by rw [hlook, hly]) t, pairsOf_cons_none hly, ih]
-        | some s' =>
-            rw [pairsOf_cons_some (by rw [hlook, hly]) t, pairsOf_cons_some hly]
-            by_cases hp : p = (y, s')
-            · rw [hp] at ih ⊢
-              rw [List.count_cons_self, ih, List.count_cons_self]
-              omega
-            · rw [List.count_cons_of_ne (b := (y, s')) (a := p) (fun hh => hp hh.symm)]
-              rw [List.count_cons_of_ne (b := (y, s')) (a := p) (fun hh => hp hh.symm)]
-              rw [ih]
-
-/-- The account of a list is its two readings: the account of a concatenation is the sum
-of the accounts. -/
-theorem acctOf_append {rho : TEnv} {us vs : List Var} {m₁ m₂ : Multi}
-    (h₁ : AcctOf rho us m₁) (h₂ : AcctOf rho vs m₂) :
-    AcctOf rho (us ++ vs) (m₁ ++ m₂) := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro r
-    rw [show expand (m₁ ++ m₂) = expand m₁ ++ expand m₂ from List.map_append,
-      List.count_append, refsOf_append, List.count_append, h₁.1 r, h₂.1 r]
-  · intro p
-    rw [List.count_append, pairsOf_append, List.count_append]
-    exact Nat.add_le_add (h₁.2.1 p) (h₂.2.1 p)
-  · intro x hx
-    rcases List.mem_append.mp hx with hx | hx
-    · exact h₁.2.2 x hx
-    · exact h₂.2.2 x hx
-
-/-- The account of a variable is the pair of its name and the reference its environment
-binding reads. -/
-theorem accountOf_var {rho : TEnv} {x : Var} {r : Ref} (h : rho.lookup x = some r) :
-    AccountOf rho (.var x) [(x, r)] := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    simp only [uses, refsOf_cons_some h, refsOf_nil]
-    simp
-  · intro p
-    simp only [uses, pairsOf_cons_some h, pairsOf_nil]
-    exact Nat.le_refl _
-  · intro x' hx'
-    rw [show uses (.var x) = [x] from rfl, List.mem_singleton] at hx'
-    subst hx'
-    exact ⟨r, h⟩
-
-/-- The account of a nullary node is empty: it has no free occurrence. -/
-theorem accountOf_con0 (rho : TEnv) (c : Ctor) : AccountOf rho (.con0 c) [] := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    rw [show uses (.con0 c) = [] from rfl, refsOf_nil,
-      show expand ([] : Multi) = [] from rfl]
-  · intro p
-    rw [show uses (.con0 c) = [] from rfl, pairsOf_nil]
-    exact Nat.le_refl _
-  · intro x hx
-    rw [show uses (.con0 c) = [] from rfl] at hx
-    simp at hx
-
-/-- A term with no free occurrence has the empty account. -/
-theorem accountOf_of_closed {rho : TEnv} {e : Expr} (h : uses e = []) :
-    AccountOf rho e [] := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    rw [h, refsOf_nil, show expand ([] : Multi) = [] from rfl]
-  · intro p
-    rw [h, pairsOf_nil]
-    exact Nat.le_refl _
-  · intro x hx
-    rw [h] at hx
-    simp at hx
-
-/-- The account of an application is the accounts of its two subterms summed. -/
-theorem accountOf_app {rho : TEnv} {f a : Expr} {m₁ m₂ : Multi}
-    (h₁ : AccountOf rho f m₁) (h₂ : AccountOf rho a m₂) :
-    AccountOf rho (.app f a) (m₁ ++ m₂) :=
-  acctOf_append h₁ h₂
-
-/-- The account of a unary node is its field's account. -/
-theorem accountOf_con1 {rho : TEnv} {c : Ctor} {a : Expr} {m : Multi}
-    (h : AccountOf rho a m) : AccountOf rho (.con1 c a) m :=
-  h
-
-/-- The account of a binary node is the accounts of its two fields summed. -/
-theorem accountOf_con2 {rho : TEnv} {ct : Ctor} {a b : Expr} {m₁ m₂ : Multi}
-    (h₁ : AccountOf rho a m₁) (h₂ : AccountOf rho b m₂) :
-    AccountOf rho (.con2 ct a b) (m₁ ++ m₂) :=
-  acctOf_append h₁ h₂
-
-/-- The account of a write is the accounts of its subject and its value summed. -/
-theorem accountOf_store {rho : TEnv} {s : Expr} {i : Nat} {v : Expr} {m₁ m₂ : Multi}
-    (h₁ : AccountOf rho s m₁) (h₂ : AccountOf rho v m₂) :
-    AccountOf rho (.store s i v) (m₁ ++ m₂) :=
-  acctOf_append h₁ h₂
 
 /-- The pairs a `dup` node's free occurrences name: the occurrence the instruction
 supplies and its body's. -/
@@ -508,390 +182,354 @@ theorem occsOf_dup {rho : TEnv} {y : Var} {r : Ref} {e : Expr} (h : rho.lookup y
   change pairsOf rho (y :: uses e) = (y, r) :: pairsOf rho (uses e)
   rw [pairsOf_cons_some h]
 
-/-- The pairs a `drop` node's free occurrences name: the occurrence the instruction
-releases and its body's. -/
-theorem occsOf_drop {rho : TEnv} {y : Var} {r : Ref} {e : Expr} (h : rho.lookup y = some r) :
-    occsOf rho (.drop y e) = (y, r) :: occsOf rho e := by
-  change pairsOf rho (y :: uses e) = (y, r) :: pairsOf rho (uses e)
-  rw [pairsOf_cons_some h]
+/-- The occurrence a `drop` supplies is the first the list it leaves holds, so the
+account a release leaves is the one it was handed back. -/
+@[simp] theorem dropOcc_insert_self (m : Multi) (y : Var) (r : Ref) :
+    Multi.dropOcc (Multi.insert m y r) y r = m := by
+  simp [Multi.insert, Multi.dropOcc]
 
-/-- The account of a `dup` is the account of its body with the occurrence the instruction
-supplies: the term holds one occurrence more than its body does. -/
-theorem accountOf_dup {rho : TEnv} {e : Expr} {m : Multi} {y : Var} {r : Ref}
-    (h : AccountOf rho e m) (hlook : rho.lookup y = some r) :
-    AccountOf rho (.dup y e) (Multi.insert m y r) := by
-  change AcctOf rho (y :: uses e) (Multi.insert m y r)
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    rw [expand_insert, refsOf_cons_some hlook]
-    exact count_cons_of_count_eq (fun s => h.refs s) s
-  · intro p
-    have hp := h.pairs p
-    rw [pairsOf_cons_some hlook, ← occsOf_pairsOf]
-    by_cases heq : p = (y, r)
-    · rw [heq] at hp ⊢
-      rw [count_insert_self, List.count_cons_self]
-      omega
-    · rw [count_insert_of_ne heq,
-        List.count_cons_of_ne (b := (y, r)) (a := p) (fun hh => heq hh.symm)]
-      exact hp
-  · intro x hx
-    rcases List.mem_cons.mp hx with rfl | hx
-    · exact ⟨r, hlook⟩
-    · exact h.dom x hx
+/-- The pair a `dup` supplies is counted once more than the list it joins counts it. -/
+@[simp] theorem count_insert_self (m : Multi) (y : Var) (r : Ref) :
+    (Multi.insert m y r).count (y, r) = m.count (y, r) + 1 := by
+  simp [Multi.insert]
 
-/-- The account of a `drop` is the account of its body with the occurrence the instruction
-releases: the term holds the occurrence its body's release reads. -/
-theorem accountOf_drop {rho : TEnv} {e : Expr} {m : Multi} {y : Var} {r : Ref}
-    (h : AccountOf rho e m) (hlook : rho.lookup y = some r) :
-    AccountOf rho (.drop y e) (Multi.insert m y r) :=
-  accountOf_dup h hlook
-
-/-! ## The moves the runtime's rules make
-
-The runtime's own rules move the account where they move one occurrence with the term: the
-release's rules, and the binding of a variable. The instructions that supply an occurrence
-or consume a value move the account *against* the term, and each of those is stated too. -/
-
-/-- The release's move: the account of a release is the account of its body with the
-released occurrence, so the body's account is the release's with that occurrence removed.
-This is the move both of `Target.TStep`'s release rules make, and it needs nothing of the
-heap but the pair the instruction reads. -/
-theorem accountOf_dropStep {rho : TEnv} {m : Multi} {y : Var} {r : Ref} {e : Expr}
-    (hacc : AccountOf rho (.drop y e) m) (hlook : rho.lookup y = some r)
-    (hsub : (y, r) ∈ m) : AccountOf rho e (Multi.dropOcc m y r) := by
-  change AcctOf rho (uses e) (Multi.dropOcc m y r)
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    have h1 := hacc.refs s
-    change (expand m).count s = (refsOf rho (y :: uses e)).count s at h1
-    rw [refsOf_cons_some hlook] at h1
-    by_cases hs : s = r
-    · rw [hs] at h1 ⊢
-      rw [List.count_cons_self] at h1
-      have hself := expand_dropOcc_count_self m y hsub
-      omega
-    · rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm)] at h1
-      have hne := expand_dropOcc_count_of_ne m y (r := r) (s := s) hs
-      omega
-  · intro p
-    have hp := hacc.pairs p
-    rw [show occsOf rho (.drop y e) = pairsOf rho (uses (.drop y e)) from rfl,
-      show uses (.drop y e) = y :: uses e from rfl, pairsOf_cons_some hlook,
-      ← occsOf_pairsOf] at hp
-    rw [List.count_cons] at hp
-    simp only [beq_iff_eq] at hp
-    rw [← occsOf_pairsOf]
-    have hdrop := count_dropOcc m hsub p
-    by_cases heq : (y, r) = p
-    · rw [ite_eq_left heq] at hp hdrop
-      omega
-    · rw [ite_eq_right heq] at hp hdrop
-      omega
-  · intro x hx
-    exact hacc.dom x (List.mem_cons_of_mem _ hx)
-
-/-- The move the binding of a variable makes: the account of a term whose instruction reads
-a value's variable moves to the body's account with the value's occurrence replaced by the
-binder's, once the binder occurs exactly once in the body. The two readings of the
-instruction's own account are the hypotheses; the value's variable being read at the
-reference the account holds for it is what the pair hypothesis reads, so it is not a
-hypothesis of its own. -/
-theorem acctOf_bindVar {rho : TEnv} {us us' : List Var} {m : Multi} {x z : Var} {r : Ref}
-    (hacc : AcctOf rho us' m) (hsub : (z, r) ∈ m)
-    (hreads : ∀ s, (refsOf rho us').count s
-      = (refsOf rho (us.filter (fun y => decide (y ≠ x)))).count s + (if r = s then 1 else 0))
-    (hpairs : ∀ p, (pairsOf rho us').count p
-      = (pairsOf rho (us.filter (fun y => decide (y ≠ x)))).count p
-        + (if (z, r) = p then 1 else 0))
-    (hbound : ∀ y ∈ us, y ≠ x → ∃ s, rho.lookup y = some s)
-    (hlinear : us.count x = 1) :
-    AcctOf (TEnv.set rho x r) us (Multi.insert (Multi.dropOcc m z r) x r) := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro s
-    have h1 := hacc.refs s
-    rw [hreads s] at h1
-    rw [refsOf_set_count rho x r us s]
-    rw [expand_insert]
-    by_cases hs : s = r
-    · rw [hs] at h1 ⊢
-      rw [ite_eq_left rfl] at h1
-      rw [List.count_cons_self, ite_eq_left rfl, hlinear]
-      have hself := expand_dropOcc_count_self m z hsub
-      omega
-    · rw [ite_eq_right (fun hh => hs hh.symm)] at h1
-      rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm),
-        ite_eq_right (fun hh => hs hh.symm)]
-      have hne := expand_dropOcc_count_of_ne m z (r := r) (s := s) hs
-      omega
-  · intro p
-    have hp := hacc.pairs p
-    rw [hpairs p] at hp
-    rw [pairsOf_set_count rho x r us p, hlinear]
-    have hdrop := count_dropOcc m hsub p
-    by_cases hx : p = (x, r)
-    · rw [hx] at hp hdrop ⊢
-      rw [count_insert_self, ite_eq_left rfl]
-      omega
-    · rw [ite_eq_right (fun hh => hx hh.symm)]
-      rw [count_insert_of_ne hx]
-      omega
-  · intro y hy
-    by_cases hyx : y = x
-    · rw [hyx]
-      exact ⟨r, TEnv.lookup_set_self rho x r⟩
-    · rw [TEnv.lookup_set_of_ne (fun hh => hyx hh.symm) r]
-      exact hbound y hy hyx
-
-/-- The move a binding of a variable makes, at the configuration's own account. -/
-theorem accountOf_bindVar {rho : TEnv} {m : Multi} {x z : Var} {r : Ref} {e₂ : Expr}
-    (hacc : AccountOf rho (.bind x (.var z) e₂) m) (hlook : rho.lookup z = some r)
-    (hsub : (z, r) ∈ m) (hlinear : (uses e₂).count x = 1) :
-    AccountOf (TEnv.set rho x r) e₂ (Multi.insert (Multi.dropOcc m z r) x r) := by
-  refine acctOf_bindVar hacc hsub ?_ ?_ ?_ hlinear
-  · intro s
-    rw [show uses (.bind x (.var z) e₂) = [z] ++ (uses e₂).filter (fun y => y ≠ x) from rfl,
-      refsOf_append, refsOf_cons_some hlook, refsOf_nil, List.count_append]
-    by_cases hs : s = r
-    · rw [hs] at ⊢
-      rw [List.count_cons_self, List.count_nil, ite_eq_left rfl]
-      try omega
-    · rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm), List.count_nil,
-        ite_eq_right (fun hh => hs hh.symm)]
-      try omega
-  · intro p
-    rw [show uses (.bind x (.var z) e₂) = [z] ++ (uses e₂).filter (fun y => y ≠ x) from rfl,
-      pairsOf_append, pairsOf_cons_some hlook, pairsOf_nil, List.count_append]
-    by_cases hp : p = (z, r)
-    · rw [hp] at ⊢
-      rw [List.count_cons_self, List.count_nil, ite_eq_left rfl]
-      try omega
-    · rw [List.count_cons_of_ne (b := (z, r)) (a := p) (fun hh => hp hh.symm), List.count_nil,
-        ite_eq_right (fun hh => hp hh.symm)]
-      try omega
-  · intro y hy hyx
-    exact hacc.dom y (List.mem_append_right _ (List.mem_filter.mpr ⟨hy, by simpa using hyx⟩))
-
-/-- The move an application to a variable makes, at the configuration's own account. -/
-theorem accountOf_appVar {rho : TEnv} {m : Multi} {x z : Var} {r : Ref} {body : Expr}
-    (hacc : AccountOf rho (.app (.lam x body) (.var z)) m) (hlook : rho.lookup z = some r)
-    (hsub : (z, r) ∈ m) (hlinear : (uses body).count x = 1) :
-    AccountOf (TEnv.set rho x r) body (Multi.insert (Multi.dropOcc m z r) x r) := by
-  refine acctOf_bindVar hacc hsub ?_ ?_ ?_ hlinear
-  · intro s
-    rw [show uses (.app (.lam x body) (.var z))
-        = (uses body).filter (fun y => y ≠ x) ++ [z] from rfl,
-      refsOf_append, refsOf_cons_some hlook, refsOf_nil, List.count_append]
-    by_cases hs : s = r
-    · rw [hs] at ⊢
-      rw [List.count_cons_self, List.count_nil, ite_eq_left rfl]
-      try omega
-    · rw [List.count_cons_of_ne (b := r) (a := s) (fun hh => hs hh.symm), List.count_nil,
-        ite_eq_right (fun hh => hs hh.symm)]
-      try omega
-  · intro p
-    rw [show uses (.app (.lam x body) (.var z))
-        = (uses body).filter (fun y => y ≠ x) ++ [z] from rfl,
-      pairsOf_append, pairsOf_cons_some hlook, pairsOf_nil, List.count_append]
-    by_cases hp : p = (z, r)
-    · rw [hp] at ⊢
-      rw [List.count_cons_self, List.count_nil, ite_eq_left rfl]
-      try omega
-    · rw [List.count_cons_of_ne (b := (z, r)) (a := p) (fun hh => hp hh.symm), List.count_nil,
-        ite_eq_right (fun hh => hp hh.symm)]
-      try omega
-  · intro y hy hyx
-    exact hacc.dom y (List.mem_append_left _
-      (List.mem_filter.mpr ⟨hy, by simpa using hyx⟩))
-
-/-- The `dup` rule's move is not the account's: the rule *supplies* an occurrence, so the
-account it leaves is the body's own account with the supplied occurrence still on it, and
-the body's account is the rule's with that occurrence removed. The account of the body is
-therefore one occurrence above what the rule leaves, which is why no `TStep` of this shape
-preserves the discipline. -/
-theorem accountOf_dupStep {rho : TEnv} {m : Multi} {y : Var} {r : Ref} {e : Expr}
-    (hacc : AccountOf rho e m) (_hlook : rho.lookup y = some r) :
-    AccountOf rho e (Multi.dropOcc (Multi.insert m y r) y r)
-      ∧ ¬ AccountOf rho e (Multi.insert m y r) := by
-  have hdrop : Multi.dropOcc (Multi.insert m y r) y r = m := by
-    simp [Multi.insert, Multi.dropOcc]
-  refine ⟨by rw [hdrop]; exact hacc, ?_⟩
-  intro h
-  have h1 := h.refs r
-  have h2 := hacc.refs r
-  rw [expand_insert, List.count_cons_self] at h1
+/-- The reading this module replaces is refuted by the `dup` rule: the account the
+rule leaves holds one occurrence more than the body's own free occurrences, and the
+body's own account is the body of the rule's account --- the instruction's own
+occurrence is still on it, because `uses` counts the instruction's name besides its
+body's occurrences. An account that *is* the term's free occurrences read through the
+environment therefore cannot survive the instruction: the rule's step leaves
+`insert (occsOf ρ (.dup y e)) y r`, and that list is not `occsOf ρ e`. -/
+theorem dup_step_overtakes_own {rho : TEnv} {e : Expr} {y : Var} {r : Ref}
+    (h : rho.lookup y = some r) :
+    Multi.dropOcc (Multi.insert (occsOf rho (.dup y e)) y r) y r = occsOf rho (.dup y e)
+      ∧ Multi.insert (occsOf rho (.dup y e)) y r ≠ occsOf rho e := by
+  refine ⟨dropOcc_insert_self _ _ _, ?_⟩
+  intro heq
+  have hcount : (Multi.insert (occsOf rho (.dup y e)) y r).count (y, r)
+      = (occsOf rho e).count (y, r) + 2 := by
+    rw [count_insert_self, occsOf_dup h]
+    simp
+  rw [heq] at hcount
   omega
 
-/-- The store's move is not the account's: an occurrence of the value's variable is a pair
-the account holds --- read off the account's own reference count, with the injectivity of
-the environment's reading making its variable the occurrence's --- and the result `.var y`'s
-own account holds no pair but one of the subject's, so the account the rule leaves is wider
-than the result's own. -/
-theorem accountOf_storeStep {rho : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
-    (hacc : AccountOf rho (.store (.var y) i v) m) (hinj : InjectiveOn rho (.store (.var y) i v))
-    {z : Var} {s : Ref} (hz : z ∈ uses v) (hzr : rho.lookup z = some s) (hzy : z ≠ y) :
-    ¬ AccountOf rho (.var y) m := by
-  intro h
-  have hz' : z ∈ uses (.store (.var y) i v) := List.mem_append_right _ hz
-  have hmem : s ∈ refsOf rho (uses (.store (.var y) i v)) := mem_refsOf_of hz' hzr
-  have hpos : 0 < (expand m).count s := by
-    rw [hacc.refs s]
-    exact List.count_pos_iff.mpr hmem
-  obtain ⟨p, hp, hps⟩ : ∃ p ∈ m, p.2 = s := by
-    rw [expand, List.count_pos_iff, List.mem_map] at hpos
-    exact hpos
-  have hpz : p.1 = z :=
-    hinj p.1 (hacc.names p hp) z hz' (by rw [hacc.bound p hp, hps, hzr])
-  have hzn : (z, s) ∈ m := by rw [← hpz, ← hps]; exact hp
-  have hbound := h.pairs (z, s)
-  have hzero : (occsOf rho (.var y)).count (z, s) = 0 := by
-    rw [List.count_eq_zero]
-    intro hmem'
-    obtain ⟨x, hx, _, hfst⟩ := mem_pairsOf hmem'
-    rw [show uses (.var y) = [y] from rfl, List.mem_singleton] at hx
-    exact hzy (hfst.trans hx)
-  have hpos' : 0 < m.count (z, s) := List.count_pos_iff.mpr hzn
-  omega
+/-! ## The discipline: a term run at an account
 
-/-! ## The discipline survives the moves the account makes -/
+`Runs` is the judgement this module is for. Each clause is one construct of
+`Scidonia.RC.Syntax`'s syntax, and each is the premise of the target rule that
+construct takes, together with the account movement that rule makes, read
+root-first: the outer instruction's premise and movement, and the continuation's own
+clause. -/
 
-/-- Binding a name to a value's reference keeps the environment injective on the body once
-the value's variable is not free in the body: the body's names are read by the old
-environment, and the new name reads the one reference, which no name of the body reads. -/
-theorem injectiveOn_set {rho : TEnv} {us us' : List Var} {x z : Var} {r : Ref}
-    (h : ∀ a ∈ us, ∀ b ∈ us, rho.lookup a = rho.lookup b → a = b)
-    (hz : z ∈ us) (hlook : rho.lookup z = some r)
-    (hsub : ∀ a ∈ us', a ≠ x → a ∈ us) (hzout : z ∉ us') :
-    ∀ a ∈ us', ∀ b ∈ us', (TEnv.set rho x r).lookup a = (TEnv.set rho x r).lookup b → a = b := by
-  intro a ha b hb hab
-  by_cases hax : a = x
-  · rw [hax, TEnv.lookup_set_self] at hab
-    by_cases hbx : b = x
-    · rw [hax, hbx]
-    · exfalso
-      rw [TEnv.lookup_set_of_ne (fun hh => hbx hh.symm) r] at hab
-      have hbz : b = z := h b (hsub b hb hbx) z hz (by rw [← hab, hlook])
-      exact hzout (hbz ▸ hb)
-  · rw [TEnv.lookup_set_of_ne (fun hh => hax hh.symm) r] at hab
-    by_cases hbx : b = x
-    · exfalso
-      rw [hbx] at hab
-      rw [TEnv.lookup_set_self] at hab
-      have haz : a = z := h a (hsub a ha hax) z hz (by rw [hab, hlook])
-      exact hzout (haz ▸ ha)
-    · rw [TEnv.lookup_set_of_ne (fun hh => hbx hh.symm) r] at hab
-      exact h a (hsub a ha hax) b (hsub b hb hbx) hab
+/-- The term `e` is run at the account `m` in the environment `ρ`: the judgement the
+target's rules preserve at their instructions. The environment is an index of the
+judgement and not a parameter, because a clause's continuation runs at the
+environment the rule leaves --- a binding's body at the binding's own environment,
+an arm's body at the arm's binders --- and a uniform parameter could not hold it. -/
+inductive Runs : TEnv → Multi → Expr → Prop where
+  /-- A variable is a value whose occurrence the account holds, at the reference the
+  environment names for it. -/
+  | var {ρ : TEnv} {x : Var} {r : Ref} {m : Multi} (hρ : ρ.lookup x = some r)
+      (hmem : (x, r) ∈ m) : Runs ρ m (.var x)
+  /-- An abstraction is a value that holds no occurrence: the closure captures
+  nothing, and its body's free variables are read from the environment in force when
+  it is applied. -/
+  | lam {ρ : TEnv} (x : Var) (body : Expr) (m : Multi) : Runs ρ m (.lam x body)
+  /-- A nullary node is a value that holds no occurrence. -/
+  | con0 {ρ : TEnv} (c : Ctor) (m : Multi) : Runs ρ m (.con0 c)
+  /-- A unary node's field runs: its cell is allocated with the field's reference as
+  its only slot. -/
+  | con1 {ρ : TEnv} {c : Ctor} {a : Expr} {m : Multi} (h : Runs ρ m a) :
+      Runs ρ m (.con1 c a)
+  /-- A binary node's first field is a value and its second field runs: the
+  realization reads the fields in that order. -/
+  | con2 {ρ : TEnv} {c : Ctor} {a b : Expr} {m : Multi} (ha : Value a) (hb : Runs ρ m b) :
+      Runs ρ m (.con2 c a b)
+  /-- A `dup` supplies an occurrence: the environment binds its name and the
+  continuation runs at the account with one more occurrence. -/
+  | dup {ρ : TEnv} {y : Var} {r : Ref} {e : Expr} {m : Multi} (hρ : ρ.lookup y = some r)
+      (h : Runs ρ (Multi.insert m y r) e) : Runs ρ m (.dup y e)
+  /-- A `drop` releases an occurrence the account holds: the continuation runs at the
+  account with it removed. -/
+  | drop {ρ : TEnv} {y : Var} {r : Ref} {e : Expr} {m : Multi} (hρ : ρ.lookup y = some r)
+      (hmem : (y, r) ∈ m) (h : Runs ρ (Multi.dropOcc m y r) e) : Runs ρ m (.drop y e)
+  /-- A binding of a variable moves the value's occurrence onto the binder, and the
+  body runs at the environment and account the rule leaves. The binder's name holds
+  no occurrence of the account at another reference, because it reads the value's
+  reference from then on. -/
+  | bindVar {ρ : TEnv} {x z : Var} {r : Ref} {e₂ : Expr} {m : Multi}
+      (hρ : ρ.lookup z = some r) (hmem : (z, r) ∈ m) (hhigh : nameOnly m x r = true)
+      (h : Runs (TEnv.set ρ x r) (Multi.insert (Multi.dropOcc m z r) x r) e₂) :
+      Runs ρ m (.bind x (.var z) e₂)
+  /-- A binding of an allocated value: the binder takes the reference the realization
+  handed out, and the body runs at the account with the binder's occurrence added.
+  The bound term is no variable, and the binder's name holds no occurrence of the
+  account. -/
+  | bindVal {ρ : TEnv} {x : Var} {v e₂ : Expr} {m : Multi} (hnovar : ∀ z, v ≠ .var z)
+      (hval : Value v) (hfree : freeName m x = true)
+      (h : ∀ r, Runs (TEnv.set ρ x r) (Multi.insert m x r) e₂) :
+      Runs ρ m (.bind x v e₂)
+  /-- A binding whose bound term is a computation: the position runs and the body
+  runs. -/
+  | bindPos {ρ : TEnv} {x : Var} {e₁ e₂ : Expr} {m : Multi} (hval : ¬ Value e₁)
+      (h₁ : Runs ρ m e₁) (h₂ : Runs ρ m e₂) : Runs ρ m (.bind x e₁ e₂)
+  /-- An application of an abstraction to a variable moves the argument's occurrence
+  onto the parameter, and the body runs at the environment and account the rule
+  leaves. -/
+  | appVar {ρ : TEnv} {x z : Var} {r : Ref} {body : Expr} {m : Multi}
+      (hρ : ρ.lookup z = some r) (hmem : (z, r) ∈ m) (hhigh : nameOnly m x r = true)
+      (h : Runs (TEnv.set ρ x r) (Multi.insert (Multi.dropOcc m z r) x r) body) :
+      Runs ρ m (.app (.lam x body) (.var z))
+  /-- An application of an abstraction to an allocated value resumes the body at the
+  reference the realization handed out. -/
+  | appVal {ρ : TEnv} {x : Var} {v body : Expr} {m : Multi} (hnovar : ∀ z, v ≠ .var z)
+      (hval : Value v) (hfree : freeName m x = true)
+      (h : ∀ r, Runs (TEnv.set ρ x r) (Multi.insert m x r) body) :
+      Runs ρ m (.app (.lam x body) v)
+  /-- An application whose function is a computation: the function position runs and
+  the argument runs. -/
+  | appPos {ρ : TEnv} {f a : Expr} {m : Multi} (hval : ¬ Value f) (hf : Runs ρ m f)
+      (ha : Runs ρ m a) : Runs ρ m (.app f a)
+  /-- An application whose function is a value that is not an abstraction: the
+  argument runs. The function is not read for an occurrence, which is what the
+  argument's rule asks of it. -/
+  | appArgPos {ρ : TEnv} {f a : Expr} {m : Multi} (hval : Value f)
+      (hnotlam : ∀ x body, f ≠ .lam x body) (ha : Runs ρ m a) : Runs ρ m (.app f a)
+  /-- An application of an abstraction to a computation: the argument runs. -/
+  | appLamArg {ρ : TEnv} {x : Var} {body a : Expr} {m : Multi} (hval : ¬ Value a)
+      (ha : Runs ρ m a) : Runs ρ m (.app (.lam x body) a)
+  /-- A match binds the arm's binders to the slots of the cell its subject names, and
+  leaves the account as it was. The body runs once the binders name references the
+  account pairs with them; the arm's binders receive the cell's slots, which are the
+  heap's, so the pairs are the hypothesis the clause carries. -/
+  | matchC {ρ : TEnv} {z : Var} {r : Ref} {c : Ctor} {ys : List Var} {body : Expr}
+      {m : Multi} (hρ : ρ.lookup z = some r) (hmem : (z, r) ∈ m)
+      (h : ∀ rs, ys.length = rs.length → (∀ p ∈ ys.zip rs, p ∈ m) →
+        Runs (TEnv.bindAll ρ ys rs) m body) : Runs ρ m (.matchC (.var z) c ys body)
+  /-- A store, with the discipline's own requirement: the account holds the store's
+  occurrence (`Owns`), the reference the environment names for its subject is counted
+  once in the account, and the value and the rest of the term run. -/
+  | store {ρ : TEnv} {y : Var} {i : Nat} {v : Expr} {m : Multi}
+      (hown : Owns ρ m (.store (.var y) i v))
+      (hdistinct : ∀ r, ρ.lookup y = some r → (expand m).count r = 1)
+      (hv : Runs ρ m v) (hy : Runs ρ m (.var y)) : Runs ρ m (.store (.var y) i v)
 
-/-- The discipline survives a release: the account moves as the term does and the
-environment and the term's body are what they were. `Target.TStep`'s two release rules make
-exactly this move. -/
-theorem wellFormed_drop {rho : TEnv} {m : Multi} {y : Var} {r : Ref} {e : Expr}
-    (hw : WellFormed rho m (.drop y e)) (hlook : rho.lookup y = some r)
-    (hsub : (y, r) ∈ m) : WellFormed rho (Multi.dropOcc m y r) e :=
-  ⟨accountOf_dropStep hw.account hlook hsub,
-    fun a ha b hb => hw.injective a (List.mem_cons_of_mem _ ha) b (List.mem_cons_of_mem _ hb),
-    hw.writes⟩
+/-! ## Values do not step, and a realized value is a value
 
-/-- The discipline survives the release of a cell a second reference also names, the rule
-`Target.TStep.dropShared`: its premises are the reference the subject names (which is the
-lookup `wellFormed_drop` reads), the count of two or more the rule branches on, and the
-occurrence the term holds, and the configuration it leaves is the release's. -/
-theorem wellFormed_dropShared {c : CHeap} {rho : TEnv} {m : Multi} {y : Var} {r : Ref}
-    {e : Expr} (hlook : rho.lookup y = some r) (_h2 : 2 ≤ CHeap.count c r)
-    (hsub : (y, r) ∈ m) (hw : WellFormed rho m (.drop y e)) :
-    WellFormed rho (Multi.dropOcc m y r) e :=
-  wellFormed_drop hw hlook hsub
+The clause of a binary node asks its first field to be a value, which is what makes
+the first field's congruence rule vacuous: no rule of the relation starts from a
+value. The lemma is by induction on the value, each case closed by the shape of the
+rules' conclusions. -/
 
-/-- The discipline survives the final release of a cell, the rule `Target.TStep.dropFinal`:
-its premises are the reference the subject names, the count of one the rule branches on,
-and the occurrence the term holds, and the configuration it leaves is the release's. -/
-theorem wellFormed_dropFinal {c : CHeap} {rho : TEnv} {m : Multi} {y : Var} {r : Ref}
-    {e : Expr} (hlook : rho.lookup y = some r) (_h1 : CHeap.count c r = 1)
-    (hsub : (y, r) ∈ m) (hw : WellFormed rho m (.drop y e)) :
-    WellFormed rho (Multi.dropOcc m y r) e :=
-  wellFormed_drop hw hlook hsub
+/-- A value takes no step of the target relation: every rule of `Scidonia.RC.Target`
+starts from an instruction, and no instruction is a value. -/
+theorem value_does_not_step {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {e : Expr}
+    {c' : CHeap} {hs' : List Ref} {ρ' : TEnv} {m' : Multi} (hv : Value e) :
+    ∀ {e' : Expr}, ¬ TStep c hs ρ m e c' hs' ρ' m' e' := by
+  induction hv with
+  | var x => intro e' h; cases h
+  | lam x body => intro e' h; cases h
+  | con0 c => intro e' h; cases h
+  | con1 ha ih =>
+      intro e' h
+      cases h with
+      | con1Field hstep => exact ih hstep
+  | con2 ha hb iha ihb =>
+      intro e' h
+      cases h with
+      | con2FieldL hstep => exact iha hstep
+      | con2FieldR _ hstep => exact ihb hstep
 
-/-- The discipline survives the binding of a variable — `Target.TStep.bindVar` and
-`Target.TStep.appVar` make this move — once the binder occurs exactly once in the body and
-the value's variable is not free in it. Those two hypotheses are the binder's own linearity:
-the account relation does not supply them, and the move is not preserved without them. -/
-theorem wellFormed_bindVar {rho : TEnv} {m : Multi} {x z : Var} {r : Ref} {e₂ : Expr}
-    (hw : WellFormed rho m (.bind x (.var z) e₂)) (hlook : rho.lookup z = some r)
-    (hsub : (z, r) ∈ m) (hlinear : (uses e₂).count x = 1) (hz : z ∉ uses e₂) :
-    WellFormed (TEnv.set rho x r) (Multi.insert (Multi.dropOcc m z r) x r) e₂ :=
-  ⟨accountOf_bindVar hw.account hlook hsub hlinear,
-    injectiveOn_set (us := uses (.bind x (.var z) e₂)) (us' := uses e₂)
-      hw.injective (List.mem_cons_self ..) hlook
-      (fun a ha hax => List.mem_cons_of_mem _ (List.mem_filter.mpr ⟨ha, by simpa using hax⟩))
-      hz,
-    hw.writes.2⟩
-
-/-- The discipline survives the binding of a variable in an application —
-`Target.TStep.appVar` — under the same two linearity hypotheses. -/
-theorem wellFormed_appVar {rho : TEnv} {m : Multi} {x z : Var} {r : Ref} {body : Expr}
-    (hw : WellFormed rho m (.app (.lam x body) (.var z))) (hlook : rho.lookup z = some r)
-    (hsub : (z, r) ∈ m) (hlinear : (uses body).count x = 1) (hz : z ∉ uses body) :
-    WellFormed (TEnv.set rho x r) (Multi.insert (Multi.dropOcc m z r) x r) body :=
-  ⟨accountOf_appVar hw.account hlook hsub hlinear,
-    injectiveOn_set (us := uses (.app (.lam x body) (.var z))) (us' := uses body)
-      hw.injective (List.mem_append_right _ (List.mem_singleton_self z)) hlook
-      (fun a ha hax => List.mem_append_left _ (List.mem_filter.mpr ⟨ha, by simpa using hax⟩))
-      hz,
-    hw.writes.left⟩
+/-- A realized value is a value: the realization's clauses are the value forms one by
+one. -/
+theorem valRef_value : ∀ {c : CHeap} {hs : List Ref} {ρ : TEnv} {v : Expr} {c' : CHeap}
+    {hs' : List Ref} {r : Ref}, ValRef c hs ρ v c' hs' r → Value v
+  | _, _, _, _, _, _, _, ValRef.var _ _ => Value.var _
+  | _, _, _, _, _, _, _, ValRef.lam => Value.lam _ _
+  | _, _, _, _, _, _, _, ValRef.con0 => Value.con0 _
+  | _, _, _, _, _, _, _, ValRef.con1 hv _ => Value.con1 (valRef_value hv)
+  | _, _, _, _, _, _, _, ValRef.con2 hv₁ hv₂ _ _ =>
+      Value.con2 (valRef_value hv₁) (valRef_value hv₂)
 
 /-! ## The discipline implies the store's hypotheses -/
 
-/-- The discipline gives ownership at a write: the term's own account holds the subject's
-occurrence, and — with the environment injective on the term's free variables — the account
-counts the subject's reference once, because the write clause says the subject is the only
-free occurrence of its name. This is where the discipline becomes the ownership
-`Ownership.store_owned_is_destructive` consumes: its `hown` and `hm` are the two
-conclusions here, and the third hypothesis of that theorem (the accounted cell's count) is
-the subject's occurrence read at the account. -/
-theorem wellFormed_store {rho : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
-    (h : WellFormed rho m (.store (.var y) i v)) :
-    Owns rho m (.store (.var y) i v) ∧ ∃ r, rho.lookup y = some r ∧ (expand m).count r = 1 := by
-  obtain ⟨hacc, hinj, hw⟩ := h
-  have hw' := (writesOwned_store_var y i v).mp hw
-  have hy : y ∈ uses (.store (.var y) i v) := List.mem_append_left _ (List.mem_singleton_self y)
-  obtain ⟨r, hr⟩ := hacc.dom y hy
-  have hyv : y ∉ uses v := by
-    intro hmem
-    have h1 : (uses (.store (.var y) i v)).count y = (uses v).count y + 1 := by
-      rw [show uses (.store (.var y) i v) = [y] ++ uses v from rfl, List.count_append,
-        List.count_singleton_self]
-      omega
-    have h2 : 1 ≤ (uses v).count y := List.count_pos_iff.mpr hmem
-    omega
-  have hzero : (refsOf rho (uses v)).count r = 0 := by
-    rw [List.count_eq_zero]
-    intro hmem
-    obtain ⟨z, hz, hzr⟩ := mem_refsOf hmem
-    have hzy : z = y :=
-      hinj z (List.mem_append_right _ hz) y hy (by rw [hzr, hr])
-    exact hyv (hzy ▸ hz)
-  have hcount : (expand m).count r = 1 := by
-    rw [hacc.refs r, show uses (.store (.var y) i v) = [y] ++ uses v from rfl,
-      refsOf_append, refsOf_cons_some hr, refsOf_nil, List.count_append, hzero]
-    simp
-  obtain ⟨p, hp, hpr⟩ : ∃ p ∈ m, p.2 = r := by
-    have hpos : 0 < (expand m).count r := by omega
-    rw [expand, List.count_pos_iff, List.mem_map] at hpos
-    obtain ⟨p, hp, hpr⟩ := hpos
-    exact ⟨p, hp, hpr⟩
-  have hpy : p = (y, r) := by
-    have hb := hacc.bound p hp
-    have hn := hacc.names p hp
-    have hxy : p.1 = y := hinj p.1 hn y hy (by rw [hb, hpr, hr])
-    exact Prod.ext hxy hpr
-  exact ⟨Owns.store hr (by rw [← hpy]; exact hp), r, hr, hcount⟩
+/-- A term run at an account whose store is disciplined gives the store's two
+hypotheses: the account holds the store's occurrence (`Owns`), and the reference the
+environment names for the subject is counted once in the account. The second is the
+clause's own distinctness conjunct, which is the reading
+`Ownership.store_owned_is_destructive` consumes as its `hm`. -/
+theorem runs_store_owned {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
+    (h : Runs ρ m (.store (.var y) i v)) :
+    Owns ρ m (.store (.var y) i v) ∧ ∃ r, ρ.lookup y = some r ∧ (expand m).count r = 1 := by
+  cases h with
+  | store hown hdistinct _ _ =>
+      obtain ⟨r, hρ, _⟩ := hown.store_occurrence
+      exact ⟨hown, r, hρ, hdistinct r hρ⟩
 
-/-! ## The root of a session
+/-- The store's own occurrence under the judgement: the pair of the subject's
+variable and the reference the environment names for it is one the account holds. -/
+theorem runs_store_occurrence {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
+    (h : Runs ρ m (.store (.var y) i v)) : ∃ r, ρ.lookup y = some r ∧ (y, r) ∈ m :=
+  (runs_store_owned h).1.store_occurrence
 
-A root is the reference a session's object is named by: no slot of the heap names it and
+/-! ## The moves the instruction rules make
+
+One theorem per instruction of the step relation, each reading the clause of the
+judgement its term is judged by. Each states the rule's move: the rule's own premises
+and the judgement at the term the rule fires at give the judgement at the
+configuration the rule leaves. Every one of them is the clause itself --- a `dup`'s
+continuation is the clause's continuation, a `drop`'s is the clause's, and a binding's
+and an application's continuations are the clauses' continuations --- and the shape
+alternatives the other clauses are excluded by. A name is read at one reference, so
+the reference the rule's premise names and the reference the clause names agree, which
+is `lookup_unique`. The theorems are about the rule and not about the whole relation:
+a term that a rule fires at may also be a position a congruence rule steps, and the
+four goals in the module note are exactly what the congruence rules then ask for.
+
+The store's two branches are one move of the account --- the write's branch is the
+heap's count --- so the two theorems below read the same clause and differ in the
+configuration the rule leaves. -/
+
+/-- The environment reads a name at one reference: two hypotheses that bind it agree. -/
+theorem lookup_unique {ρ : TEnv} {x : Var} {r r' : Ref} (h : ρ.lookup x = some r)
+    (h' : ρ.lookup x = some r') : r = r' :=
+  Option.some.inj (h.symm.trans h')
+
+/-- A `dup` step preserves the judgement: the rule leaves exactly the continuation the
+clause asks for, at the account with the occurrence the instruction supplies. -/
+theorem runs_dup {ρ : TEnv} {m : Multi} {y : Var} {r : Ref} {e : Expr}
+    (hρ : ρ.lookup y = some r) (h : Runs ρ m (.dup y e)) :
+    Runs ρ (Multi.insert m y r) e := by
+  cases h with
+  | dup hρ' h' =>
+      rw [lookup_unique hρ' hρ] at h'
+      exact h'
+
+/-- A release preserves the judgement, both of the relation's branches: the cell's
+count decides the heap's move and not the account's, so the step leaves the
+continuation the clause asks for, at the account with the released occurrence
+removed. -/
+theorem runs_drop {ρ : TEnv} {m : Multi} {y : Var} {r : Ref} {e : Expr}
+    (hρ : ρ.lookup y = some r) (_hsub : (y, r) ∈ m) (h : Runs ρ m (.drop y e)) :
+    Runs ρ (Multi.dropOcc m y r) e := by
+  cases h with
+  | drop hρ' _ h' =>
+      rw [lookup_unique hρ' hρ] at h'
+      exact h'
+
+/-- A binding of a variable preserves the judgement: the step's environment and
+account are the clause's own, so its continuation is the clause's continuation. -/
+theorem runs_bindVar {ρ : TEnv} {m : Multi} {x z : Var} {r : Ref} {e₂ : Expr}
+    (hρ : ρ.lookup z = some r) (_hsub : (z, r) ∈ m) (_hhigh : nameOnly m x r = true)
+    (h : Runs ρ m (.bind x (.var z) e₂)) :
+    Runs (TEnv.set ρ x r) (Multi.insert (Multi.dropOcc m z r) x r) e₂ := by
+  cases h with
+  | bindVar hρ' _ _ h' =>
+      rw [lookup_unique hρ' hρ] at h'
+      exact h'
+  | bindVal hnovar _ _ _ => exact absurd rfl (hnovar z)
+  | bindPos hval _ _ => exact absurd (Value.var z) hval
+
+/-- A binding of an allocated value preserves the judgement: the clause asks the body
+to run at every binding of the binder, so the step's own reference is one instance of
+it. -/
+theorem runs_bindVal {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {x : Var}
+    {v e₂ : Expr} {c' : CHeap} {hs' : List Ref} {r : Ref} (hv : ValRef c hs ρ v c' hs' r)
+    (halloc : ∀ z, v ≠ .var z) (_hfree : freeName m x = true)
+    (h : Runs ρ m (.bind x v e₂)) : Runs (TEnv.set ρ x r) (Multi.insert m x r) e₂ := by
+  cases h with
+  | bindVal _ _ _ h' => exact h' r
+  | bindVar _ _ _ _ => exact absurd rfl (halloc _)
+  | bindPos hval _ _ => exact absurd (valRef_value hv) hval
+
+/-- An application of an abstraction to a variable preserves the judgement: the step's
+environment and account are the clause's own, so its continuation is the clause's
+continuation. -/
+theorem runs_appVar {ρ : TEnv} {m : Multi} {x z : Var} {r : Ref} {body : Expr}
+    (hρ : ρ.lookup z = some r) (_hsub : (z, r) ∈ m) (_hhigh : nameOnly m x r = true)
+    (h : Runs ρ m (.app (.lam x body) (.var z))) :
+    Runs (TEnv.set ρ x r) (Multi.insert (Multi.dropOcc m z r) x r) body := by
+  cases h with
+  | appVar hρ' _ _ h' =>
+      rw [lookup_unique hρ' hρ] at h'
+      exact h'
+  | appVal hnovar _ _ _ => exact absurd rfl (hnovar z)
+  | appPos hval _ _ => exact absurd (Value.lam x body) hval
+  | appArgPos _ hnotlam _ => exact absurd rfl (hnotlam x body)
+  | appLamArg hval _ => exact absurd (Value.var z) hval
+
+/-- An application of an abstraction to an allocated value preserves the judgement:
+the clause asks the body to run at every binding of the parameter, so the step's own
+reference is one instance of it. -/
+theorem runs_appVal {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {x : Var}
+    {v body : Expr} {c' : CHeap} {hs' : List Ref} {r : Ref} (hv : ValRef c hs ρ v c' hs' r)
+    (halloc : ∀ z, v ≠ .var z) (_hfree : freeName m x = true)
+    (h : Runs ρ m (.app (.lam x body) v)) :
+    Runs (TEnv.set ρ x r) (Multi.insert m x r) body := by
+  cases h with
+  | appVal _ _ _ h' => exact h' r
+  | appVar _ _ _ _ => exact absurd rfl (halloc _)
+  | appPos hval _ _ => exact absurd (Value.lam x body) hval
+  | appArgPos _ hnotlam _ => exact absurd rfl (hnotlam x body)
+  | appLamArg hval _ => exact absurd (valRef_value hv) hval
+
+/-- The destructive branch of a store preserves the judgement: the account and the
+environment are what they were, and the write's result is the subject's occurrence,
+which the clause holds as its own conjunct. -/
+theorem runs_storeExclusive {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr}
+    (h : Runs ρ m (.store (.var y) i v)) : Runs ρ m (.var y) := by
+  cases h with
+  | store _ _ _ hy => exact hy
+
+/-- The copying branch of a store preserves the judgement: the step leaves the
+subject's name naming the fresh location, and the write's result is that name's
+occurrence, which the account the rule leaves holds as its first pair. -/
+theorem runs_storeShared {ρ : TEnv} {m : Multi} {y : Var} {i : Nat} {v : Expr} {r : Ref}
+    {fr : Ref} (_h : Runs ρ m (.store (.var y) i v)) :
+    Runs (TEnv.set ρ y fr) (Multi.insert (Multi.dropOcc m y r) y fr) (.var y) :=
+  Runs.var (TEnv.lookup_set_self ρ y fr) (List.mem_cons_self ..)
+
+/-! ## The congruence rules that preserve the judgement
+
+A congruence rule steps a term's position; the induction over the relation gives such
+a rule the position's own preservation as its hypothesis, and the theorems here are
+stated with it, because that is exactly what the rule's case has. -/
+
+/-- A step in the field of a unary node preserves the judgement: the node's clause is
+the field's clause and the field's step is the position's own preservation. -/
+theorem runs_con1Field {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {ct : Ctor}
+    {a : Expr} {c' : CHeap} {hs' : List Ref} {ρ' : TEnv} {m' : Multi} {a' : Expr}
+    (_h : TStep c hs ρ m a c' hs' ρ' m' a') (hpos : Runs ρ m a → Runs ρ' m' a')
+    (hr : Runs ρ m (.con1 ct a)) : Runs ρ' m' (.con1 ct a') := by
+  cases hr with
+  | con1 h => exact Runs.con1 (hpos h)
+
+/-- A step in the first field of a binary node preserves the judgement: the node's
+clause asks that field to be a value, and a value takes no step, so no such
+configuration is judged. -/
+theorem runs_con2FieldL {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {ct : Ctor}
+    {a b : Expr} {c' : CHeap} {hs' : List Ref} {ρ' : TEnv} {m' : Multi} {a' : Expr}
+    (h : TStep c hs ρ m a c' hs' ρ' m' a') (hr : Runs ρ m (.con2 ct a b)) :
+    Runs ρ' m' (.con2 ct a' b) := by
+  cases hr with
+  | con2 ha _ => exact (value_does_not_step ha h).elim
+
+/-- A step in the second field of a binary node preserves the judgement: the first
+field's value is what it was, and the second field's step is the position's own
+preservation. -/
+theorem runs_con2FieldR {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {ct : Ctor}
+    {a b : Expr} {c' : CHeap} {hs' : List Ref} {ρ' : TEnv} {m' : Multi} {b' : Expr}
+    (ha : Value a) (_h : TStep c hs ρ m b c' hs' ρ' m' b') (hpos : Runs ρ m b → Runs ρ' m' b')
+    (hr : Runs ρ m (.con2 ct a b)) : Runs ρ' m' (.con2 ct a b') := by
+  cases hr with
+  | con2 _ hb => exact Runs.con2 ha (hpos hb)
+
+/-! ## The root of a run
+
+A root is the reference the run's object is named by: no slot of the heap names it and
 no handle the run holds names it. Those are the two facts a rooted configuration has by
-its shape, and they are the two premises `Ownership.store_owned_is_destructive` names as
-the ones the account cannot supply. -/
+its shape, and they are the two premises `Ownership.store_owned_is_destructive` names
+as the ones the account cannot supply. -/
 
 /-- A root: a reference no slot of the heap names and no handle the run holds names. -/
 def Rooted (c : CHeap) (hs : List Ref) (r : Ref) : Prop := r ∉ CHeap.slots c ∧ r ∉ hs
@@ -908,8 +546,8 @@ theorem Rooted.handle_count {c : CHeap} {hs : List Ref} {r : Ref} (h : Rooted c 
     hs.count r = 0 :=
   List.count_eq_zero.mpr h.2
 
-/-- A reference no slot of the heap names is counted zero by the heap's slots: the shape a
-heap has at a root it does not name. -/
+/-- A reference no slot of the heap names is counted zero by the heap's slots: the
+shape a heap has at a root it does not name. -/
 theorem slot_count_zero_of_not_mem {c : CHeap} {r : Ref} (h : r ∉ CHeap.slots c) :
     (CHeap.slots c).count r = 0 :=
   List.count_eq_zero.mpr h
@@ -927,18 +565,19 @@ zero. -/
 /-! ## The composition -/
 
 /-- A disciplined write at the root of a coupled configuration is destructive. The
-discipline supplies the two premises `Ownership.store_owned_is_destructive` cannot derive
---- the term's own occurrence of the subject and the account's counting it once --- and the
-root's shape supplies the two hypotheses that theorem names, no slot of the heap and no
-handle the run holding naming the cell (`Rooted`). What is left is the write rule's own
-check on the written slots (`hks`, `writeCheck`'s third conjunct): it is the rule's premise
-and not the discipline's, and it is named here rather than assumed silently. -/
+judgement supplies the two premises `Ownership.store_owned_is_destructive` cannot
+derive --- the term's own occurrence of the subject and the account's counting it
+once --- and the root's shape supplies the two hypotheses that theorem names, no slot
+of the heap and no handle the run holding naming the cell (`Rooted`). What is left is
+the write rule's own check on the written slots (`hks`, `writeCheck`'s third
+conjunct): it is the rule's premise and not the discipline's, and it is named here
+rather than assumed silently. -/
 theorem rooted_store_destructive {c : CHeap} {hs : List Ref} {rho : TEnv} {m : Multi}
     {y : Var} {r : Ref} {i : Nat} {v : Expr} {ks : List Ref}
     (hc : Couple c hs rho m) (hlook : rho.lookup y = some r)
-    (hw : WellFormed rho m (.store (.var y) i v)) (hroot : Rooted c hs r) (hks : r ∉ ks) :
+    (hw : Runs rho m (.store (.var y) i v)) (hroot : Rooted c hs r) (hks : r ∉ ks) :
     (update c (hs ++ expand m) r ks).1.lookup r = some ks := by
-  obtain ⟨hown, r', hr', hcount⟩ := wellFormed_store hw
+  obtain ⟨hown, r', hr', hcount⟩ := runs_store_owned hw
   have hrr : r' = r := Option.some.inj (hr'.symm.trans hlook)
   exact store_owned_is_destructive hc hlook hown (hrr ▸ hcount) (Rooted.slot_count hroot)
     (Rooted.handle_count hroot) hks
