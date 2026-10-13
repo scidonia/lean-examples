@@ -182,6 +182,31 @@ The compile-time checks live in the check library:
   it where it exists (the bounds walk, the structured reader). A failed
   requirement fails the elaboration, so `lake build ScidoniaTest` is the gate; a
   detector weakened to match nothing fails the build rather than passing quietly.
+- `ScidoniaTest/OwnershipTyped.lean` checks `Scidonia.RC.OwnershipTyped` from
+  outside, in the same style. Its behavioural checks are `#guard`s of the
+  quotation's round trip at the empty slot, at `full 7` and at a payload of thirty
+  decimal digits, of the correspondence with the existing slot isomorphism at a
+  large payload, and of the sealed runner's value on the witnesses, each with a
+  pinned failing control of the same shape beside it. Its semantic checks are the
+  witnesses themselves — the read–write–read pair whose copied and direct values
+  are both `pair (full 7) (full 9)`, a two-read unchanged-cell pair, and a shape
+  change `empty → full n → empty` at an arbitrary payload — each admitted, each
+  reached by the *copying* `RC.StepStar` of the existing calculus, and each put
+  together with the direct evaluation by the agreement theorem, with the totality,
+  the quotation lemma and the `IO` equation applied at the first of them. Its
+  negative checks are a theorem `¬ Own …` for a specific expression of each shape
+  the rules cannot admit — a variable as a cell, an aliasing binding, a self-write,
+  a read returning the cell's name, a cell-headed pair, a second root while a cell
+  is held, and a write through the observation a read handed over — each beside an
+  accepted same-purpose control with its value evaluated, each with an elaboration
+  rejection pinned by `#guard_msgs`, and the absent rules by inversion for an
+  abstraction, an application, a `dup` and a `drop`. Its privacy pins are
+  `#guard_msgs` rejections of the sealed interpreter's name and the `#check`s of
+  the public evaluation and runner, beside the affirmative theorems that a client
+  can evaluate and run a submitted program. Its axiom checks assert the
+  `#print axioms` lists of the agreement, the totality, the quotation, the `IO`
+  equation, the simulation, the quotation laws and the witnesses, which show the
+  new theorems rest on the standard kernel principles only.
 - `ScidoniaTest/Run.lean` checks the run model from outside: evaluated steps and
   path resolutions on short heaps and programs, each with a pinned control beside
   it — including a step a check turns away, which does not run; the countermodel
@@ -1121,6 +1146,51 @@ Unicode in the frames is mapped to font commands in the preamble by
 `newunicodechar` — a character in a quoted range with no mapping fails the build,
 which is the signal to add one.
 
+`Scidonia/RC/OwnershipTyped/` is the ownership-typed fragment of the same
+calculus, added beside those modules and changing none of them. `Types.lean` fixes
+the fragment's vocabulary: a type index (`cell`, or an observation of a description
+of the constructible fragment), five distinct constructor tags, the quotation of a
+`Slot` as a λPure value (`emptyTag`, and `fullTag` applied to the quotation of the
+natural), the logical cell `root s` as the unary `rootTag` whose field is that
+quotation, the pair tag, and the decode `unquoteSlot` with its round trip;
+`quoteElSlot` reads the same quotation through the existing `Slot.encode`/`decode`
+isomorphism, and `quoteElSlot_encode` and `quoteElSlot_decode` say the two agree at
+every element of the description. `Judgement.lean` carries the two additional
+`Prop` judgements over the *existing* `Expr`, with no catch-all: `Obs Γ e o` is the
+observation-only formation judgement, `WellTyped Γ e τ` the fragment's typing, and
+`Own Γ κ e τ` the ownership discipline, whose `κ` is *at most one* protected-cell
+owner (`none` or `held x`, a ghost index and not a run-time capability) and whose
+six rules are the observation, the root construction, the read, the write and the
+two bindings. `Own` entails `WellTyped` and `RC.Pure`, and the shapes it does not
+admit are refutations about specific expressions — a variable as a cell, an
+aliasing binding, a self-write, a read returning the cell's name, a cell-headed
+pair, a second root while a cell is held, an abstraction, an application, a `dup`
+and a `drop` — each beside the same-purpose expression the rules do admit.
+`Model.lean` is the model: `Denote` says what a value of an observation is, `WF` is
+the agreement between the type context and the environment the interpreter
+evaluates in, `Inv` is the one-cell invariant (when a name the context types as a
+cell holds the cell, that name's value is the quoted root of exactly the slot the
+array holds, and the array is that slot's one-element array), and `runWith`/`runOn`
+are the array-threading recursion of the admitted fragment, with
+`runOn_simulate` the simulation against the *existing* `RC.StepStar`: the direct
+evaluation returns a value the copying reduction of the same term reaches, and a
+write is asked for only when the array holds slot `0`, which is what keeps the
+evaluation total for a term the discipline does not admit. `Executor.lean` is the
+sealed runner: its array-taking interpreter is private, `evalArray` creates the
+session's cell itself and returns only the quoted observation, and `runFresh` is
+the `IO` description over it in front of a proof argument that is erased.
+`Refinement.lean` is the agreement, the totality, the quotation lemma — the result
+carries no unary root node, so the cell is never among the values an admitted
+program returns — and the runner's logical `IO` equation `runFresh e h = pure v`.
+
+What the fragment does *not* claim: the agreement is about the values the two
+evaluations reach and not about compiled mutation. No equation relates the model's
+owner count to `lean_is_exclusive`, no statement is about the Slot constructor
+being mutated in place or about an array buffer keeping its address, and whether an
+update happens in place is the `inplace` harness's run-time evidence rather than a
+theorem here. The fragment is also first-order and single-cell: a lambda, an
+application, a second protected cell and a general description are outside it.
+
 ## The in-place check in the generated C
 
 `HSt.write` runs the object's `check` on the operation and the state before
@@ -1381,6 +1451,12 @@ they are defined, rather than in the appendix, so each is shown once.
 | `Scidonia/RC/Lower.lean` | The lowering strategy: the syntax-directed derivation with its canonical splits, and its totality and determinism |
 | `Scidonia/RC/Target.lean` | The target runtime: configurations over the counted heap, λ¹'s evaluation contexts, and `store` as `RCHeap.update` |
 | `Scidonia/RC/Ownership.lean` | The coupling invariant, the term-indexed ownership relation, and the two store theorems |
+| `Scidonia/RC/OwnershipTyped/` | The ownership-typed fragment: two `Prop` judgements over the existing term, the slot's quotation, the array-threading model and the sealed runner |
+| `Scidonia/RC/OwnershipTyped/Types.lean` | The fragment's vocabulary: the type index, the tags, the quotation and the decode, and the correspondence with the existing slot isomorphism |
+| `Scidonia/RC/OwnershipTyped/Judgement.lean` | `Obs`, `WellTyped` and `Own` with no catch-all, their laws, and the refutations of the shapes they do not admit |
+| `Scidonia/RC/OwnershipTyped/Model.lean` | The observation denotation, the context-and-environment agreement, the one-cell invariant, the array-threading recursion and its simulation against `RC.StepStar` |
+| `Scidonia/RC/OwnershipTyped/Executor.lean` | The sealed runner: the private array-taking interpreter, `evalArray`, and `runFresh` |
+| `Scidonia/RC/OwnershipTyped/Refinement.lean` | The agreement, the totality, the quotation lemma and the runner's logical `IO` equation |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -1396,6 +1472,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaTest/IRShape.lean` | The check over the compiler's own output: the post-reference-counting IR of the write paths read with `IR.findEnvDecl`, the shape and operand relations required of it on one executing path, and the borrowed-get control |
 | `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
 | `ScidoniaTest/RC.lean` | The calculus's controls — evaluated steps and translations with a control beside each, the capture pair, and asserted axiom lists |
+| `ScidoniaTest/OwnershipTyped.lean` | The ownership-typed fragment's controls — the quotation, the witnesses with their copying paths and direct evaluation, the refusals with their accepted counterparts and pinned rejections, the sealing, and asserted axiom lists |
 | `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |

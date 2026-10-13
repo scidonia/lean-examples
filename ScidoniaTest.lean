@@ -12,6 +12,7 @@ import ScidoniaTest.RCHeap
 import ScidoniaTest.IRShape
 import ScidoniaTest.Run
 import ScidoniaTest.RC
+import ScidoniaTest.OwnershipTyped
 import ScidoniaTest.Target
 import ScidoniaTest.Discipline
 import ScidoniaTest.Typing

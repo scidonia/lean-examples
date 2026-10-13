@@ -17,6 +17,14 @@ count would be read, and the lowering is the step that puts the two resource
 operations there. Nothing in this slice counts anything, so what is here is the
 calculus a later module can put a count on: the source, the target, and which
 target a source term becomes.
+
+`Scidonia.RC.OwnershipTyped` is the ownership-typed fragment of the same
+calculus, added beside these modules and changing none of them: an additional
+`Prop` typing and an additional `Prop` ownership discipline over the existing
+`Expr`, a quotation of the existing `Slot` as a λPure value, a private array
+interpreter of the admitted fragment, and the agreement between that
+interpreter's value and the value the copying reduction of the same term
+reaches.
 -/
 import Scidonia.RC.Syntax
 import Scidonia.RC.Pure
@@ -27,3 +35,4 @@ import Scidonia.RC.Discipline
 import Scidonia.RC.Typing
 import Scidonia.RC.Correspondence
 import Scidonia.RC.Transfer
+import Scidonia.RC.OwnershipTyped.Refinement
