@@ -1190,6 +1190,33 @@ execution route.
 carries no unary root node, so the cell is never among the values an admitted
 program returns — and the runner's logical `IO` equation `runFresh e h = pure v`.
 
+`Scidonia/RC/TreeOwnership/` is the layout-indexed side of the same calculus,
+added beside those modules and changing none of them. `Quote.lean` writes a
+`Layout5.State` as a term of the existing syntax: `quoteEl` quotes an element of
+the observation universe, `cellVal` quotes a state as its *protected node's*
+value — a leaf as the unary `rootTag` node of its observation, which is exactly
+the one-cell fragment's `root` at the slot description (`cellVal_leaf_slot`), a
+struct as the binary `structTag` node of its components' node values, and an
+array as the `consTag`/`nilTag` spine of its elements' — and `unquoteVal` decodes
+it back, so the quotation is injective (`cellVal_injective`). `nodeVal` reads the
+node at a path, `leafObsPath?` says whether a path ends at a leaf, `hasProtected`
+is the syntactic detector of a protected node, subtree or array, and `nav` walks
+a quotation along a path with `nav_cellVal` the path-resolution law at an
+in-bounds path. `Spine.lean` is the per-node fractional account: `Account d` is a
+finite association list from paths to the existing `Ledger`, `heldAt` is the
+fraction of a node its owner still holds, `Reads`/`Writes` are an outstanding
+loan and a whole holding, and the laws are `writes_holds_one`, `share_fit` (two
+distinct holders of one node fit in the whole), the loan and return movement of
+the held fraction `heldAt_lend`/`heldAt_repay` with `repay_not_mem`,
+`spine_writer_excludes`, the branch arithmetic `Branch.wf_leafSum` and
+`Branch.wf_sharesPositive`, and the read-through positivity and fit
+`spine_readThrough_positive`/`readThrough_fits`. `spine_sibling_compatible` is
+the witness: a reader owns half of a common root and half of the left leaf, a
+writer the root's other half and the whole right subtree, the root sums to one
+and the right subtree excludes every other holder. What is *not* here: no
+ownership relation over terms, no tree interpreter and no agreement theorem, so
+the tree slice is not advertised as a supported execution route.
+
 What the fragment does *not* claim: the agreement is about the values the two
 evaluations reach and not about compiled mutation. No equation relates the model's
 owner count to `lean_is_exclusive`, no statement is about the Slot constructor
@@ -1464,6 +1491,8 @@ they are defined, rather than in the appendix, so each is shown once.
 | `Scidonia/RC/OwnershipTyped/Model.lean` | The observation denotation, the context-and-environment agreement, the one-cell invariant, the array-threading recursion and its simulation against `RC.StepStar` |
 | `Scidonia/RC/OwnershipTyped/Executor.lean` | The sealed runner: the private array-taking interpreter, `evalArray`, and `runFresh` |
 | `Scidonia/RC/OwnershipTyped/Refinement.lean` | The agreement, the totality, the quotation lemma and the runner's logical `IO` equation |
+| `Scidonia/RC/TreeOwnership/Quote.lean` | A `Layout5.State`'s quotation as a λPure term, its node values and their decode, the sub-state and node accessors, the in-bounds path check, the protected-node detector, the observation path of a path, and path navigation with its resolution law |
+| `Scidonia/RC/TreeOwnership/Spine.lean` | The per-node fractional account: the node ledgers, the held fraction and the loan and return laws, the whole-holding exclusion, the branch arithmetic, the read-through positivity and fit, and the sibling witness |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
 | `Scidonia/FracPerm/Counter.lean` | The worked second object: a count and a log, and the check that covers both |
 | `ScidoniaTest/` | Compile-time checks, built as the `ScidoniaTest` library |
@@ -1480,6 +1509,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
 | `ScidoniaTest/RC.lean` | The calculus's controls — evaluated steps and translations with a control beside each, the capture pair, and asserted axiom lists |
 | `ScidoniaTest/OwnershipTyped.lean` | The ownership-typed fragment's controls — the quotation, the witnesses with their copying paths and direct evaluation, the refusals with their accepted counterparts and pinned rejections, the sealing, and asserted axiom lists |
+| `ScidoniaTest/TreeOwnership.lean` | The tree slice's controls — the quotation and its round trip at a struct and a nested array, the detector's two sides, the one-cell fragment's alignment, the path resolution at a struct leaf and at an in-bounds nested-array element, the sibling witness's account, and asserted `#print axioms` lists |
 | `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |

@@ -18,3 +18,4 @@ import ScidoniaTest.Discipline
 import ScidoniaTest.Typing
 import ScidoniaTest.Correspondence
 import ScidoniaTest.Transfer
+import ScidoniaTest.TreeOwnership
