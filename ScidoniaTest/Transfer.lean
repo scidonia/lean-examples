@@ -7,7 +7,7 @@ references, the take-out's check and the run's counting are the write theorem's 
 named hypotheses, and the account's injectivity is a consequence of the two countings
 rather than an input. A proof development has no pre-fix behaviour to observe, so the
 checks here meet the transfer from outside, on heaps, handle lists and accounts a client
-can build. They are of four kinds:
+can build. They are of five kinds:
 
 * **The transfer at one configuration, evaluated**, as `#guard`s: the run's handle list
   at the take-out and the coupling's split agree at every reference, the extracted
@@ -28,9 +28,17 @@ can build. They are of four kinds:
   injectivity, and the account the take-out extracted is injective, which is the
   affirmative side of the clause `Scidonia.RC.Correspondence` names as the one neither
   the typing nor the coupling supplies.
+* **A run's write step, read through the coupling**, as the module's own theorems applied at
+  a step of `Run.writeStep`: the heap the step's take-out leaves is the one the transfer's
+  configuration is read at, the coupling holds at it for the account that names the extracted
+  occurrence, the composition gives the destructive branch at the nested subject beside the
+  step's own result, and the boundary statement says what a coupling at the run's own handle
+  list leaves.
 * **Axioms**: each representative theorem's `#print axioms` output is pinned, so a proof
   that acquires an axiom it should not fails the build rather than printing a longer list
-  for a reader to notice.
+  for a reader to notice. The lists that name `Classical.choice` are those that read a
+  membership out of its absence through the counted heap's `Classical.byContradiction`
+  lemmas, which is where it comes in.
 
 The heaps below are read as exactly the cells they list, which is the reading `Counted`
 is stated under; nothing here constructs a heap from a compiled run.
@@ -353,6 +361,82 @@ theorem boundary_at_one_configuration :
     by simpa [expand] using ScidoniaTest.Run.pair_counted, repeated_pair_inj,
     by simpa [aliasM] using alias_not_inj⟩
 
+/-! ## A run's write step, read through the coupling
+
+The heap above is the configuration a write step's take-out leaves at the chain: the step at
+the chain's first path takes the middle cell out of the root's slot, drops the pair's handle,
+and checks the extracted cell, so the configuration it hands the nested write is that
+take-out's — the heap above and the extracted occurrence at the head of the runner's handle
+list. The checks below pin that identification, and the transfer's statements are then read at
+the step rather than at a heap built by hand. -/
+
+/-- The run model's own take-out at the chain's root slot leaves the heap above: the
+transfer's configuration is the one `Run.writeStep`'s recursion enters, not a heap a client
+composed. -/
+theorem step_takeout_is_held :
+    Scidonia.FracPerm.StateVar.Run.held ScidoniaTest.Run.chain 0 0 1 = held ∧
+      (CHeap.slotsAt ScidoniaTest.Run.chain 0)[0]? = some 1 ∧
+      1 :: ScidoniaTest.Run.handles = taken :=
+  ⟨by decide, by decide, by decide⟩
+
+/-- The coupling at the configuration the write step's take-out hands the nested write: the
+run's counting at the chain beside the root's focus check, and the account naming the
+occurrence the take-out extracted. -/
+theorem held_couple_of_the_step : Couple held rest env acct :=
+  couple_of_takeout (c := ScidoniaTest.Run.chain) (hs := ScidoniaTest.Run.handles) (r := 0)
+    (i := 0) (e := 1) ScidoniaTest.Run.chain_wf ScidoniaTest.Run.chain_counted
+    (by decide) (exclusive?_eq_true (by decide)) (by decide) env_bound (by decide)
+
+/-- The composition at the run's own write step: the step at the chain's first path, with the
+result `Run.writeStep_spec` gives it, and the destructive branch at the nested subject read
+through the correspondence the coupling and the two countings build. -/
+theorem writeStep_chain_nested_destructive :
+    Couple held rest env acct ∧
+      (update held taken 1 []).1.lookup 1 = some [] ∧
+      ScidoniaTest.Run.upper.lookup 1 = some [] := by
+  have hstep : writeStep ScidoniaTest.Run.chain ScidoniaTest.Run.handles 0 [0] [] =
+      some (ScidoniaTest.Run.upper, ScidoniaTest.Run.handles) := by decide
+  have hlook : (CHeap.slotsAt ScidoniaTest.Run.chain 0)[0]? = some 1 := by decide
+  obtain ⟨hcouple, hdest, _, t, ht, hl⟩ :=
+    writeStep_nested_destructive_of_couple (root := 0) (c := ScidoniaTest.Run.chain)
+      (hs := ScidoniaTest.Run.handles) (i := 0) (p := []) (ks := []) (e := 1)
+      (c' := ScidoniaTest.Run.upper) (hs' := ScidoniaTest.Run.handles)
+      ScidoniaTest.Run.chain_accept hstep hlook env_bound (by decide) (by decide)
+      acct_names env_lookup store_typed
+  have ht1 : t = 1 := by
+    rw [show resolve ScidoniaTest.Run.chain 0 [0] = some 1 from by decide] at ht
+    exact (Option.some.inj ht).symm
+  exact ⟨hcouple, hdest, by rw [ht1] at hl; exact hl⟩
+
+/-- The same composition at a write step whose path's level is its last: the recursion's
+entry is the write's own subject, so the leaf's check supplies the write rule's premise on the
+written slots and the run's result and the coupling's branch are about one cell. -/
+theorem writeStep_chain_subject_destructive :
+    Couple held rest env acct ∧
+      (update held taken 1 []).1.lookup 1 = some [] ∧
+      ScidoniaTest.Run.upper.lookup 1 = some [] :=
+  writeStep_subject_destructive_of_couple (root := 0) (c := ScidoniaTest.Run.chain)
+    (hs := ScidoniaTest.Run.handles) (i := 0) (ks := []) (e := 1)
+    (c' := ScidoniaTest.Run.upper) (hs' := ScidoniaTest.Run.handles)
+    ScidoniaTest.Run.chain_accept (by decide) (by decide) env_bound (by decide)
+    acct_names env_lookup store_typed
+
+/-- The boundary the account is read at, as a statement about every account: a coupling at
+the run's own handle list names no occurrence, so the only account the chain's configuration
+couples with there is the empty one. -/
+theorem chain_couple_is_empty {ρ : TEnv} {m : Multi}
+    (h : Couple ScidoniaTest.Run.chain ScidoniaTest.Run.handles ρ m) : m = [] :=
+  couple_at_run_handles_is_empty ScidoniaTest.Run.chain_counted h
+
+/-- The same boundary's affirmative side: the chain's own configuration couples with the
+empty account, which is the one the statement above leaves. -/
+theorem run_handles_couple_is_empty :
+    Couple ScidoniaTest.Run.chain ScidoniaTest.Run.handles env [] := by
+  refine ⟨ScidoniaTest.Run.chain_wf, ?_, ?_⟩
+  · simpa using ScidoniaTest.Run.chain_counted
+  · intro p hp
+    simp at hp
+
 /-! ## Axioms
 
 Each representative theorem's list is pinned, so a proof that acquires an axiom it should
@@ -407,6 +491,18 @@ info: 'ScidoniaTest.Transfer.taken_counted' depends on axioms: [propext, Quot.so
 #guard_msgs (whitespace := lax) in
 #print axioms taken_counted
 
+/--
+info: 'Scidonia.RC.couple_of_takeout' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms couple_of_takeout
+
+/--
+info: 'Scidonia.RC.writeStep_nested_destructive_of_couple' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms writeStep_nested_destructive_of_couple
+
 /-! The remaining new theorems' lists -/
 
 #print axioms count_self_eq_length_of_all_eq
@@ -437,5 +533,16 @@ info: 'ScidoniaTest.Transfer.taken_counted' depends on axioms: [propext, Quot.so
 #print axioms boundary_accounts
 #print axioms repeated_pair_inj
 #print axioms boundary_at_one_configuration
+
+#print axioms couple_at_run_handles_is_empty
+#print axioms writeStep_focus
+#print axioms writeStep_recurses
+#print axioms writeStep_subject_destructive_of_couple
+#print axioms step_takeout_is_held
+#print axioms held_couple_of_the_step
+#print axioms writeStep_chain_nested_destructive
+#print axioms writeStep_chain_subject_destructive
+#print axioms chain_couple_is_empty
+#print axioms run_handles_couple_is_empty
 
 end ScidoniaTest.Transfer

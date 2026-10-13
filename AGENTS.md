@@ -994,8 +994,14 @@ store's subject is owned" — a surface-side statement, which is not built here.
 model states that conclusion for its own writes without this account:
 `Run.writeStep_lands` is the per-step statement at an accepted configuration and
 `Run.every_write_step_keeps_its_address` the per-run one over a program's execution, and
-neither is read through the coupling. What is not built is the theorem between the two:
-nothing connects `Couple` or `Corr` to `Run.writeStep`.
+neither is read through the coupling. What `Transfer.lean` now reads is the two routes at one
+configuration of a write step: the coupling at the configuration the step's take-out hands
+the nested write (`couple_of_takeout`), and the destructive branch at the nested subject as a
+statement about that step (`writeStep_nested_destructive_of_couple`), with `Run.writeStep`'s
+own result beside it. What is not built is the induction over a whole program's steps that
+would carry the coupling through a run: the composition reads one step's recursion at one
+configuration, from an accepted configuration, where `Run.every_write_step_keeps_its_address`
+inducts over the program.
 
 `Correspondence.lean` is the link from the typing to those two assumptions of the
 store theorems. The typing counts *names* at a store's environment and the store
@@ -1048,6 +1054,26 @@ twice. `ScidoniaTest/Transfer` reads the transfer at a heap the take-out has emp
 the composition applied at the run's own handle list and again there through the
 correspondence, beside `store_destructive_of_typed` at the coupling's split, and that
 boundary at one heap and one handle list.
+
+The same module now reads the run's own write. `couple_of_takeout` is the coupling at the
+configuration `Run.writeStep`'s recursion hands the nested write: the run's counting at the
+level (`Run.takeOut_counted`) beside the schema's focus check there gives the coupling whose
+handles are the level's handle list and whose account names the extracted occurrence — the
+account is read *out of* the run's handle list rather than added beside it, which
+`couple_at_run_handles_is_empty` is why (`count_split_agree_iff` at the coupling's split).
+`writeStep_focus` and `writeStep_recurses` read the schema's own check and recursion off the
+step — the pair's drop cancels the increment, so the check the schema makes is the one the
+take-out's result carries, and the step's result is the put-back of the recursion's — and
+`writeStep_nested_destructive_of_couple` composes: a write step of an accepted configuration,
+its take-out, the account through the coupling, and the schema's checks are the write
+theorem's two premises, so the destructive branch at the nested subject is a statement about
+that step, with `Run.writeStep_spec`'s own result beside it and `Corr`'s injectivity clause
+built from the two countings (`store_destructive_of_corr`) rather than carried.
+`writeStep_subject_destructive_of_couple` is the same at a write whose path's level is its
+last, where the recursion's entry is the write's subject and the leaf's check supplies the
+write rule's premise on the written slots, so the two routes' conclusions are about one cell.
+The induction over a whole program's steps is `Run.every_write_step_keeps_its_address`'s own;
+the composition reads one step's recursion at one configuration.
 
 `Discipline.lean`'s `Runs` and this correspondence are two routes and not one.
 `Runs` is a target-side sufficient condition *at a store*, which `runs_store_owned`

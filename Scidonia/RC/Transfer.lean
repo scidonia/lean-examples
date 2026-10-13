@@ -72,11 +72,28 @@ them --- and it needs nothing about the heap beyond the two countings. The run m
 carries its own destructive-write guarantees without this account, and they stand beside
 these statements unchanged: `Run.writeStep_lands` is the per-step statement at an
 accepted configuration and `Run.every_write_step_keeps_its_address` is the per-run one,
-each about `Run.writeStep`'s own steps. What is not here is the theorem between the two
-routes: nothing connects `Couple` or `Corr` to `Run.writeStep`. The composition meets the
-take-out's focus check (`Run.exclusive_head`) and the update beneath it, at one
-configuration at a time, and not a whole step of a run's program. Nothing here is about
-compiled code, and nothing in it runs.
+each about `Run.writeStep`'s own steps.
+
+What is here is the two routes read at one configuration of a write step.
+`couple_of_takeout` states the coupling at the configuration the step's take-out hands the
+nested write: the run's counting at the level and the account that names the occurrence the
+take-out extracted, whose identity is the two countings' (`expand_eq_singleton_of_counted`),
+and `couple_at_run_handles_is_empty` is why the account is read out of the run's own handle
+list rather than added beside it --- the coupling's split and the run's list hold the same
+handles only at the empty account. `writeStep_focus` and `writeStep_recurses` read the
+schema's check and its recursion off the step itself, and
+`writeStep_nested_destructive_of_couple` composes them: the take-out of a write step of an
+accepted configuration, the account the term holds there through the coupling, and the
+schema's checks are the write theorem's two premises, so the destructive branch at the
+nested subject is a statement about that step, with `Run.writeStep_spec`'s own result beside
+it and the correspondence's injectivity clause built from the two countings rather than
+carried (`store_destructive_of_corr`). `writeStep_subject_destructive_of_couple` is the same
+composition at a write whose path's level is its last, where the recursion's entry is the
+write's own subject and the leaf's check supplies the write rule's premise on the written
+slots. What is still not here is the program: the composition reads one step's recursion at
+one configuration, from an accepted configuration, and the induction over a whole program's
+steps is `Run.every_write_step_keeps_its_address`'s own. Nothing here is about compiled code,
+and nothing in it runs.
 -/
 import Scidonia.RC.Correspondence
 import Scidonia.FracPerm.StateVar.Run
@@ -321,5 +338,213 @@ theorem refInj_not_determined :
     simp only [List.mem_cons, List.not_mem_nil, or_false] at hp hq
     rcases hp with rfl | rfl <;> rcases hq with rfl | rfl <;> rfl
   · simpa [aliasM] using alias_not_inj
+
+/-! ## The configuration the take-out hands the nested write
+
+`Run.writeStep`'s recursion is a sequence of take-outs. At a level the schema takes the
+element the path's index names out of the cell at hand, hands back the pair, drops the
+pair's handle, checks the element it extracted, and recurses into that element, so the
+configuration it hands the nested write is the take-out's: the heap loses the extracted
+occurrence from the cell at hand's slots, the run's handle list gains it at the head, and
+the recursion enters the extracted element with that handle list.
+
+The coupling at that configuration is therefore a statement about the take-out. The
+coupling's split is the run's handle list with the account's references *read out of it*:
+at the level the run holds `hs` whose head names the cell at hand, and at the level below
+it holds `e :: hs` while the coupling's handles are `hs` and its account names `e` --- the
+occurrence the take-out moved into the run's handle. The account is not a second handle
+beside the run's, and `couple_at_run_handles_is_empty` is why it cannot be: the coupling's
+split and the run's own handle list hold the same handles only at the empty account, so at
+the run's own list the account's occurrence is the head of that list and the coupling's
+handles are what follows it. The account's identity `expand m = [e]` is then the identity
+of the two countings at the level below (`expand_eq_singleton_of_counted`), not an input
+of its own.
+
+`couple_of_takeout` is that statement at one level. `writeStep_focus` and
+`writeStep_recurses` are the two facts about `Run.writeStep` the statement is applied at:
+the check the schema makes is the one the take-out's result carries, the pair's drop
+cancelling the increment, and the step's result is the put-back of the recursion's.
+
+## The run's own write, read through the coupling
+
+`writeStep_nested_destructive_of_couple` is the composition at a write step of an accepted
+configuration: the step's own take-out hands the nested write the configuration
+`couple_of_takeout`'s coupling is stated at, the schema's checks are the write theorem's
+two premises, and the write at the cell the recursion entered is the counted heap's
+destructive branch, reached through the correspondence --- its injectivity clause built from
+the two countings (`store_destructive_of_corr`) rather than carried. The step's own result
+stands beside it, which is `Run.writeStep_spec`'s, so the run's route and the typing's route
+are read at one configuration. `writeStep_subject_destructive_of_couple` is the same
+composition at a write whose path's level is its last: there the recursion's entry *is* the
+write's subject, so the leaf's check supplies the write rule's premise and the two routes'
+conclusions are about one cell. -/
+
+/-- The coupling's split and the run's own handle list hold the same handles only at the
+empty account: a coupling stated at the run's own list names no occurrence. So the account
+at a nested write is read out of the run's handle list --- the extracted occurrence is that
+list's head, and the coupling's handles are what follows it --- and not added to it. -/
+theorem couple_at_run_handles_is_empty {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi}
+    (hcounted : Counted c hs) (hc : Couple c hs ρ m) : m = [] := by
+  refine (count_split_agree_iff hs m).mp fun x => ?_
+  have h1 := (counted_iff_slots c hs).mp hcounted x
+  have h2 := (counted_iff_slots c (hs ++ expand m)).mp hc.counted x
+  omega
+
+/-- **The coupling at the configuration the take-out hands the nested write.** The take-out's
+own statement counts the configuration it leaves at the run's handle list --- the heap's counts
+are what they were and the list is the level's with the extracted occurrence at its head ---
+and the account the recursion hands names that occurrence, so the coupling at that
+configuration is the run's counting read through the account: its handles are the level's
+handle list and its account the extracted occurrence, which is the level's account's pair read
+again as the run's new head.
+
+The run's handle list's head names the cell at hand, so the level's focus check is what puts
+the addressed cell's only name on that handle. The account's clause is `Bound` and the run
+supplies the counting; the account is not a second handle beside the run's list. -/
+theorem couple_of_takeout {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {r : Ref}
+    {i : Nat} {e : Ref} (hW : CHeap.WF c) (hcounted : Counted c hs)
+    (hhead : hs.head? = some r) (hex : Exclusive (CHeap.presentation c) hs r)
+    (hlook : (CHeap.slotsAt c r)[i]? = some e)
+    (hbound : Bound ρ m) (hsize : expand m = [e]) :
+    Couple (held c r i e) hs ρ m := by
+  have hcount : CHeap.count c r = 1 := (counted_iff_exclusive hcounted r).mpr hex
+  have hr : r ∈ CHeap.refs c := CHeap.mem_refs_of_count_pos c (by omega)
+  obtain ⟨hclean, _hhold, _htail⟩ := exclusive_head hex hhead
+  have hself : r ∉ CHeap.slotsAt c r := by
+    intro hmem
+    have hpos : 0 < (CHeap.slotsAt c r).count r := List.count_pos_iff.mpr hmem
+    have hle := CHeap.slotsAt_count_le_slots c r hr r
+    omega
+  have hks : r ∉ eraseAt (CHeap.slotsAt c r) i := fun hmem => hself (mem_eraseAt hmem)
+  have hlive : ∀ x ∈ eraseAt (CHeap.slotsAt c r) i, x ∈ CHeap.refs c := fun x hx =>
+    mem_refs_of_mem_slots hcounted (mem_slots_of_mem_slotsAt hr (mem_eraseAt hx))
+  have htake : Counted (held c r i e) (e :: hs) :=
+    takeOut_counted hcounted hr hlook hks hself hlive
+  refine ⟨?_, counted_couple_of_takeout htake hsize, hbound⟩
+  show CHeap.WF (takeOut c hs r i e).1
+  rw [CHeap.WF, takeOut_refs]
+  exact hW
+
+/-- **The schema's focus check.** A write step at a path with a level checks the element it
+took out, at the heap and the handle list the take-out left: the pair's drop cancels the
+increment, so the check the schema makes there is the one the take-out's result carries. -/
+theorem writeStep_focus {c : CHeap} {hs : List Ref} {r : Ref} {i : Nat} {p : Path}
+    {ks : List Ref} {e : Ref} {c' : CHeap} {hs' : List Ref}
+    (hlook : (CHeap.slotsAt c r)[i]? = some e)
+    (h : writeStep c hs r (i :: p) ks = some (c', hs')) :
+    exclusive? (held c r i e) (e :: hs) e = true := by
+  rw [writeStep_cons] at h
+  simp only [hlook] at h
+  by_cases hchk : exclusive? c hs r = true
+  · rw [ite_eq_left hchk] at h
+    simp only [pair_dup_decRef_fst, pair_dup_decRef_snd, takeOut_fst_held, takeOut_handles] at h
+    by_cases hfoc : exclusive? (held c r i e) (e :: hs) e = true
+    · exact hfoc
+    · rw [ite_eq_right hfoc] at h
+      exact absurd h (by simp)
+  · rw [ite_eq_right hchk] at h
+    exact absurd h (by simp)
+
+/-- **The schema's recursion.** A write step at a path with a level recurses into the
+element it took out, at the configuration the take-out left, and puts the recursion's
+result back where it came from: the step's result is that put-back. -/
+theorem writeStep_recurses {c : CHeap} {hs : List Ref} {r : Ref} {i : Nat} {p : Path}
+    {ks : List Ref} {e : Ref} {c' : CHeap} {hs' : List Ref}
+    (hlook : (CHeap.slotsAt c r)[i]? = some e)
+    (h : writeStep c hs r (i :: p) ks = some (c', hs')) :
+    ∃ c₁ hs₁, writeStep (held c r i e) (e :: hs) e p ks = some (c₁, hs₁) ∧
+      plug c₁ hs₁ r i (hs₁.headD e) = some (c', hs') := by
+  rw [writeStep_cons] at h
+  simp only [hlook] at h
+  by_cases hchk : exclusive? c hs r = true
+  · rw [ite_eq_left hchk] at h
+    simp only [pair_dup_decRef_fst, pair_dup_decRef_snd, takeOut_fst_held, takeOut_handles] at h
+    by_cases hfoc : exclusive? (held c r i e) (e :: hs) e = true
+    · rw [ite_eq_left hfoc] at h
+      cases hdeep : writeStep (held c r i e) (e :: hs) e p ks with
+      | none =>
+          rw [hdeep] at h
+          exact absurd h (by simp)
+      | some rest =>
+          rw [hdeep] at h
+          exact ⟨rest.1, rest.2, rfl, h⟩
+    · rw [ite_eq_right hfoc] at h
+      exact absurd h (by simp)
+  · rw [ite_eq_right hchk] at h
+    exact absurd h (by simp)
+
+/-- **The composition at a write step's recursion.** A write step of an accepted
+configuration --- the run's own write, at a path with a level --- hands the nested write the
+configuration its take-out left, and the account the term holds there names the occurrence
+it extracted. The take-out's own statement counts that configuration at the run's handle
+list, the account's clause turns that counting into the coupling at it, and the schema's
+checks are the write theorem's two premises, so the nested subject's write is the counted
+heap's destructive branch, read through the correspondence the coupling and the two
+countings build (`store_destructive_of_corr`) rather than off the take-out's check alone.
+
+The step's own result stands beside it, which is `Run.writeStep_spec`'s: the addressed cell
+reads the written slots back and the handle list is what it was. The write rule's own check
+on the written slots (`hks`) is the rule's premise and not the transfer's. -/
+theorem writeStep_nested_destructive_of_couple {root : Ref} {c : CHeap} {hs : List Ref}
+    {vs : List Scidonia.FracPerm.StateVar.Value} {ρ : TEnv} {m : Multi} {i : Nat}
+    {p : Path} {ks : List Ref}
+    {e : Ref} {c' : CHeap} {hs' : List Ref} {Γ Δ : Occs} {y : Var} {j : Nat} {v : Expr}
+    (hacc : Accept root c hs vs)
+    (hstep : writeStep c hs root (i :: p) ks = some (c', hs'))
+    (hlook : (CHeap.slotsAt c root)[i]? = some e)
+    (hbound : Bound ρ m) (hsize : expand m = [e]) (hks : e ∉ ks)
+    (hname : ∀ x, countName m x = Γ.count x) (hlookup : ρ.lookup y = some e)
+    (hstore : Typed Δ Γ (.store (.var y) j v)) :
+    Couple (held c root i e) hs ρ m ∧
+      (update (held c root i e) (e :: hs) e ks).1.lookup e = some ks ∧
+      hs' = hs ∧ ∃ t, resolve c root (i :: p) = some t ∧ c'.lookup t = some ks := by
+  have hhead : hs.head? = some root := by rw [hacc.handles]; rfl
+  have hex : Exclusive (CHeap.presentation c) hs root :=
+    exclusive?_eq_true (writeStep_check hstep)
+  have hcouple : Couple (held c root i e) hs ρ m :=
+    couple_of_takeout hacc.healthy.1 hacc.counted hhead hex hlook hbound hsize
+  have hentry : Counted (held c root i e) (e :: hs) :=
+    counted_takeout_of_couple hcouple.counted hsize
+  have hfocus : Exclusive (CHeap.presentation (held c root i e)) (e :: hs) e :=
+    exclusive?_eq_true (writeStep_focus hlook hstep)
+  obtain ⟨t, ht⟩ := writeStep_resolve_of_eq hstep
+  obtain ⟨hlookT, hlistT, _⟩ := writeStep_spec hacc.healthy hacc.counted hhead ht hstep
+  exact ⟨hcouple,
+    store_destructive_of_corr hcouple hentry hfocus hname hlookup hstore hks,
+    hlistT, t, ht, hlookT⟩
+
+/-- **The two routes at one cell.** The same composition at a write step whose path's level
+is its last: the recursion's entry is the write's own subject, so the leaf's check supplies
+the write rule's premise on the written slots and both routes' conclusions are about that
+cell --- the run's step reads the written slots back at it (`Run.writeStep_spec`'s result)
+and the coupling's update is the counted heap's destructive branch there. -/
+theorem writeStep_subject_destructive_of_couple {root : Ref} {c : CHeap} {hs : List Ref}
+    {vs : List Scidonia.FracPerm.StateVar.Value} {ρ : TEnv} {m : Multi} {i : Nat}
+    {ks : List Ref} {e : Ref}
+    {c' : CHeap} {hs' : List Ref} {Γ Δ : Occs} {y : Var} {j : Nat} {v : Expr}
+    (hacc : Accept root c hs vs)
+    (hstep : writeStep c hs root [i] ks = some (c', hs'))
+    (hlook : (CHeap.slotsAt c root)[i]? = some e)
+    (hbound : Bound ρ m) (hsize : expand m = [e])
+    (hname : ∀ x, countName m x = Γ.count x) (hlookup : ρ.lookup y = some e)
+    (hstore : Typed Δ Γ (.store (.var y) j v)) :
+    Couple (held c root i e) hs ρ m ∧
+      (update (held c root i e) (e :: hs) e ks).1.lookup e = some ks ∧
+      c'.lookup e = some ks := by
+  have hks : e ∉ ks := by
+    obtain ⟨c₁, hs₁, hrec, _⟩ := writeStep_recurses (p := []) hlook hstep
+    rw [writeStep_nil] at hrec
+    by_cases hchk : (exclusive? (held c root i e) (e :: hs) e &&
+        namesLive (held c root i e) ks && avoids ks e) = true
+    · exact avoids_eq_true (Bool.and_eq_true_iff.mp hchk).2
+    · rw [ite_eq_right hchk] at hrec
+      exact absurd hrec (by simp)
+  obtain ⟨hcpl, hdest, _, t, ht, hl⟩ :=
+    writeStep_nested_destructive_of_couple (p := []) hacc hstep hlook hbound hsize hks
+      hname hlookup hstore
+  have ht1 : t = e := by
+    rw [resolve_cons c root i [] e hlook, resolve_nil] at ht
+    exact (Option.some.inj ht).symm
+  exact ⟨hcpl, hdest, by rw [ht1] at hl; exact hl⟩
 
 end Scidonia.RC
