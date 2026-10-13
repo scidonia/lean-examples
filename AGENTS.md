@@ -988,9 +988,14 @@ honest form of the claim inside the calculus:
   reference.
 
 In λRC a store is destructive **exactly when its operand is owned at multiplicity
-one**, and a subject another reference also names copies. So "every write in an
-accepted program is destructive" reduces to "in the lowered term every store's
-subject is owned" — a surface-side statement, which is not built here.
+one**, and a subject another reference also names copies. So that calculus's "every
+write in an accepted program is destructive" reduces to "in the lowered term every
+store's subject is owned" — a surface-side statement, which is not built here. The run
+model states that conclusion for its own writes without this account:
+`Run.writeStep_lands` is the per-step statement at an accepted configuration and
+`Run.every_write_step_keeps_its_address` the per-run one over a program's execution, and
+neither is read through the coupling. What is not built is the theorem between the two:
+nothing connects `Couple` or `Corr` to `Run.writeStep`.
 
 `Correspondence.lean` is the link from the typing to those two assumptions of the
 store theorems. The typing counts *names* at a store's environment and the store
@@ -1028,16 +1033,21 @@ the coupling's split exactly at the empty account (`count_split_agree_iff`).
 handle the only name on it, which are the two hypotheses
 `store_owned_is_destructive` names as what the take-out provides, so
 `store_destructive_of_takeout` reads the nested write's destructive branch off the
-take-out's check. The injectivity is not one of its inputs: the run's counting beside
-the coupling's counting of one heap force the account to be the one extracted
-occurrence (`expand_eq_singleton_of_counted`), and one occurrence's tags are injective
-whatever they are (`refInj_of_counted`), which is what
+take-out's check, and `store_destructive_of_corr` states the same composition in the
+correspondence's own vocabulary: it takes the correspondence's name counts beside the
+coupling, builds `Corr ρ m Γ` from the coupling's `Bound` and the injectivity the two
+countings give, and reads the write theorem's two premises off the built structure, so no
+injectivity proof is an input. The injectivity is not one of the first theorem's inputs
+either: the run's counting beside the coupling's counting of one heap force the account
+to be the one extracted occurrence (`expand_eq_singleton_of_counted`), and one
+occurrence's tags are injective whatever they are (`refInj_of_counted`), which is what
 `ScidoniaTest/Transfer`'s `acct_inj` reads at the take-out. `refInj_not_determined` is
 the boundary: two accounts with the same references are one configuration to the run's
 side — the same count at every heap and handle list — and one of them names a reference
 twice. `ScidoniaTest/Transfer` reads the transfer at a heap the take-out has emptied,
-the composition applied at the run's own handle list beside `store_destructive_of_typed`
-at the coupling's split, and that boundary at one heap and one handle list.
+the composition applied at the run's own handle list and again there through the
+correspondence, beside `store_destructive_of_typed` at the coupling's split, and that
+boundary at one heap and one handle list.
 
 `Discipline.lean`'s `Runs` and this correspondence are two routes and not one.
 `Runs` is a target-side sufficient condition *at a store*, which `runs_store_owned`

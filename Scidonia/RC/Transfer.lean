@@ -56,7 +56,9 @@ one heap force the account to be that one extracted occurrence
 whatever it is named (`refInj_of_expand_singleton`, `refInj_of_counted`). So at the
 configuration a nested write runs at, `Corr`'s third clause is a consequence of the two
 countings and not an input: `store_destructive_of_corr` states the composition in the
-correspondence's own vocabulary, and its proof reads only `Corr`'s environment clauses.
+correspondence's own vocabulary --- the caller supplies the correspondence's name counts,
+the coupling its `Bound`, and the two countings its injectivity clause, so the structure
+is built at the composition and no caller carries an injectivity proof.
 
 ## What is modelled, and what is trusted
 
@@ -66,8 +68,15 @@ the occurrences a `Multi` lists, and the counts are the counted heap's own. The
 identification it rests on is the schema's own --- the handle list `e :: hs` at the
 nested focus check is the outer handles with the extracted occurrence at the head, and
 the coupling's split is the same outer handles with the account's references after
-them --- and it needs nothing about the heap beyond the two countings. Nothing here is
-about compiled code, and nothing in it runs.
+them --- and it needs nothing about the heap beyond the two countings. The run model
+carries its own destructive-write guarantees without this account, and they stand beside
+these statements unchanged: `Run.writeStep_lands` is the per-step statement at an
+accepted configuration and `Run.every_write_step_keeps_its_address` is the per-run one,
+each about `Run.writeStep`'s own steps. What is not here is the theorem between the two
+routes: nothing connects `Couple` or `Corr` to `Run.writeStep`. The composition meets the
+take-out's focus check (`Run.exclusive_head`) and the update beneath it, at one
+configuration at a time, and not a whole step of a run's program. Nothing here is about
+compiled code, and nothing in it runs.
 -/
 import Scidonia.RC.Correspondence
 import Scidonia.FracPerm.StateVar.Run
@@ -261,16 +270,31 @@ theorem store_destructive_of_takeout {c : CHeap} {hs : List Ref} {m : Multi} {e 
   rw [hsingle, update_fst_eq_of_handles c (hs ++ [e]) (e :: hs) e ks] at hmain
   exact hmain
 
-/-- The same composition in the correspondence's own vocabulary: `Corr`'s environment
-clauses are all it reads, and the injectivity the structure carries is the consequence
-`refInj_of_counted` reads off the two countings. -/
+/-- **The composition in the correspondence's own vocabulary.** The caller supplies the
+correspondence's name counts beside the coupling, and the composition builds `Corr ρ m Γ`
+itself: `Bound` is the coupling's own, and the injectivity clause is the consequence
+`refInj_of_counted` reads off the run's counting and the coupling's counting of the same
+heap. That built structure is what the write theorem's two premises are read off
+(`bridge`, through `store_owned_is_destructive`) --- the subject's occurrence in the
+account and the account's count of the reference the environment names for it --- so the
+conclusion is `store_destructive_of_takeout`'s, reached through the correspondence rather
+than off the take-out's check alone. No injectivity proof is an input: at the
+configuration a nested write runs at, `Corr`'s third clause is the two countings'
+consequence and not a hypothesis to carry. -/
 theorem store_destructive_of_corr {c : CHeap} {hs : List Ref} {m : Multi} {e : Ref}
     {ks : List Ref} {ρ : TEnv} {Γ Δ : Occs} {y : Var} {i : Nat} {v : Expr}
     (hcouple : Couple c hs ρ m) (hcounted : Counted c (e :: hs))
-    (hex : Exclusive (CHeap.presentation c) (e :: hs) e) (hcorr : Corr ρ m Γ)
+    (hex : Exclusive (CHeap.presentation c) (e :: hs) e)
+    (hname : ∀ x, countName m x = Γ.count x)
     (hlook : ρ.lookup y = some e) (hstore : Typed Δ Γ (.store (.var y) i v)) (hks : e ∉ ks) :
-    (update c (e :: hs) e ks).1.lookup e = some ks :=
-  store_destructive_of_takeout hcouple hcounted hex hcorr.name hlook hstore hks
+    (update c (e :: hs) e ks).1.lookup e = some ks := by
+  have hcorr : Corr ρ m Γ :=
+    ⟨hcouple.bound, hname, refInj_of_counted hcounted hcouple.counted⟩
+  obtain ⟨hslots, _hhold, htail⟩ := exclusive_head hex rfl
+  obtain ⟨howns, hcount⟩ := bridge (i := i) (v := v) hcorr hlook (Typed.store_count hstore)
+  have hmain := store_owned_is_destructive hcouple hlook howns hcount hslots htail hks
+  rw [update_fst_eq_of_handles c (hs ++ expand m) (e :: hs) e ks] at hmain
+  exact hmain
 
 /-! ## The boundary
 

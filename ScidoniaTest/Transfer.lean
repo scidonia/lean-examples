@@ -18,8 +18,10 @@ can build. They are of four kinds:
   to fire rather than to pass whatever it is given.
 * **The transfer's statements, applied**: the coupling at the run's tail and the account
   the take-out extracted is counted at the same heap as the run's own list is, and the
-  composition reads the write's destructive branch off the take-out's check — both at the
-  run's own handle list and at `Scidonia.RC.store_destructive_of_typed`'s coupling.
+  composition reads the write's destructive branch off the take-out's check — at the run's
+  own handle list, again at that list through `Scidonia.RC.store_destructive_of_corr` with
+  the correspondence's name counts alone and no injectivity proof beside them, and at
+  `Scidonia.RC.store_destructive_of_typed`'s coupling.
 * **The boundary**, as theorems: the run's handle list is the coupling's split exactly at
   the empty account, the two accounts the run's side cannot separate --- the same
   references, hence the same counts at one heap and one handle list --- differ only in
@@ -299,10 +301,12 @@ theorem coupled_write_destructive :
   store_destructive_of_typed held_couple acct_corr env_lookup store_typed (by decide)
     (by decide) (by decide)
 
-/-- The same write through the correspondence's own vocabulary:
-`store_destructive_of_corr` reads only `Corr`'s environment clauses. -/
+/-- The same write through the correspondence's own vocabulary: `store_destructive_of_corr`
+takes the correspondence's name counts and builds the `Corr` itself --- the injectivity
+the structure carries is the consequence `refInj_of_counted` reads off the run's counting
+and the coupling's --- so no injectivity proof is built here. -/
 theorem corr_write_destructive : (update held taken 1 []).1.lookup 1 = some [] :=
-  store_destructive_of_corr held_couple taken_counted takeout_exclusive acct_corr
+  store_destructive_of_corr held_couple taken_counted takeout_exclusive acct_names
     env_lookup store_typed (by decide)
 
 /-- The account the take-out extracted is injective: one occurrence's tags cannot
