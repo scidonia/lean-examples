@@ -358,13 +358,17 @@ private def runTree (d : Layout) (hnd : Var → Option (NodeTy d)) (ρ : VEnv) (
         (runTree d hnd ρ s b).bind (fun p =>
           match hnd x with
           | some (.at _ pth (.leaf o) h) =>
-              (unquoteEl o p.1).map (fun xel => (.con1 rootTag p.1, (setLeaf ⟨pth, o, h⟩ xel s).1))
+              (unquoteEl o p.1).bind (fun xel =>
+                if (setLeaf ⟨pth, o, h⟩ xel s).2 then
+                  some (.con1 rootTag p.1, (setLeaf ⟨pth, o, h⟩ xel s).1)
+                else none)
           | some (.at _ pth (.struct a _) h) =>
               match ρ x with
               | some (.con2 c' _ v₂) =>
                   if c' = structTag then
-                    (unquoteVal a p.1).map (fun u =>
-                      (.con2 structTag p.1 v₂, setStructLeft pth h u s))
+                    (unquoteVal a p.1).bind (fun u =>
+                      (setStructLeft pth h u s).map (fun s' =>
+                        (.con2 structTag p.1 v₂, s')))
                   else none
               | _ => none
           | _ => none)
@@ -523,11 +527,11 @@ theorem treeOwn_binders_fresh : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)
     TreeOwn d Γ ρ A s e τ v s' → ∀ a, ρ a ≠ none → a ∉ binders e := by
   intro d₀ Γ₀ ρ₀ A₀ s₀ e₀ τ₀ v₀ s₀' h
   induction h with
-  | obs hobs =>
+  | obs hobs _ _ =>
       intro z _
       rw [obs_binders_nil hobs]
       exact List.not_mem_nil
-  | read x y body hx hval hden hid hpath hobs hread hy hρy hbody ih =>
+  | read x y body share _ _ hx hval hden hloan hread hy hρy hbody ih =>
       intro z hz hmem
       have hzy : z ≠ y := fun he => hz (by rw [he]; exact hρy)
       have hzb : z ∉ binders body := ih z (by
@@ -538,19 +542,19 @@ theorem treeOwn_binders_fresh : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)
       rcases List.mem_append.mp hmem with h | h
       · exact hzy (List.mem_singleton.mp h)
       · exact hzb h
-  | write x a hx hval hobs hden hacc hwrite =>
+  | write x a _ _ hx hval hobs hden hacc hwrite =>
       intro z _ hmem
       have hb : binders (.store (.var x) 0 a) = [] := by
         rw [show binders (.store (.var x) 0 a) = binders a from rfl, obs_binders_nil hobs]
       rw [hb] at hmem
       exact List.not_mem_nil hmem
-  | writeSub x b hx hval hrec hacc =>
+  | writeSub x b _ _ hx hval hrec hacc hwrite =>
       intro z _ hmem
       have hb : binders (.store (.var x) 0 b) = [] := by
         rw [show binders (.store (.var x) 0 b) = binders b from rfl, (recipe_shape hrec).2.2.2]
       rw [hb] at hmem
       exact List.not_mem_nil hmem
-  | descendStruct x y z body hx hval hy hρy hz hρz hyz hbody ih =>
+  | descendStruct x y z body _ _ hx hval hy hρy hz hρz hyz hbody ih =>
       intro zz hzz hmem
       have hzy : zz ≠ y := fun he => hzz (by rw [he]; exact hρy)
       have hzz' : zz ≠ z := fun he => hzz (by rw [he]; exact hρz)
@@ -564,7 +568,7 @@ theorem treeOwn_binders_fresh : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)
         · exact hzy h
         · exact hzz' (List.mem_singleton.mp h)
       · exact hzb h
-  | descendSpine x y z body hx hval hy hρy hz hρz hyz hbody ih =>
+  | descendSpine x y z body _ _ hx hval hy hρy hz hρz hyz hbody ih =>
       intro zz hzz hmem
       have hzy : zz ≠ y := fun he => hzz (by rw [he]; exact hρy)
       have hzz' : zz ≠ z := fun he => hzz (by rw [he]; exact hρz)
@@ -578,7 +582,7 @@ theorem treeOwn_binders_fresh : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)
         · exact hzy h
         · exact hzz' (List.mem_singleton.mp h)
       · exact hzb h
-  | handoff x y a e₂ hx h₁ hy hρy h₂ ih₁ ih₂ =>
+  | handoff x y a e₂ _ _ hx h₁ hy hρy h₂ ih₁ ih₂ =>
       intro z hz hmem
       have hzy : z ≠ y := fun he => hz (by rw [he]; exact hρy)
       have hb₁ : z ∉ binders (.store (.var x) 0 a) := ih₁ z hz
@@ -592,7 +596,7 @@ theorem treeOwn_binders_fresh : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)
       · rcases List.mem_append.mp h with h | h
         · exact hb₁ h
         · exact hb₂ h
-  | obsBind y e₁ e₂ h₁ hy hρy h₂ ih₁ ih₂ =>
+  | obsBind y e₁ e₂ _ _ h₁ hy hρy h₂ ih₁ ih₂ =>
       intro z hz hmem
       have hzy : z ≠ y := fun he => hz (by rw [he]; exact hρy)
       have hb₁ : z ∉ binders e₁ := ih₁ z hz
@@ -677,7 +681,8 @@ theorem inst_bind (ρ : VEnv) (x : Var) (e₁ e₂ : Expr) :
 
 /-- A write at a leaf node: the operand evaluates to its instance at the unchanged
 state, the instance decodes to the observation the leaf holds, and the state the
-clause leaves is the library's own leaf write. -/
+clause leaves is the library's own leaf write. An index the state does not have
+leaves no state and the clause answers `none`. -/
 private theorem runTree_store_leaf {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ : VEnv}
     {hnd : Var → Option (NodeTy d)} {s : State d} {x : Var} {a : Expr} {o : ObsDesc}
     {xl : ObsEl o} {w : Nat} {p : Path d} {h : At p = .leaf o} {s' : State d}
@@ -688,25 +693,29 @@ private theorem runTree_store_leaf {d : Layout} {Γ : Var → Option (TreeTy d)}
       Value (inst ρ a) ∧ Closed (inst ρ a) := by
   obtain ⟨hrun, hval', hcl', _⟩ := runTree_obs hobs hnd (s := s) hcl hob
   refine ⟨?_, hval', hcl'⟩
-  simp only [runTree, hndx, hrun, Option.bind_some, hden, unquoteEl_quoteEl, Option.map_some,
+  simp only [runTree, hndx, hrun, Option.bind_some, hden, unquoteEl_quoteEl, Option.bind_some,
     hwrite, reduceIte]
 
 /-- A write at a struct node: the operand is a node quotation, decoded into the
 component's state and installed in the struct's own cell, and the value the clause
 yields is the struct node of the operand's instance and the component the write
-did not touch. -/
+did not touch. The clause answers `none` exactly where the replacement does, so an
+index the state does not have leaves no state. -/
 private theorem runTree_store_struct {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ : VEnv}
     {hnd : Var → Option (NodeTy d)} {s : State d} {x : Var} {b : Expr} {a c : Layout}
     {w : Nat} {p : Path d} {h : At p = .struct a c} {u : State a} {v₁ v₂ : Expr}
+    {s' : State d}
     (hrec : Recipe Γ ρ a b u) (hval : ρ x = some (.con2 structTag v₁ v₂))
-    (hcl : ClosedEnv ρ) (hob : ObsAgrees Γ ρ) (hndx : hnd x = some (.at w p (.struct a c) h)) :
+    (hcl : ClosedEnv ρ) (hob : ObsAgrees Γ ρ) (hndx : hnd x = some (.at w p (.struct a c) h))
+    (hwrite : setStructLeft p h u s = some s') :
     runTree d hnd ρ s (.store (.var x) 0 b) =
-        some (.con2 structTag (inst ρ b) v₂, setStructLeft p h u s) ∧
+        some (.con2 structTag (inst ρ b) v₂, s') ∧
       Value (inst ρ b) ∧ Closed (inst ρ b) := by
   obtain ⟨huq, hvb, hcb, _⟩ := recipe_shape hrec
   have hrun := runTree_recipe hrec hnd s hcl hob
   refine ⟨?_, hvb, hcb⟩
-  simp only [runTree, hndx, hval, hrun, Option.bind_some, huq, Option.map_some, reduceIte]
+  simp only [runTree, hndx, hval, hrun, Option.bind_some, huq, Option.bind_some, hwrite,
+    Option.map_some, reduceIte]
 
 /-! ## The simulation -/
 
@@ -729,11 +738,11 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
         ∧ Shape τ v := by
   intro d₀ Γ₀ ρ₀ A₀ s₀ e₀ τ₀ v₀ s₀' h
   induction h with
-  | obs hobs =>
+  | obs hobs _ _ =>
       intro hnd _ hcl hob
       obtain ⟨hrun, hv, hc, hp⟩ := runTree_obs hobs hnd hcl hob
       exact ⟨hrun, StepStar.refl _, hv, hc, hp⟩
-  | read x y body hx hval hden hid hpath hobs hread hy hρy hbody ih =>
+  | read x y body share hA hΓ hx hval hden hloan hread hy hρy hbody ih =>
       intro hnd hh hcl hob
       obtain ⟨hv, hc⟩ := closedEnv_con1 hcl hval
       have hprot := hasProtected_of_eq_quoteEl hden
@@ -749,7 +758,7 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
           (Root.toStep (Root.matchVal (Value.con1 hv) rfl (by simp [nodeFields]))) ?_
         simpa only [nodeFields, substAll,
           subst_inst hρy hc (fun z w hw => (hcl z w hw).2) body hfresh] using hstep
-  | write x a hx hval hobs hden hacc hwrite =>
+  | write x a hA hΓ hx hval hobs hden hacc hwrite =>
       intro hnd hh hcl hob
       obtain ⟨hrun, hval', hcl'⟩ := runTree_store_leaf hobs hcl hob (hh x _ hx) hden hwrite
       obtain ⟨hv, _⟩ := closedEnv_con1 hcl hval
@@ -759,9 +768,9 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
           (Root.toStep (Root.storeVal (Value.con1 hv) hval' (by simp [slotUpdate])))
           (StepStar.refl _)
       · rw [hden]; exact quoteEl_closed _ _
-  | writeSub x b hx hval hrec hacc =>
+  | writeSub x b hA hΓ hx hval hrec hacc hwrite =>
       intro hnd hh hcl hob
-      obtain ⟨hrun, hvb, hcb⟩ := runTree_store_struct hrec hval hcl hob (hh x _ hx)
+      obtain ⟨hrun, hvb, hcb⟩ := runTree_store_struct hrec hval hcl hob (hh x _ hx) hwrite
       obtain ⟨_, _, hv₂, hc₂⟩ := closedEnv_con2 hcl hval
       refine ⟨hrun, ?_, Value.con2 hvb hv₂, ?_, trivial⟩
       · rw [inst_store, inst_var, hval, Option.getD_some]
@@ -770,7 +779,7 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
           (StepStar.refl _)
       · simp only [Closed, uses, List.append_eq_nil_iff]
         exact ⟨hcb, hc₂⟩
-  | descendStruct x y z body hx hval hy hρy hz hρz hyz hbody ih =>
+  | descendStruct x y z body hA hΓ hx hval hy hρy hz hρz hyz hbody ih =>
       intro hnd hh hcl hob
       obtain ⟨hv₁, hc₁, hv₂, hc₂⟩ := closedEnv_con2 hcl hval
       obtain ⟨hrun, hstep, hval', hcl', hsh⟩ :=
@@ -793,7 +802,7 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
         rw [subst_two_inst hyz hρy hρz hc₁ hc₂ (fun z w hw => (hcl z w hw).2) (body := body)
           hfy hfz]
         exact hstep
-  | descendSpine x y z body hx hval hy hρy hz hρz hyz hbody ih =>
+  | descendSpine x y z body hA hΓ hx hval hy hρy hz hρz hyz hbody ih =>
       intro hnd hh hcl hob
       obtain ⟨hv₁, hc₁, hv₂, hc₂⟩ := closedEnv_con2 hcl hval
       obtain ⟨hrun, hstep, hval', hcl', hsh⟩ :=
@@ -816,7 +825,7 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
         rw [subst_two_inst hyz hρy hρz hc₁ hc₂ (fun z w hw => (hcl z w hw).2) (body := body)
           hfy hfz]
         exact hstep
-  | handoff x y a e₂ hx h₁ hy hρy h₂ ih₁ ih₂ =>
+  | handoff x y a e₂ hA hΓ hx h₁ hy hρy h₂ ih₁ ih₂ =>
       intro hnd hh hcl hob
       obtain ⟨hrun₁, hstep₁, hv₁, hc₁, hsh₁⟩ := ih₁ hh hcl hob
       obtain ⟨hrun₂, hstep₂, hval₂, hcl₂, hsh₂⟩ :=
@@ -831,7 +840,7 @@ theorem runTree_simulate : ∀ {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ
           (StepStar.step (Root.toStep (Root.bindVal hv₁))
             (by simpa only [subst_inst hρy hc₁ (fun z w hw => (hcl z w hw).2) e₂ hfresh]
                   using hstep₂))
-  | obsBind y e₁ e₂ h₁ hy hρy h₂ ih₁ ih₂ =>
+  | obsBind y e₁ e₂ hA hΓ h₁ hy hρy h₂ ih₁ ih₂ =>
       intro hnd hh hcl hob
       obtain ⟨hrun₁, hstep₁, hv₁, hc₁, hsh₁⟩ := ih₁ hh hcl hob
       obtain ⟨hrun₂, hstep₂, hval₂, hcl₂, hsh₂⟩ :=
@@ -904,6 +913,26 @@ theorem obsAgrees_rootCtx (d : Layout) (s : State d) : ObsAgrees (rootCtx d) (ro
     exact absurd hx (by simp)
   · rw [rootCtx, ite_eq_right hxs] at hx
     exact absurd hx (by simp)
+
+/-- The root node of a layout is at the root path: the one path the session's
+context can bind. -/
+theorem rootCtx_bindsPaths (d : Layout) : BindsPaths (rootCtx d) [Path.here] := by
+  intro z n hz
+  by_cases hzs : z = sessionName
+  · rw [rootCtx, ite_eq_left hzs] at hz
+    simp only [Option.some.injEq, TreeTy.node.injEq] at hz
+    rw [← hz, List.mem_singleton]
+    cases d <;> rfl
+  · rw [rootCtx, ite_eq_right hzs] at hz
+    exact absurd hz (by simp)
+
+/-- The session's context holds one live handle per path: it holds the root node
+at one name and nothing anywhere else. -/
+theorem rootCtx_handleWF (d : Layout) : HandleWF (rootCtx d) := by
+  refine (HandleWF.empty (d := d)).extendTy_node ?_
+  intro z n hz
+  have hm := bindsPaths_empty z n hz
+  simp at hm
 
 /-- The value-level evaluation of an admitted program: the private interpreter run
 on the session's configuration and state, returning only the value it produced.
@@ -1064,7 +1093,7 @@ theorem evalTree_no_protected {d : Layout} {s : State d} {e : Expr} {o : ObsDesc
 
 /-- The `IO` description over the private interpreter on the session's
 configuration and state: it returns only the value the interpreter produced, and a
-program the judgement does not admit fails the action rather than returning a
+program the judgement does not accept fails the action rather than returning a
 value, which the totality theorem makes unreachable for an admitted one. It is the
 interpreter's runner and not a supported execution route: the equation below is
 the whole of what is stated about it. -/

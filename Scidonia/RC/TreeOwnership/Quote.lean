@@ -118,8 +118,8 @@ def quoteEl : (o : ObsDesc) → ObsEl o → Expr
   | .bool, b => .con0 (if b then trueTag else falseTag)
   | .sum .unit .nat, Sum.inl _ => .con0 emptyTag
   | .sum .unit .nat, Sum.inr n => .con1 fullTag (.con0 n)
-  | .sum a b, Sum.inl x => .con1 inlTag (quoteEl a x)
-  | .sum a b, Sum.inr y => .con1 inrTag (quoteEl b y)
+  | .sum a _, Sum.inl x => .con1 inlTag (quoteEl a x)
+  | .sum _ b, Sum.inr y => .con1 inrTag (quoteEl b y)
   | .option _, none => .con0 noneTag
   | .option a, some x => .con1 someTag (quoteEl a x)
   | .pair a b, (x, y) => .con2 pairTag (quoteEl a x) (quoteEl b y)
@@ -182,8 +182,8 @@ theorem unquoteEl_quoteEl : ∀ (o : ObsDesc) (x : ObsEl o), unquoteEl o (quoteE
       revert x
       cases a <;> cases b <;> intro x <;> cases x <;>
         simp_all [quoteEl, unquoteEl, unquoteEl_quoteEl, unquoteEl_bool_round,
-          UInt64.ofNat_toNat, unitTag, emptyTag, fullTag, inlTag, inrTag, someTag,
-          noneTag, trueTag, falseTag, uintTag]
+          UInt64.ofNat_toNat, unitTag, emptyTag, fullTag, inlTag, inrTag,
+          trueTag, falseTag, uintTag]
   | .option a, x => by
       cases x with
       | none => rfl
@@ -263,8 +263,8 @@ def decodeValue : (o : ObsDesc) → Scidonia.FracPerm.StateVar.Value → Option 
   | .nat, .nat n => some n
   | .uint, .uint n => some n
   | .bool, .bool b => some b
-  | .sum a b, .inl x => (decodeValue a x).map Sum.inl
-  | .sum a b, .inr y => (decodeValue b y).map Sum.inr
+  | .sum a _, .inl x => (decodeValue a x).map Sum.inl
+  | .sum _ b, .inr y => (decodeValue b y).map Sum.inr
   | .option _, .none => some none
   | .option a, .some x => (decodeValue a x).map some
   | .pair a b, .pair x y =>
@@ -320,16 +320,16 @@ end
 /-- A leaf's node value is the unary root node of its observation. -/
 theorem cellVal_leaf (o : ObsDesc) (x : ObsEl o) :
     cellVal (.leaf o) x = .con1 rootTag (quoteEl o x) := by
-  simp [cellVal, spineVal]
+  simp [cellVal]
 
 /-- The empty spine is the nullary nil node. -/
 theorem spineVal_nil (a : Layout) : spineVal a [] = .con0 nilTag := by
-  simp [cellVal, spineVal]
+  simp [spineVal]
 
 /-- A nonempty spine is the binary cons node of its head and its tail. -/
 theorem spineVal_cons (a : Layout) (x : State a) (t : List (State a)) :
     spineVal a (x :: t) = .con2 consTag (cellVal a x) (spineVal a t) := by
-  simp [cellVal, spineVal]
+  simp [spineVal]
 
 /-- A leaf's node value at the slot description is the one-cell fragment's root:
 the two quotations agree at the description the fragment's cell is encoded
@@ -337,18 +337,18 @@ against. -/
 theorem cellVal_leaf_slot (s : Slot) :
     cellVal (.leaf (.sum .unit .nat)) (Scidonia.FracPerm.StateVar.encode s) = root s := by
   cases s <;>
-    simp [cellVal, spineVal, quoteEl, root, quoteSlot, Scidonia.FracPerm.StateVar.encode,
+    simp [cellVal, quoteEl, root, quoteSlot, Scidonia.FracPerm.StateVar.encode,
       emptyTag, fullTag]
 
 /-- A struct's node value is the binary struct node of its components'. -/
 theorem cellVal_struct (a b : Layout) (u : State a) (v : State b) :
     cellVal (.struct a b) (u, v) = .con2 structTag (cellVal a u) (cellVal b v) := by
-  simp [cellVal, spineVal]
+  simp [cellVal]
 
 /-- An array's node value is its spine. -/
 theorem cellVal_arr (a : Layout) (s : Array (State a)) :
     cellVal (.arr a) s = spineVal a s.toList := by
-  simp [cellVal, spineVal]
+  simp [cellVal]
 
 mutual
 

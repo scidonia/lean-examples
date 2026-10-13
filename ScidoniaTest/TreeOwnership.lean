@@ -2,7 +2,8 @@
 Checks for `Scidonia.RC.TreeOwnership` from outside the library.
 
 The subject is a layout-indexed state, its quotation, its per-node fractional
-account and the laws that account obeys. The checks here are of four kinds:
+account, the laws that account obeys and the ownership discipline read at
+concrete configurations. The checks here are of five kinds:
 
 * **The quotation, evaluated**: the round trip at a struct of two naturals and at
   a nested array, the detector on a leaf's observation and on a leaf's node, and
@@ -12,7 +13,13 @@ account and the laws that account obeys. The checks here are of four kinds:
   of a path to an observation path.
 * **The account, evaluated**: the sibling witness — a reader owning half of the
   common root and half of the left leaf, a writer owning the root's other half
-  and the whole right subtree — read at the held fraction it computes.
+  and the whole right subtree — and the three-holder witness, both read at the
+  held fraction they compute.
+* **The discipline at the boundary.** Each affirmative control is *evaluated*: the
+  session program that performs it is run by the real `evalTree`, its result is
+  pinned by a `#guard`, and the library's simulation against the existing
+  `RC.StepStar` is applied to the admitted derivation. Each refusal is the
+  library's `¬ TreeOwn` proposition at a concrete configuration.
 * **Axioms**: each representative theorem's `#print axioms` output is pinned, so
   a proof that acquires an axiom fails the build rather than printing a longer
   list for a reader to notice.
@@ -21,8 +28,8 @@ import Scidonia.RC
 
 open Scidonia.RC
 open Scidonia.RC.TreeOwnership
-open Scidonia.RC.OwnershipTyped (root quoteSlot rootTag inst)
-open Scidonia.FracPerm.StateVar (Slot encode decode halves_rejoin)
+open Scidonia.RC.OwnershipTyped (root quoteSlot rootTag inst Obs Fragment VEnv)
+open Scidonia.FracPerm.StateVar (Slot encode decode halves_rejoin ValidShare)
 open Scidonia.FracPerm.StateVar.Layout5
 
 namespace ScidoniaTest.TreeOwnership
@@ -146,55 +153,50 @@ theorem sibling_writer_owns : Writes siblingAccount siblingRight :=
 /-- The two halves of the common root fill it exactly. -/
 theorem sibling_halves : (1 / 2 : Rat) + 1 / 2 = 1 := halves_rejoin 1
 
-/-! ## Axioms
+/-
+The three-holder witness, evaluated: one node whose holders hold a half, a
+quarter and a quarter, the node filled by the three of them, and the conservation
+of the node's own fraction step by step.
+-/
+#guard decide (heldAt halfAccount nodePath = 1 / 2)
 
-Each of these is asserted: the `#guard_msgs` pins the list `#print axioms` emits,
-so a proof that acquires another axiom fails the build rather than printing a
-longer list. -/
+#guard decide (heldAt forkAccount nodePath = 1 / 2)
 
-/-- info: 'Scidonia.RC.TreeOwnership.unquoteEl_quoteEl' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.unquoteEl_quoteEl
+#guard decide (heldAt multiAccount nodePath = 0)
 
-/-- info: 'Scidonia.RC.TreeOwnership.unquoteVal_cellVal' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.unquoteVal_cellVal
+/-- The three-holder account is valid: its holders fit in the node. -/
+theorem multi_valid : ValidAccount multiAccount := multiAccount_valid
 
-/-- info: 'Scidonia.RC.TreeOwnership.cellVal_injective' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.cellVal_injective
+/-- The three-holder account's loans: a half, a quarter and a quarter. -/
+theorem multi_holders : Reads multiAccount nodePath 0 (1 / 4)
+    ∧ Reads multiAccount nodePath 1 (1 / 4) ∧ Reads multiAccount nodePath 2 (1 / 2) :=
+  multi_reads
 
-/-- info: 'Scidonia.RC.TreeOwnership.nav_cellVal' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.nav_cellVal
+/-- The three-holder account's conservation: the two loans move the node's own
+fraction by exactly their fractions, and the fork leaves it where it was. -/
+theorem multi_conserved :
+    heldAt halfAccount nodePath = heldAt nodeAccount nodePath - 1 / 2
+      ∧ heldAt forkAccount nodePath = heldAt halfAccount nodePath
+      ∧ heldAt multiAccount nodePath = heldAt forkAccount nodePath - 1 / 2 :=
+  multi_conservation
 
-/-- info: 'Scidonia.RC.TreeOwnership.quoteEl_hasProtected' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.quoteEl_hasProtected
+/-- A fork's half is a valid share: the split the account makes is the halving of
+the share it splits. -/
+theorem fork_halves_valid : ValidShare (1 / 4) := by
+  rw [quarter_eq]
+  exact half_share_valid one_half_valid
 
-/-- info: 'Scidonia.RC.TreeOwnership.leafObsPath?_some' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.leafObsPath?_some
-
-/-- info: 'Scidonia.RC.TreeOwnership.share_fit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.share_fit
-
-/-- info: 'Scidonia.RC.TreeOwnership.spine_writer_excludes' does not depend on any axioms -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.spine_writer_excludes
-
-/-- info: 'Scidonia.RC.TreeOwnership.readThrough_fits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-#print axioms Scidonia.RC.TreeOwnership.readThrough_fits
+/-- A loan bigger than what the node's owner still holds would overfill it: the
+conservation premise the account's own lending law carries. -/
+theorem lend_fits_refused : ¬ ((1 : Rat) / 2 + 1 / 2 + 1 / 2 ≤ 1) := by grind
 
 /-! ## The tree ownership discipline, from outside
 
 The discipline's own checks: the write the account admits beside the write it
 refuses, the reader's read beside the read at a node that is not a leaf, the
-sequential hand-off beside the write through a spent handle, and the
-out-of-bounds write. Each is the library theorem at a concrete configuration, and
-the refusals are the `¬ TreeOwn` propositions a client cannot derive. -/
+sequential hand-off beside the write through a spent handle and beside the write
+handed two names of one subtree, and the nonleaf replacement's two controls.
+-/
 
 /-- The witness's write at its right leaf is admitted, while the reader holds half
 of the left leaf and half of the shared root. -/
@@ -241,24 +243,324 @@ theorem handoff_admitted :
         (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 :=
   cell_handoff_admitted
 
-/-- The out-of-bounds write is refused: the rule's own success premise is the
-library's failure report. -/
-theorem out_of_bounds_refused (obs : Expr) {v : Expr} {s' : State arrLayout} :
-    ¬ TreeOwn arrLayout arrCtx arrEnv arrAccount arrState
-        (.store (.var leftName) 0 obs) (.node (arrTy 5)) v s' :=
-  arr_out_of_bounds_refused obs
+/-- The write handed *two* names of one subtree is refused: the context that would
+carry it holds the one node at two names. -/
+theorem two_name_refused (obs obs' : Expr) {τ : TreeTy (.leaf .nat)} {v : Expr}
+    {s' : State (.leaf .nat)} :
+    ¬ TreeOwn (.leaf .nat) aliasCtx cellEnv cellAccount 7
+        (.bind nextName (.store (.var cellName) 0 obs) (.store (.var aliasName) 0 obs')) τ v s' :=
+  cell_two_name_refused obs obs'
 
-/-- The in-bounds element of the same array is one the account admits a write
-at. -/
-theorem in_bounds_admitted :
-    WriteHolds arrAccount 0 (.index 1 (.here : Path (.leaf .nat))) :=
-  arr_write_admitted
+/-- The same shape with one name is admitted: the refusal is the two names. -/
+theorem two_name_control :
+    TreeOwn (.leaf .nat) cellCtx cellEnv cellAccount 7
+      (.bind nextName (.store (.var cellName) 0 (.con0 5)) (.store (.var nextName) 0 (.con0 6)))
+      (.node cellTy) (.con1 rootTag (.con0 6))
+      (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 6
+        (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 :=
+  cell_two_name_control
+
+/-- An admitted derivation's name is the path's only live one: the second name
+that would carry a second write of the same subtree does not exist. -/
+theorem handle_unique {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ : VEnv} {A : Account d}
+    {s : State d} {e : Expr} {τ : TreeTy d} {v : Expr} {s' : State d}
+    (h : TreeOwn d Γ ρ A s e τ v s') :
+    ∀ x y n m, Γ x = some (.node n) → Γ y = some (.node m) → n.path = m.path → x = y :=
+  treeOwn_handleWF h
+
+/-- Every admitted derivation's account is valid: the per-node conservation
+discipline is an index of the rules. -/
+theorem admitted_account_valid {τ : TreeTy (.leaf .nat)} {v : Expr} {s' : State (.leaf .nat)} :
+    ValidAccount cellAccount :=
+  treeOwn_validAccount cell_handoff_admitted (τ := (.node cellTy)) (v := .con1 rootTag (.con0 6))
+    (s' := _)
+
+/-- The nonleaf replacement at an index the state does not have is refused: the
+replacement answers `none` there. -/
+theorem nonleaf_out_of_bounds_refused (b : Expr) {v : Expr} {s' : State subLayout} :
+    ¬ TreeOwn subLayout subCtx subEnv subAccount subState
+        (.store (.var leftName) 0 b) (.node subMissingTy) v s' :=
+  sub_out_of_bounds_refused b
+
+/-- The in-bounds nonleaf control of the same shape is admitted. -/
+theorem nonleaf_in_bounds_admitted :
+    ∃ s' : State subLayout,
+      TreeOwn subLayout subCtx subEnv subAccount subState
+        (.store (.var rootName) 0 (.con1 rootTag (.con0 5))) (.node subTy)
+        (.con2 structTag (.con1 rootTag (.con0 5)) (.con1 rootTag (.con0 2))) s' :=
+  sub_in_bounds_admitted
+
+/-- The bounds the rule's own success premise carries: a replacement that answers
+`some` is at an in-bounds path, so the nonleaf rule's success is the state's
+bounds and not a state the replacement did not touch. -/
+theorem replacement_bounds {d : Layout} (p : Path d) (y : State (At p)) (s : State d)
+    {s' : State d} (h : replaceAt d p y s = some s') : InBounds p s :=
+  replaceAt_inBounds p y s h
 
 -- The refused write's own elaboration: the account's write right at the root is
 -- not derivable from the reader's loan.
 #check (witness_subtree_write_refused : ∀ (b : Expr) {v : Expr} {s' : State siblingLayout},
   ¬ TreeOwn siblingLayout witnessCtx witnessEnv siblingAccount witnessState
       (.store (.var rootName) 0 b) (.node witnessRootTy) v s')
+
+/-! ## The discipline at the session boundary, evaluated
+
+Each affirmative control below is read at the *session* configuration the runner
+begins from — the one name the state's root is held under — and each is evaluated:
+the program is run by the real `evalTree`, its result is pinned by a `#guard`, and
+the library's simulation gives the existing `RC.StepStar` of the program's instance
+at that same value.
+-/
+
+/-- The name a struct descent binds to a node's left component. -/
+def midName : Var := 30
+
+/-- The name a struct descent binds to a node's right component. -/
+def tailName : Var := 31
+
+/-- The left component's path from the session's root. -/
+def sessionLeft : Path siblingLayout := leftPath (Path.here : Path siblingLayout) rfl
+
+/-- The right component's path from the session's root. -/
+def sessionRight : Path siblingLayout := rightPath (Path.here : Path siblingLayout) rfl
+
+/-- The handle the session's descent installs for the left component. -/
+def sessionLeftTy : NodeTy siblingLayout :=
+  .at 0 sessionLeft (.leaf .nat) (leftPath_at (Path.here : Path siblingLayout) rfl)
+
+/-- The handle the session's descent installs for the right component. -/
+def sessionRightTy : NodeTy siblingLayout :=
+  .at 0 sessionRight (.leaf .nat) (rightPath_at (Path.here : Path siblingLayout) rfl)
+
+/-- The session's context after the descent's first binding. -/
+def sessionCtxL : Var → Option (TreeTy siblingLayout) :=
+  extendTy (rootCtx siblingLayout) midName (.node sessionLeftTy)
+
+/-- The session's context after the descent: both components bound under the
+root's holder. -/
+def sessionCtx : Var → Option (TreeTy siblingLayout) :=
+  extendTy sessionCtxL tailName (.node sessionRightTy)
+
+/-- The session's first binding holds one live handle per path. -/
+theorem sessionCtxL_handleWF : HandleWF sessionCtxL :=
+  (rootCtx_handleWF siblingLayout).extendTy_node (by
+    intro z m hz
+    have hm := rootCtx_bindsPaths siblingLayout z m hz
+    simp at hm
+    rw [hm]
+    decide)
+
+/-- The paths the session's first binding can bind. -/
+theorem sessionCtxL_bindsPaths : BindsPaths sessionCtxL [sessionLeft, Path.here] :=
+  (rootCtx_bindsPaths siblingLayout).extendTy_node
+
+/-- The session's context holds one live handle per path. -/
+theorem sessionCtx_handleWF : HandleWF sessionCtx :=
+  sessionCtxL_handleWF.extendTy_node (by
+    intro z m hz
+    have hm := sessionCtxL_bindsPaths z m hz
+    simp at hm
+    rcases hm with hm | hm
+    · rw [hm]; decide
+    · rw [hm]; decide)
+
+/-- The session's context binds its left component's name to the left component's
+node. -/
+theorem sessionCtx_mid : sessionCtx midName = some (.node sessionLeftTy) := by
+  simp [sessionCtx, sessionCtxL, extendTy, midName, tailName]
+
+/-- The session's context binds its right component's name to the right
+component's node. -/
+theorem sessionCtx_tail : sessionCtx tailName = some (.node sessionRightTy) := by
+  simp [sessionCtx, sessionCtxL, extendTy, midName, tailName]
+
+/-- The session's context holds nothing at a name the descent did not bind. -/
+theorem sessionCtx_out : sessionCtx outName = none := by
+  simp [sessionCtx, sessionCtxL, rootCtx, extendTy, midName, tailName, outName, sessionName]
+
+/-- The session program that writes the witness's right leaf under the shared
+root: a descent into the struct, then the write through the component's name. -/
+def siblingProgram : Expr :=
+  .matchC (.var sessionName) structTag [midName, tailName] (.store (.var tailName) 0 (.con0 5))
+
+/-- The session program that reads the witness's left leaf under the shared root:
+a descent into the struct, then the read through the component's name. -/
+def readProgram : Expr :=
+  .matchC (.var sessionName) structTag [midName, tailName]
+    (.matchC (.var midName) rootTag [outName] (.var outName))
+
+/-- The session's write of the right leaf under the shared root is admitted: the
+descent installs the component's handle under the root's holder, and the account's
+write right at the right leaf is read at the same node. -/
+theorem session_write_admitted :
+    TreeOwn siblingLayout (rootCtx siblingLayout) (rootEnv siblingLayout witnessState)
+      siblingAccount witnessState siblingProgram (.node sessionRightTy) (.con1 rootTag (.con0 5))
+      (setLeaf ⟨siblingRight, .nat, rfl⟩ 5 witnessState).1 := by
+  refine TreeOwn.descendStruct (x := sessionName) (y := midName) (z := tailName)
+    (body := .store (.var tailName) 0 (.con0 5)) (w := 0)
+    (p := (Path.here : Path siblingLayout)) (a := .leaf .nat) (c := .leaf .nat) (h := rfl)
+    (v₁ := .con1 rootTag (.con0 7)) (v₂ := .con1 rootTag (.con0 9)) (τ := (.node sessionRightTy))
+    (v' := .con1 rootTag (.con0 5)) (s' := (setLeaf ⟨siblingRight, .nat, rfl⟩ 5 witnessState).1)
+    (hA := siblingAccount_valid) (hΓ := rootCtx_handleWF siblingLayout)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+  · simp [rootCtx, rootNode, siblingLayout, sessionName]
+  · simp only [rootEnv, sessionName, reduceIte]
+    rw [cellVal_struct, cellVal_leaf, cellVal_leaf, quoteEl]
+    rfl
+  · simp [rootCtx, sessionName, midName, tailName]
+  · simp [rootEnv, sessionName, midName, tailName]
+  · simp [rootCtx, sessionName, midName, tailName]
+  · simp [rootEnv, sessionName, midName, tailName]
+  · decide
+  · refine TreeOwn.write (x := tailName) (a := .con0 5) (w := 0) (p := sessionRight)
+      (o := .nat) (h := rfl) (v := .con0 9) (xel := 5)
+      (s' := (setLeaf ⟨siblingRight, .nat, rfl⟩ 5 witnessState).1)
+      (hA := siblingAccount_valid) (hΓ := sessionCtx_handleWF) ?_ ?_ ?_ ?_ ?_ ?_
+    · exact sessionCtx_tail
+    · rw [VEnv.extend_self]
+    · exact Obs.nat 5
+    · rfl
+    · exact witness_right_writeHolds_root
+    · rfl
+
+/-
+The session's write of the right leaf, evaluated: the real interpreter returns the
+observation written.
+-/
+#guard decide (evalTree siblingLayout witnessState siblingProgram = some (.con1 rootTag (.con0 5)))
+
+/-- The session's write, with the copying side given: the real `evalTree`'s value is
+the value the *existing* `StepStar` of the program's instance reaches. -/
+theorem session_write_agrees
+    (hs : StepStar (inst (rootEnv siblingLayout witnessState) siblingProgram)
+      (.con1 rootTag (.con0 5))) :
+    evalTree siblingLayout witnessState siblingProgram = some (.con1 rootTag (.con0 5)) :=
+  evalTree_sound session_write_admitted hs (Value.con1 (Value.con0 5))
+
+/-- The session's write reaches a value the same reduction reaches: the simulation's
+totality applied to the admitted derivation. -/
+theorem session_write_total :
+    ∃ v, evalTree siblingLayout witnessState siblingProgram = some v
+      ∧ StepStar (inst (rootEnv siblingLayout witnessState) siblingProgram) v ∧ Value v :=
+  evalTree_total session_write_admitted
+
+/-- The session's read of the left leaf is admitted under the reader's own loan:
+the descent installs the component's handle, and the read's borrow is the reader's
+half of the shared root and of the leaf. -/
+theorem session_read_admitted :
+    TreeOwn siblingLayout (rootCtx siblingLayout) (rootEnv siblingLayout witnessState)
+      siblingAccount witnessState readProgram (.obs .nat) (.con0 7) witnessState :=
+  TreeOwn.descendStruct (x := sessionName) (y := midName) (z := tailName)
+    (body := .matchC (.var midName) rootTag [outName] (.var outName)) (w := 0)
+    (p := (Path.here : Path siblingLayout)) (a := .leaf .nat) (c := .leaf .nat) (h := rfl)
+    (v₁ := .con1 rootTag (.con0 7)) (v₂ := .con1 rootTag (.con0 9)) (τ := (.obs .nat))
+    (v' := .con0 7) (s' := witnessState)
+    (hA := siblingAccount_valid) (hΓ := rootCtx_handleWF siblingLayout)
+    (by simp [rootCtx, rootNode, siblingLayout, sessionName])
+    (by
+      simp only [rootEnv, sessionName, reduceIte]
+      rw [cellVal_struct, cellVal_leaf, cellVal_leaf, quoteEl]
+      rfl)
+    (by simp [rootCtx, sessionName, midName, tailName])
+    (by simp [rootEnv, sessionName, midName, tailName])
+    (by simp [rootCtx, sessionName, midName, tailName])
+    (by simp [rootEnv, sessionName, midName, tailName])
+    (by decide)
+    (TreeOwn.read (x := midName) (y := outName) (body := .var outName) (w := 0) (p := sessionLeft)
+      (o := .nat) (h := rfl) (share := fun _ => 1 / 2) (v := .con0 7) (xel := 7)
+      (τ := (.obs .nat)) (v' := .con0 7) (s' := witnessState)
+      (hA := siblingAccount_valid) (hΓ := sessionCtx_handleWF) sessionCtx_mid
+      (by rw [VEnv.extend_of_ne (by decide : midName ≠ tailName), VEnv.extend_self])
+      rfl witnessLoan_read (by decide)
+      (by simp [sessionCtx, sessionCtxL, rootCtx, extendTy, midName, tailName, outName,
+        sessionName])
+      (by simp [VEnv.extend, rootEnv, sessionName, midName, tailName, outName])
+      (TreeOwn.obs (Obs.var outName (by
+        simp [obsEnv, sessionCtx, sessionCtxL, rootCtx, extendTy, midName, tailName, outName,
+          sessionName]) Fragment.nat) siblingAccount_valid sessionCtx_handleWF.extendTy_obs))
+
+/-
+The session's read of the left leaf, evaluated: the real interpreter returns the
+detached observation the reader holds.
+-/
+#guard decide (evalTree siblingLayout witnessState readProgram = some (.con0 7))
+
+/-- The session's read, with the copying side given: the real `evalTree`'s detached
+value is the value the *existing* `StepStar` of the program's instance reaches. -/
+theorem session_read_agrees
+    (hs : StepStar (inst (rootEnv siblingLayout witnessState) readProgram) (.con0 7)) :
+    evalTree siblingLayout witnessState readProgram = some (.con0 7) :=
+  evalTree_sound session_read_admitted hs (Value.con0 7)
+
+/-- The session's read reaches a detached value the same reduction reaches: the
+simulation's totality applied to the admitted derivation. -/
+theorem session_read_total :
+    ∃ v, evalTree siblingLayout witnessState readProgram = some v
+      ∧ StepStar (inst (rootEnv siblingLayout witnessState) readProgram) v ∧ Value v :=
+  evalTree_total session_read_admitted
+
+/-- The session's detached read carries no protected node: the value the read hands
+on is an observation. -/
+theorem session_read_detached : hasProtected (.con0 7) = false :=
+  quoteEl_hasProtected .nat 7
+
+/-- The one-node configuration *is* the session configuration of the leaf layout:
+the same context and the same environment. -/
+theorem cellCtx_eq_rootCtx : cellCtx = rootCtx (.leaf .nat) := rfl
+
+/-- The one-node environment is the session environment of the leaf layout: each
+holds the quoted root node at the one name. -/
+theorem cellEnv_eq_rootEnv : cellEnv = rootEnv (.leaf .nat) 7 := by
+  funext x
+  by_cases hx : x = 0
+  · subst hx
+    simp [cellEnv, rootEnv, sessionName, cellName, cellVal, quoteEl]
+  · simp [cellEnv, rootEnv, sessionName, cellName, hx]
+
+/-
+The sequential hand-off, evaluated: the real interpreter returns the second
+write's observation.
+-/
+#guard decide (evalTree (.leaf .nat) 7
+  (.bind nextName (.store (.var cellName) 0 (.con0 5)) (.store (.var nextName) 0 (.con0 6)))
+  = some (.con1 rootTag (.con0 6)))
+
+/-- The sequential hand-off, at the boundary: the real `evalTree` agrees with the
+*existing* `StepStar` of the program's instance at the value both reach. -/
+theorem session_handoff_agrees
+    (hs : StepStar (inst (rootEnv (.leaf .nat) 7)
+      (.bind nextName (.store (.var cellName) 0 (.con0 5))
+        (.store (.var nextName) 0 (.con0 6)))) (.con1 rootTag (.con0 6))) :
+    evalTree (.leaf .nat) 7
+      (.bind nextName (.store (.var cellName) 0 (.con0 5))
+        (.store (.var nextName) 0 (.con0 6))) = some (.con1 rootTag (.con0 6)) := by
+  have h : TreeOwn (.leaf .nat) (rootCtx (.leaf .nat)) (rootEnv (.leaf .nat) 7) cellAccount 7
+      (.bind nextName (.store (.var cellName) 0 (.con0 5))
+        (.store (.var nextName) 0 (.con0 6))) (.node cellTy) (.con1 rootTag (.con0 6))
+      (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 6
+        (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 := by
+    rw [← cellCtx_eq_rootCtx, ← cellEnv_eq_rootEnv]
+    exact cell_handoff_admitted
+  exact evalTree_sound h hs (Value.con1 (Value.con0 6))
+
+/-- The totality applied at the hand-off: the evaluation reaches a value the
+copying reduction of the same instance reaches. -/
+theorem session_handoff_total :
+    ∃ v, evalTree (.leaf .nat) 7
+        (.bind nextName (.store (.var cellName) 0 (.con0 5))
+          (.store (.var nextName) 0 (.con0 6))) = some v
+      ∧ StepStar (inst (rootEnv (.leaf .nat) 7)
+          (.bind nextName (.store (.var cellName) 0 (.con0 5))
+            (.store (.var nextName) 0 (.con0 6)))) v
+      ∧ Value v := by
+  have h : TreeOwn (.leaf .nat) (rootCtx (.leaf .nat)) (rootEnv (.leaf .nat) 7) cellAccount 7
+      (.bind nextName (.store (.var cellName) 0 (.con0 5))
+        (.store (.var nextName) 0 (.con0 6))) (.node cellTy) (.con1 rootTag (.con0 6))
+      (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 6
+        (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 := by
+    rw [← cellCtx_eq_rootCtx, ← cellEnv_eq_rootEnv]
+    exact cell_handoff_admitted
+  exact evalTree_total h
 
 /-! ## The frame, the snapshot and the take-out, from outside -/
 
@@ -296,106 +598,116 @@ theorem snapshot_pair_check :
 /-- The nonleaf frame: replacing the left component of the pair leaves the node
 value at the right component where it was. -/
 theorem nonleaf_frame_check :
-    nodeVal pairRight (replaceAt pairLayout pairLeft 5 pairState)
-      = nodeVal pairRight pairState :=
-  replaceAt_nodeVal_of_disjoint pairLeft pairRight 5 pairState
+    nodeVal pairRight ((5, 9) : State pairLayout) = nodeVal pairRight pairState :=
+  replaceAt_nodeVal_of_disjoint pairLeft pairRight 5 pairState rfl
     (disjoint_left_right (.here : Path (.leaf .nat)) (.here : Path (.leaf .nat)))
-    trivial
 
 /-- The replacement lands its new focus where the path points. -/
-theorem replacement_lands_check :
-    subAt pairLeft (replaceAt pairLayout pairLeft 5 pairState) = 5 :=
-  replaceAt_subAt pairLeft 5 pairState trivial
+theorem replacement_lands_check : subAt pairLeft ((5, 9) : State pairLayout) = 5 :=
+  replaceAt_subAt pairLeft 5 pairState rfl
 
 /-- The array's take-out and put-back equation at one level. -/
 theorem takeout_level_check :
     replaceAt arrLayout (.index 1 (.here : Path (.leaf .nat))) (5 : State (.leaf .nat))
         (#[1, 2, 3] : Array (State (.leaf .nat)))
-      = (#[1, 2, 3] : Array (State (.leaf .nat))).set 1
-          (replaceAt (.leaf .nat) (.here : Path (.leaf .nat)) 5
-            ((#[1, 2, 3] : Array (State (.leaf .nat)))[1])) (by decide) :=
-  replaceAt_index 1 (.here : Path (.leaf .nat)) 5 (#[1, 2, 3] : Array (State (.leaf .nat)))
-    (by decide)
+      = some ((#[1, 2, 3] : Array (State (.leaf .nat))).set 1 (5 : State (.leaf .nat))
+          (by decide)) := by
+  simp only [arrLayout]
+  rw [replaceAt_index 1 (Path.here : Path (.leaf .nat)) 5 _ (by decide)]
+  rfl
 
 -- The take-out's conditional injectivity, as the library states it: the run's
 -- counting and the coupling's counting of one heap are its two premises.
 #check @Scidonia.RC.TreeOwnership.takeout_transfer
 
-/-! ## The interpreter and the agreement, from outside
-
-The direct evaluation is the interpreter on the state it is given; the copying
-side is the existing reduction of the same term's instance. The two meet at one
-value, and an admitted program's result carries no protected node. -/
-
--- The direct evaluation of the one-node program, evaluated: the interpreter
--- returns the quoted root node of the observation written.
-#guard decide (evalTree (.leaf .nat) 7 (.store (.var cellName) 0 (.con0 5))
-  = some (.con1 rootTag (.con0 5)))
-
--- The agreement, the totality, the detachment and the runner's `IO` equation, as
--- the library states them.
+-- The interpreter and the agreement, as the library states them.
 #check @evalTree_sound
 #check @evalTree_sound_closed
 #check @evalTree_total
 #check @evalTree_no_protected
 #check @runTreeIO_of_evalTree
 
-/-- The one-node configuration *is* the session configuration of the leaf layout:
-the same context and the same environment. -/
-theorem cellCtx_eq_rootCtx : cellCtx = rootCtx (.leaf .nat) := rfl
-
-/-- The one-node environment is the session environment of the leaf layout: each
-holds the quoted root node at the one name. -/
-theorem cellEnv_eq_rootEnv : cellEnv = rootEnv (.leaf .nat) 7 := by
-  funext x
-  by_cases hx : x = 0
-  · subst hx
-    simp [cellEnv, rootEnv, sessionName, cellName, cellVal, quoteEl]
-  · simp [cellEnv, rootEnv, sessionName, cellName, hx]
-
-/-- The agreement applied at the hand-off, with the copying reduction's hypothesis
-given: the interpreter's value is the value the *existing* `StepStar` of the same
-term's instance reaches. -/
-theorem handoff_agreement
-    (hs : StepStar (inst (rootEnv (.leaf .nat) 7)
-      (.bind nextName (.store (.var cellName) 0 (.con0 5))
-        (.store (.var nextName) 0 (.con0 6)))) (.con1 rootTag (.con0 6))) :
-    evalTree (.leaf .nat) 7
-      (.bind nextName (.store (.var cellName) 0 (.con0 5))
-        (.store (.var nextName) 0 (.con0 6))) = some (.con1 rootTag (.con0 6)) := by
-  have h : TreeOwn (.leaf .nat) (rootCtx (.leaf .nat)) (rootEnv (.leaf .nat) 7) cellAccount 7
-      (.bind nextName (.store (.var cellName) 0 (.con0 5))
-        (.store (.var nextName) 0 (.con0 6))) (.node cellTy) (.con1 rootTag (.con0 6))
-      (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 6
-        (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 := by
-    rw [← cellCtx_eq_rootCtx, ← cellEnv_eq_rootEnv]
-    exact cell_handoff_admitted
-  exact evalTree_sound h hs (Value.con1 (Value.con0 6))
-
-/-- The totality applied at the hand-off: the evaluation reaches a value the
-copying reduction of the same instance reaches. -/
-theorem handoff_total :
-    ∃ v, evalTree (.leaf .nat) 7
-        (.bind nextName (.store (.var cellName) 0 (.con0 5))
-          (.store (.var nextName) 0 (.con0 6))) = some v
-      ∧ StepStar (inst (rootEnv (.leaf .nat) 7)
-          (.bind nextName (.store (.var cellName) 0 (.con0 5))
-            (.store (.var nextName) 0 (.con0 6)))) v
-      ∧ Value v := by
-  have h : TreeOwn (.leaf .nat) (rootCtx (.leaf .nat)) (rootEnv (.leaf .nat) 7) cellAccount 7
-      (.bind nextName (.store (.var cellName) 0 (.con0 5))
-        (.store (.var nextName) 0 (.con0 6))) (.node cellTy) (.con1 rootTag (.con0 6))
-      (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 6
-        (setLeaf ⟨(Path.here : Path (.leaf .nat)), .nat, rfl⟩ 5 7).1).1 := by
-    rw [← cellCtx_eq_rootCtx, ← cellEnv_eq_rootEnv]
-    exact cell_handoff_admitted
-  exact evalTree_total h
-
 /-! ## Axioms
 
 Each of these is asserted: the `#guard_msgs` pins the list `#print axioms` emits,
 so a proof that acquires another axiom fails the build rather than printing a
 longer list for a reader. -/
+
+/-- info: 'Scidonia.RC.TreeOwnership.unquoteEl_quoteEl' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.unquoteEl_quoteEl
+
+/-- info: 'Scidonia.RC.TreeOwnership.unquoteVal_cellVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.unquoteVal_cellVal
+
+/-- info: 'Scidonia.RC.TreeOwnership.cellVal_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.cellVal_injective
+
+/-- info: 'Scidonia.RC.TreeOwnership.nav_cellVal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.nav_cellVal
+
+/-- info: 'Scidonia.RC.TreeOwnership.quoteEl_hasProtected' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.quoteEl_hasProtected
+
+/-- info: 'Scidonia.RC.TreeOwnership.leafObsPath?_some' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.leafObsPath?_some
+
+/-- info: 'Scidonia.RC.TreeOwnership.share_fit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.share_fit
+
+/-- info: 'Scidonia.RC.TreeOwnership.spine_writer_excludes' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.spine_writer_excludes
+
+/-- info: 'Scidonia.RC.TreeOwnership.readThrough_fits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.readThrough_fits
+
+/-- info: 'Scidonia.RC.TreeOwnership.lend_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.lend_valid
+
+/-- info: 'Scidonia.RC.TreeOwnership.repay_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.repay_valid
+
+/-- info: 'Scidonia.RC.TreeOwnership.fork_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.fork_valid
+
+/-- info: 'Scidonia.RC.TreeOwnership.heldAt_lend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.heldAt_lend
+
+/-- info: 'Scidonia.RC.TreeOwnership.heldAt_repay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.heldAt_repay
+
+/-- info: 'Scidonia.RC.TreeOwnership.heldAt_fork' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.heldAt_fork
+
+/-- info: 'Scidonia.RC.TreeOwnership.treeOwn_validAccount' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.treeOwn_validAccount
+
+/-- info: 'Scidonia.RC.TreeOwnership.treeOwn_handleWF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.treeOwn_handleWF
+
+/-- info: 'Scidonia.RC.TreeOwnership.treeOwn_store_handle' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.treeOwn_store_handle
+
+/-- info: 'Scidonia.RC.TreeOwnership.aliasCtx_not_handleWF' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.aliasCtx_not_handleWF
 
 /-- info: 'Scidonia.RC.TreeOwnership.witness_sibling_write_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
@@ -413,13 +725,29 @@ longer list for a reader. -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.TreeOwnership.witness_struct_read_refused
 
-/-- info: 'Scidonia.RC.TreeOwnership.cell_spent_write_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Scidonia.RC.TreeOwnership.cell_spent_write_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.TreeOwnership.cell_spent_write_refused
 
-/-- info: 'Scidonia.RC.TreeOwnership.cell_handoff_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Scidonia.RC.TreeOwnership.cell_handoff_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.TreeOwnership.cell_handoff_admitted
+
+/-- info: 'Scidonia.RC.TreeOwnership.cell_two_name_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.cell_two_name_refused
+
+/-- info: 'Scidonia.RC.TreeOwnership.sub_out_of_bounds_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.sub_out_of_bounds_refused
+
+/-- info: 'Scidonia.RC.TreeOwnership.sub_in_bounds_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.sub_in_bounds_admitted
+
+/-- info: 'Scidonia.RC.TreeOwnership.replaceAt_inBounds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.replaceAt_inBounds
 
 /-- info: 'Scidonia.RC.TreeOwnership.arr_out_of_bounds_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
@@ -436,5 +764,49 @@ longer list for a reader. -/
 /-- info: 'Scidonia.RC.TreeOwnership.snapshot_pair_witness' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.TreeOwnership.snapshot_pair_witness
+
+/-- info: 'ScidoniaTest.TreeOwnership.session_write_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScidoniaTest.TreeOwnership.session_write_admitted
+
+/-- info: 'ScidoniaTest.TreeOwnership.session_write_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScidoniaTest.TreeOwnership.session_write_total
+
+/-- info: 'ScidoniaTest.TreeOwnership.session_read_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScidoniaTest.TreeOwnership.session_read_admitted
+
+/-- info: 'ScidoniaTest.TreeOwnership.session_read_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms ScidoniaTest.TreeOwnership.session_read_total
+
+/-- info: 'Scidonia.RC.TreeOwnership.rootCtx_handleWF' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.rootCtx_handleWF
+
+/-- info: 'Scidonia.RC.TreeOwnership.multiAccount_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.multiAccount_valid
+
+/-- info: 'Scidonia.RC.TreeOwnership.join_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.join_valid
+
+/-- info: 'Scidonia.RC.TreeOwnership.heldAt_fork' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.heldAt_fork
+
+/-- info: 'Scidonia.RC.TreeOwnership.cell_two_name_control' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.cell_two_name_control
+
+/-- info: 'Scidonia.RC.TreeOwnership.replaceAt_index' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.replaceAt_index
+
+/-- info: 'Scidonia.RC.TreeOwnership.replaceAt_subAt' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.replaceAt_subAt
 
 end ScidoniaTest.TreeOwnership

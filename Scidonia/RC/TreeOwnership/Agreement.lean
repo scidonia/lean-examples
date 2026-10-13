@@ -6,12 +6,12 @@ snapshots are evaluated at, and the conditional take-out transfer of the counted
 heap.
 
 **The replacement.** `replaceAt` rebuilds a struct from its updated component and,
-at an array, takes the element out of its slot with the layout's default left
-behind, replaces the node inside the extracted element, and puts the result back.
-`replaceAt_index` writes that array case down as one equation — the take-out, the
-recursion on the extracted element, and the put-back — so no level leaves the
-placeholder in the array. `replaceAt_subAt` is the replacement's own effect: at an
-in-bounds path the accessor at that path reads exactly the state that was
+at an array, replaces the element at the index the state has. It answers `some`
+only where every index on the path addresses a node, so its callers carry the
+state's bounds with their success: the array case's own equation is
+`replaceAt_index` and `replaceAt_inBounds` turns a success into the path's bounds.
+`replaceAt_subAt` is the replacement's own effect: where it answers `some`, the
+accessor at that path reads exactly the state that was
 installed, so the replacement writes one node and no other level of the path.
 `replaceAt_subAt_of_disjoint` is the frame: an accessor at a path disjoint from the
 replaced one — a sibling component, or an element of another index — reads what it
@@ -54,100 +54,101 @@ open Scidonia.FracPerm.StateVar.RCHeap (CHeap Counted)
 
 /-! ## The replacement's levels -/
 
-/-- The replacement's array case, level by level: at an in-bounds index the
-element is taken out of its slot with the layout's default left behind, the
-replacement runs on the extracted element, and the result is put back at that
-slot. The array is the one it was with that slot set to the replaced node, and no
-default survives the level. -/
-theorem replaceAt_index {a : Layout} (i : Nat) (q : Path a) (y : State (At q))
-    (s : Array (State a)) (h : i < s.size) :
-    replaceAt (.arr a) (.index i q) y s = s.set i (replaceAt a q y s[i]) h := by
-  show (if h' : i < s.size then
-      (s.swapAt i (stateDefault a) h').2.set! i
-        (replaceAt a q y (s.swapAt i (stateDefault a) h').1) else s) =
-    s.set i (replaceAt a q y s[i]) h
-  rw [dite_eq_left h, Array.swapAt_def]
-  dsimp only
-  rw [Array.set!_eq_setIfInBounds]
-  apply Array.ext_getElem?
-  intro j
-  by_cases hji : i = j
-  · subst hji
-    simp only [Array.getElem?_setIfInBounds_self_of_lt (xs := s.set i (stateDefault a) h)
-      (by simpa using h), Array.getElem?_set_self h]
-  · simp only [Array.getElem?_setIfInBounds_ne hji, Array.getElem?_set_ne h hji]
-
-/-- The replacement lands its focus at the path it addressed: at an in-bounds path
-the state's own accessor reads back exactly the state that was installed, so the
-replacement writes one node and leaves no other level of the path changed. -/
-theorem replaceAt_subAt {d : Layout} (p : Path d) (y : State (At p)) (s : State d) :
-    InBounds p s → subAt p (replaceAt d p y s) = y := by
+/-- The replacement lands its focus at the path it addressed: where the replacement
+answers `some`, the state's own accessor reads back exactly the state that was
+installed, so the replacement writes one node and leaves no other level of the path
+changed. -/
+theorem replaceAt_subAt {d : Layout} : ∀ (p : Path d) (y : State (At p)) (s : State d)
+    {s' : State d}, replaceAt d p y s = some s' → subAt p s' = y := by
+  intro p
   induction p with
   | here =>
-      intro _
-      rfl
+      intro y s s' h
+      exact (Option.some.inj h).symm
   | left r ih =>
-      intro hb
+      intro y s s' h
       obtain ⟨u, v⟩ := s
-      exact ih y u hb
+      rw [replaceAt, Option.map_eq_some_iff] at h
+      obtain ⟨u', hu', hu''⟩ := h
+      rw [← hu'']
+      exact ih y u hu'
   | right r ih =>
-      intro hb
+      intro y s s' h
       obtain ⟨u, v⟩ := s
-      exact ih y v hb
+      rw [replaceAt, Option.map_eq_some_iff] at h
+      obtain ⟨u', hu', hu''⟩ := h
+      rw [← hu'']
+      exact ih y v hu'
   | index i r ih =>
-      intro hb
-      obtain ⟨e, he, hbq⟩ := hb
-      obtain ⟨hlt, hget⟩ := Array.getElem?_eq_some_iff.mp he
-      rw [replaceAt_index i r y s hlt, hget, subAt_index,
-        Array.getElem?_set_self hlt]
-      exact ih y e hbq
+      intro y s s' h
+      rw [replaceAt] at h
+      split at h
+      · rename_i hlt
+        rw [Option.map_eq_some_iff] at h
+        obtain ⟨e', he', he''⟩ := h
+        rw [← he'']
+        rw [subAt_index, Array.getElem?_set_self hlt]
+        exact ih y s[i] he'
+      · exact absurd h (by simp)
 
 /-- The replacement's frame: a read at a path disjoint from the replaced one — a
 sibling component, or an element of another index — reads what it read before the
 replacement. Disjointness is non-overlap of the whole paths, so the two accesses
 share no level the replacement rebuilt. -/
-theorem replaceAt_subAt_of_disjoint {d : Layout} (p q : Path d) (y : State (At p))
-    (s : State d) : Disjoint p q → InBounds p s → subAt q (replaceAt d p y s) = subAt q s := by
+theorem replaceAt_subAt_of_disjoint {d : Layout} : ∀ (p q : Path d) (y : State (At p))
+    (s : State d) {s' : State d}, replaceAt d p y s = some s' → Disjoint p q →
+      subAt q s' = subAt q s := by
+  intro p
   induction p with
   | here =>
-      intro hd _
+      intro q y s s' _ hd
       exact absurd hd (not_disjoint_here_left q)
   | left r ih =>
-      intro hd hb
+      intro q y s s' h hd
       obtain ⟨u, v⟩ := s
+      rw [replaceAt, Option.map_eq_some_iff] at h
+      obtain ⟨u', hu', hu''⟩ := h
+      rw [← hu'']
       cases q with
       | here => exact absurd hd (not_disjoint_here_right (Path.left r))
-      | left q' => exact ih q' y u (disjoint_left_iff.mp hd) hb
+      | left q' => exact ih q' y u hu' (disjoint_left_iff.mp hd)
       | right q' => rfl
   | right r ih =>
-      intro hd hb
+      intro q y s s' h hd
       obtain ⟨u, v⟩ := s
+      rw [replaceAt, Option.map_eq_some_iff] at h
+      obtain ⟨u', hu', hu''⟩ := h
+      rw [← hu'']
       cases q with
       | here => exact absurd hd (not_disjoint_here_right (Path.right r))
       | left q' => rfl
-      | right q' => exact ih q' y v (disjoint_right_iff.mp hd) hb
+      | right q' => exact ih q' y v hu' (disjoint_right_iff.mp hd)
   | index i r ih =>
-      intro hd hb
-      obtain ⟨e, he, hbq⟩ := hb
-      obtain ⟨hlt, hget⟩ := Array.getElem?_eq_some_iff.mp he
-      cases q with
-      | here => exact absurd hd (not_disjoint_here_right (Path.index i r))
-      | index j q' =>
-          by_cases hij : i = j
-          · subst hij
-            simp only [replaceAt_index i r y s hlt, hget, subAt_index,
-              Array.getElem?_set_self hlt, he]
-            exact ih q' y e ((disjoint_index_iff i).mp hd) hbq
-          · simp only [replaceAt_index i r y s hlt, subAt_index,
-              Array.getElem?_set_ne hlt hij]
+      intro q y s s' h hd
+      rw [replaceAt] at h
+      split at h
+      · rename_i hlt
+        rw [Option.map_eq_some_iff] at h
+        obtain ⟨e', he', he''⟩ := h
+        rw [← he'']
+        cases q with
+        | here => exact absurd hd (not_disjoint_here_right (Path.index i r))
+        | index j q' =>
+            by_cases hij : i = j
+            · subst hij
+              rw [subAt_index, Array.getElem?_set_self hlt, subAt_index,
+                Array.getElem?_eq_some_iff.mpr ⟨hlt, rfl⟩]
+              exact ih q' y s[i] he' ((disjoint_index_iff i).mp hd)
+            · rw [subAt_index, subAt_index, Array.getElem?_set_ne hlt hij]
+      · exact absurd h (by simp)
 
 /-- The frame at the node value a read or a write inspects: the replacement at a
 path leaves the node value at every disjoint path as it was, because the node value
 at a path is the quotation of the state that path's own accessor reads. -/
 theorem replaceAt_nodeVal_of_disjoint {d : Layout} (p q : Path d) (y : State (At p))
-    (s : State d) (hd : Disjoint p q) (hb : InBounds p s) :
-    nodeVal q (replaceAt d p y s) = nodeVal q s :=
-  congrArg (cellVal (At q)) (replaceAt_subAt_of_disjoint p q y s hd hb)
+    (s : State d) {s' : State d} (h : replaceAt d p y s = some s') (hd : Disjoint p q) :
+    nodeVal q s' = nodeVal q s :=
+  congrArg (cellVal (At q)) (replaceAt_subAt_of_disjoint p q y s h hd)
 
 /-! ## The leaf write's frame and snapshot -/
 

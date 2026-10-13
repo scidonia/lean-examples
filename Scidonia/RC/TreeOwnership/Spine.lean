@@ -1,6 +1,6 @@
 /-
-The per-node fractional account of a tree state, its laws, and the sibling
-witness.
+The per-node fractional account of a tree state, its laws, and the sibling and
+fork witnesses.
 
 **The account.** A layout's state is a tree, and a *node* of it is a logical
 in-bounds `Path`. `Account d` records, for each node, the reads currently lent
@@ -15,21 +15,37 @@ keeps the ancestor's allocated share on its spine and obtains a separate positiv
 share at the child from the child's own account; nothing asserts
 `q_child = q_parent / 2`, which would make a fraction-1 write under a fractional
 ancestor impossible. Only concurrent holders of the *same* node split, and they
-split by halving (`Branch.fork_conservation`, `half_valid`, `halves_rejoin`).
+split by halving: `lend` takes a loan out of what an owner holds and `repay` puts
+it back (`heldAt_lend`, `heldAt_repay`); `fork` halves one holder's share between
+two holders of that node and leaves the node's own fraction exactly where it was
+(`heldAt_fork`), and `join` puts the halves back (`heldAt_join`). The halving is
+the existing `ValidShare`/`half_valid`/`halves_rejoin` arithmetic.
+
+**The account is evidence, not data.** `ValidAccount` requires every lent share
+to be a positive fraction of at most the whole, the shares at one node to fit in
+it, a node's ledger to name each loan at most once, and no node to be listed
+twice; `lend`, `repay`, `fork` and `join` each preserve it (`lend_valid`,
+`repay_valid`, `fork_valid`, `join_valid`). The borrow scope of a read is a
+`Prop` — `ReadLoan` — naming its identifier, its leaf and the share it holds at
+each node of that leaf's path, so nothing about a borrow is data a caller could
+inspect.
 
 **What is proved.** A node whose account is empty is held whole
 (`writes_holds_one`), and no other holder fits beside it (`cannot_add_reader`,
 `writer_excludes_reader`, `spine_writer_excludes`); two *distinct* holders of one
-node fit in the whole (`share_fit`); a loan and its return move the held fraction
-by exactly the loan (`heldAt_lend`, `heldAt_repay`) and a returned loan cannot be
-returned twice (`repay_not_mem`); a well-formed branch tree's leaves sum to its
-share and are positive when the share is (`wf_leafSum`, `wf_sharesPositive`); a
-read holds a positive share at every node of its path and fits beside any other
-holder of those nodes (`spine_readThrough_positive`, `readThrough_fits`); and
-`spine_sibling_compatible` exhibits the witness the milestone rests on — a
-reader owning half of the common root and half of the left leaf, a writer holding
-the root's other half and the whole right subtree, the root summing to one and
-the right subtree excluding every other holder.
+node fit in the whole (`share_fit`) and a holder's share never exceeds it
+(`share_le_one`, `node_shares_positive`); a loan and its return move the held
+fraction by exactly the loan (`heldAt_lend`, `heldAt_repay`) and a returned loan
+cannot be returned twice (`repay_not_mem`); a read holds a positive share at
+every node of its path and fits beside any other holder of those nodes
+(`spine_readThrough_positive`, `readThrough_fits`); and `spine_sibling_compatible`
+exhibits the witness the milestone rests on — a reader owning half of the common
+root and half of the left leaf, a writer holding the root's other half and the
+whole right subtree, the root summing to one and the right subtree excluding
+every other holder. `multiAccount_valid` is the three-holder witness: one node
+whose holders are a half, a quarter and a quarter, reached by a loan, a fork and
+a second loan, valid at every step and with the node's own fraction conserved at
+every step.
 -/
 import Scidonia.FracPerm.Ledger
 import Scidonia.FracPerm.StateVar.Heap
@@ -97,16 +113,238 @@ the identifier as well as the fraction. -/
 theorem reads_self {d : Layout} {A : Account d} {p : Path d} {i : Nat} {q : Rat}
     (h : Reads A p i q) : ∃ l, ledgerAt A p = l ∧ (i, q) ∈ l := ⟨_, rfl, h⟩
 
+/-- The ledger a valid account holds at a node satisfies the account's own
+conditions: the entry is the account's if it has one there, and the empty ledger
+does so trivially. -/
+theorem ledgerAt_valid {d : Layout} (A : Account d) (p : Path d) : ValidAccount A →
+    (∀ x ∈ ledgerAt A p, ValidShare x.2)
+      ∧ ((ledgerAt A p).map Prod.snd).sum ≤ 1 ∧ (ledgerAt A p).Nodup := by
+  induction A with
+  | nil =>
+      intro _
+      exact ⟨by intro x hx; simp [ledgerAt] at hx, by rw [ledgerAt]; grind, by rw [ledgerAt]; simp⟩
+  | cons e es ih =>
+      intro hA
+      obtain ⟨k, l⟩ := e
+      obtain ⟨hval, hkeys⟩ := hA
+      rw [List.forall_mem_cons] at hval
+      rw [List.map_cons, List.nodup_cons] at hkeys
+      by_cases hk : p = k
+      · have hlook : ledgerAt ((k, l) :: es) p = l := by simp [ledgerAt, hk]
+        rw [hlook]
+        exact hval.1
+      · have hlook : ledgerAt ((k, l) :: es) p = ledgerAt es p := by simp [ledgerAt, hk]
+        rw [hlook]
+        exact ih ⟨hval.2, hkeys.2⟩
+
+/-! ## Updating one node's ledger
+
+The account is one entry per node, and every operation below rewrites the node's
+own entry in place rather than shadowing it, so a node keeps a single entry and
+the account's own well-formedness is preserved. -/
+
+/-- The account with a node's ledger updated: the node's entry becomes `f` of
+what it was, and a node the account does not mention gains the entry `f []`. -/
+def updateLedger {d : Layout} (A : Account d) (p : Path d) (f : Ledger → Ledger) :
+    Account d :=
+  match A with
+  | [] => [(p, f [])]
+  | (q, l) :: rest => if p = q then (q, f l) :: rest else (q, l) :: updateLedger rest p f
+
+/-- Updating a node's ledger reads back exactly the update at that node. -/
+theorem ledgerAt_updateLedger_self {d : Layout} (A : Account d) (p : Path d)
+    (f : Ledger → Ledger) : ledgerAt (updateLedger A p f) p = f (ledgerAt A p) := by
+  induction A with
+  | nil => simp [updateLedger, ledgerAt]
+  | cons e rest ih =>
+      obtain ⟨q, l⟩ := e
+      rw [updateLedger]
+      split
+      · rename_i hpq
+        simp [ledgerAt, hpq]
+      · rename_i hpq
+        simp only [ledgerAt, hpq, reduceIte]
+        exact ih
+
+/-- Updating one node's ledger leaves every other node's ledger as it was. -/
+theorem ledgerAt_updateLedger_ne {d : Layout} (A : Account d) (p p' : Path d)
+    (f : Ledger → Ledger) (h : p' ≠ p) :
+    ledgerAt (updateLedger A p f) p' = ledgerAt A p' := by
+  induction A with
+  | nil => simp [updateLedger, ledgerAt, h]
+  | cons e rest ih =>
+      obtain ⟨q, l⟩ := e
+      rw [updateLedger]
+      split
+      · rename_i hpq
+        have hp'q : ¬ p' = q := fun h' => h (h'.trans hpq.symm)
+        simp only [ledgerAt, hp'q, reduceIte]
+      · rename_i hpq
+        by_cases hp'q : p' = q
+        · simp only [ledgerAt, hp'q, reduceIte]
+        · simp only [ledgerAt, hp'q, reduceIte]
+          exact ih
+
+/-- An entry of an updated account is the node's new entry or an entry the
+account already had. -/
+theorem mem_updateLedger {d : Layout} (A : Account d) (p : Path d) (f : Ledger → Ledger)
+    {e : Path d × Ledger} (h : e ∈ updateLedger A p f) :
+    e = (p, f (ledgerAt A p)) ∨ e ∈ A := by
+  induction A with
+  | nil => exact Or.inl (by simpa [updateLedger, ledgerAt] using h)
+  | cons e' rest ih =>
+      obtain ⟨q, l⟩ := e'
+      rw [updateLedger] at h
+      split at h
+      · rename_i hpq
+        rw [List.mem_cons] at h
+        rcases h with h | h
+        · refine Or.inl ?_
+          rw [h, hpq, ledgerAt_cons_self]
+        · exact Or.inr (List.mem_cons_of_mem _ h)
+      · rename_i hpq
+        rw [List.mem_cons] at h
+        rcases h with h | h
+        · exact Or.inr (by simp [h])
+        · rcases ih h with h' | h'
+          · refine Or.inl ?_
+            rw [h']
+            have hlook : ledgerAt ((q, l) :: rest) p = ledgerAt rest p := by
+              simp only [ledgerAt, hpq, reduceIte]
+            rw [hlook]
+          · exact Or.inr (by simp [h'])
+
+/-- A node of an updated account is a node of the account or the updated node. -/
+theorem updateLedger_paths {d : Layout} (A : Account d) (p : Path d) (f : Ledger → Ledger)
+    {e : Path d × Ledger} (h : e ∈ updateLedger A p f) :
+    e.1 ∈ A.map Prod.fst ∨ e.1 = p := by
+  induction A with
+  | nil =>
+      have h1 : e = (p, f []) := by simpa [updateLedger] using h
+      exact Or.inr (by rw [h1])
+  | cons e' rest ih =>
+      obtain ⟨q, l⟩ := e'
+      rw [updateLedger] at h
+      split at h
+      · rename_i hpq
+        rw [List.mem_cons] at h
+        rcases h with h | h
+        · left
+          rw [h]
+          simp
+        · left
+          exact List.mem_map.mpr ⟨e, List.mem_cons_of_mem _ h, rfl⟩
+      · rename_i hpq
+        rw [List.mem_cons] at h
+        rcases h with h | h
+        · left
+          rw [h]
+          simp
+        · rcases ih h with h' | h'
+          · left
+            rw [List.mem_map] at h' ⊢
+            obtain ⟨z, hz, hz'⟩ := h'
+            exact ⟨z, List.mem_cons_of_mem _ hz, hz'⟩
+          · right
+            exact h'
+
+/-- Updating a node's ledger keeps the account's nodes distinct. -/
+theorem updateLedger_nodup {d : Layout} (A : Account d) (p : Path d) (f : Ledger → Ledger)
+    (h : (A.map Prod.fst).Nodup) : ((updateLedger A p f).map Prod.fst).Nodup := by
+  induction A with
+  | nil => simp [updateLedger]
+  | cons e' rest ih =>
+      obtain ⟨q, l⟩ := e'
+      rw [List.map_cons, List.nodup_cons] at h
+      rw [updateLedger]
+      split
+      · simp only [List.map_cons, List.nodup_cons]
+        exact ⟨h.1, h.2⟩
+      · rename_i hpq
+        simp only [List.map_cons, List.nodup_cons]
+        have hrest := ih h.2
+        refine ⟨?_, hrest⟩
+        intro hmem
+        rw [List.mem_map] at hmem
+        obtain ⟨e, he, hef⟩ := hmem
+        rcases updateLedger_paths rest p f he with h' | h'
+        · exact h.1 (hef ▸ h')
+        · exact hpq (h'.symm.trans hef)
+
+/-- Updating one node's ledger in a way the node's own loans allow keeps the
+account valid: every other node's entry is the account's own, and the updated
+entry is the caller's. -/
+theorem updateLedger_valid {d : Layout} (A : Account d) (p : Path d) (f : Ledger → Ledger)
+    (hA : ValidAccount A)
+    (hf : (∀ x ∈ f (ledgerAt A p), ValidShare x.2)
+      ∧ (f (ledgerAt A p)).Nodup ∧ (f (ledgerAt A p) |>.map Prod.snd).sum ≤ 1) :
+    ValidAccount (updateLedger A p f) := by
+  refine ⟨?_, updateLedger_nodup A p f hA.2⟩
+  intro e he
+  rcases mem_updateLedger A p f he with rfl | he
+  · exact ⟨hf.1, hf.2.2, hf.2.1⟩
+  · exact hA.1 e he
+
+/-- An entry of a ledger that is not the entry erased survives the erasure. -/
+theorem mem_erase_of_ne {l : Ledger} {a b : Nat × Rat} (hb : b ∈ l) (h : b ≠ a) :
+    b ∈ l.erase a := by
+  induction l with
+  | nil => simp at hb
+  | cons x xs ih =>
+      by_cases hxa : x = a
+      · rw [hxa, List.erase_cons_head]
+        rcases List.mem_cons.mp hb with hb | hb
+        · exact absurd (hb.trans hxa) h
+        · exact hb
+      · rw [List.erase_cons_tail (by simpa [beq_iff_eq] using hxa)]
+        rcases List.mem_cons.mp hb with hb | hb
+        · exact List.mem_cons.mpr (Or.inl hb)
+        · exact List.mem_cons.mpr (Or.inr (ih hb))
+
 /-! ## The loans -/
 
 /-- Lend the fraction `q` at a node under the ghost identifier `i`. -/
 def lend {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat) : Account d :=
-  (p, ledgerAt A p ++ [(i, q)]) :: A
+  updateLedger A p (fun l => l ++ [(i, q)])
 
 /-- Return the loan the identifier `i` holds at a node: the entry is erased, and
 a loan the node does not hold leaves the ledger as it was. -/
 def repay {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat) : Account d :=
-  (p, (ledgerAt A p).erase (i, q)) :: A
+  updateLedger A p (fun l => l.erase (i, q))
+
+/-- Fork the loan `(i, q)` at a node into the two halves `(i, q / 2)` and
+`(j, q / 2)`: one holder of the node becomes two, each holding half of what the
+one held there. -/
+def fork {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat) : Account d :=
+  updateLedger A p (fun l => l.erase (i, q) ++ [(i, q / 2), (j, q / 2)])
+
+/-- Join the two halves `(i, q / 2)` and `(j, q / 2)` at a node back into the one
+loan `(i, q)`: two holders of the node become one, holding between them what the
+two held. -/
+def join {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat) : Account d :=
+  updateLedger A p (fun l => (l.erase (i, q / 2)).erase (j, q / 2) ++ [(i, q)])
+
+/-- Lending a fraction appends one entry to the node's ledger. -/
+theorem ledgerAt_lend {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat) :
+    ledgerAt (lend A p i q) p = ledgerAt A p ++ [(i, q)] := by
+  rw [lend, ledgerAt_updateLedger_self]
+
+/-- Returning a loan erases its entry from the node's ledger. -/
+theorem ledgerAt_repay {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat) :
+    ledgerAt (repay A p i q) p = (ledgerAt A p).erase (i, q) := by
+  rw [repay, ledgerAt_updateLedger_self]
+
+/-- Forking a loan replaces its entry at the node by the two halves. -/
+theorem ledgerAt_fork {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat) :
+    ledgerAt (fork A p i j q) p =
+      (ledgerAt A p).erase (i, q) ++ [(i, q / 2), (j, q / 2)] := by
+  rw [fork, ledgerAt_updateLedger_self]
+
+/-- Joining two halves replaces their entries at the node by the joined loan. -/
+theorem ledgerAt_join {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat) :
+    ledgerAt (join A p i j q) p =
+      ((ledgerAt A p).erase (i, q / 2)).erase (j, q / 2) ++ [(i, q)] := by
+  rw [join, ledgerAt_updateLedger_self]
 
 /-- Lending raises a ledger by one entry, so the held fraction falls by exactly
 the loan. -/
@@ -116,17 +354,70 @@ theorem held_append_singleton (l : Ledger) (i : Nat) (q : Rat) :
     List.sum_append, List.sum_cons, List.sum_nil]
   grind
 
+/-- Lending two fractions lowers the held fraction by exactly their two
+fractions. -/
+theorem held_append_two (l : Ledger) (e₁ e₂ : Nat × Rat) :
+    Scidonia.FracPerm.Ledger.held (l ++ [e₁, e₂])
+      = Scidonia.FracPerm.Ledger.held l - e₁.2 - e₂.2 := by
+  rw [show l ++ [e₁, e₂] = (l ++ [e₁]) ++ [e₂] from by simp, held_append_singleton,
+    held_append_singleton]
+
+/-- Appending one entry raises a ledger's sum of fractions by exactly that
+entry's fraction. -/
+theorem sum_append_singleton (l : Ledger) (e : Nat × Rat) :
+    ((l ++ [e]).map Prod.snd).sum = (l.map Prod.snd).sum + e.2 := by
+  have h := held_append_singleton l e.1 e.2
+  simp only [Scidonia.FracPerm.Ledger.held] at h
+  grind
+
+/-- Appending two entries raises a ledger's sum of fractions by exactly their two
+fractions. -/
+theorem sum_append_two (l : Ledger) (e₁ e₂ : Nat × Rat) :
+    ((l ++ [e₁, e₂]).map Prod.snd).sum = (l.map Prod.snd).sum + e₁.2 + e₂.2 := by
+  have h := held_append_two l e₁ e₂
+  simp only [Scidonia.FracPerm.Ledger.held] at h ⊢
+  grind
+
+/-- Erasing an entry lowers a ledger's sum of fractions by exactly that entry's
+fraction. -/
+theorem sum_erase_of_mem {l : Ledger} {e : Nat × Rat} (h : e ∈ l) :
+    ((l.erase e).map Prod.snd).sum = (l.map Prod.snd).sum - e.2 := by
+  have h' := Scidonia.FracPerm.Ledger.held_erase_of_mem h
+  simp only [Scidonia.FracPerm.Ledger.held] at h' ⊢
+  grind
+
 /-- Lending a fraction lowers the held fraction at that node by exactly it. -/
 theorem heldAt_lend {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat) :
     heldAt (lend A p i q) p = heldAt A p - q := by
-  rw [heldAt, heldAt, lend, ledgerAt_cons_self, held_append_singleton]
+  rw [heldAt, heldAt, ledgerAt_lend, held_append_singleton]
 
 /-- Returning a loan raises the held fraction at that node by exactly the loan:
 a returned read gives back what it took, no more and no less. -/
 theorem heldAt_repay {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat)
     (h : Reads A p i q) : heldAt (repay A p i q) p = heldAt A p + q := by
-  rw [heldAt, heldAt, repay, ledgerAt_cons_self,
+  rw [heldAt, heldAt, ledgerAt_repay,
     Scidonia.FracPerm.Ledger.held_erase_of_mem h]
+
+/-- Forking a loan leaves the node's held fraction exactly where it was: the two
+halves are the one loan, and nothing enters or leaves the node. -/
+theorem heldAt_fork {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat)
+    (h : Reads A p i q) : heldAt (fork A p i j q) p = heldAt A p := by
+  rw [heldAt, heldAt, ledgerAt_fork, held_append_two,
+    Scidonia.FracPerm.Ledger.held_erase_of_mem h]
+  have hh := halves_rejoin q
+  grind
+
+/-- Joining two halves leaves the node's held fraction exactly where it was: the
+joined loan is the two halves, and nothing enters or leaves the node. -/
+theorem heldAt_join {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat)
+    (h₁ : Reads A p i (q / 2)) (h₂ : Reads A p j (q / 2)) (hij : (i, q / 2) ≠ (j, q / 2)) :
+    heldAt (join A p i j q) p = heldAt A p := by
+  have hne : (j, q / 2) ≠ (i, q / 2) := fun hh => hij hh.symm
+  have h3 := Scidonia.FracPerm.Ledger.held_erase_of_mem (mem_erase_of_ne h₂ hne)
+  have h4 := Scidonia.FracPerm.Ledger.held_erase_of_mem h₁
+  rw [heldAt, heldAt, ledgerAt_join, held_append_singleton, h3, h4]
+  have h5 := halves_rejoin q
+  grind
 
 /-- A ledger whose entries are distinct does not hold a loan it has erased. -/
 theorem not_mem_erase_self : ∀ {l : Ledger}, l.Nodup → ∀ e : Nat × Rat, e ∉ l.erase e
@@ -147,7 +438,7 @@ theorem not_mem_erase_self : ∀ {l : Ledger}, l.Nodup → ∀ e : Nat × Rat, e
 ledger no longer holds it. -/
 theorem repay_not_mem {d : Layout} {A : Account d} {p : Path d} {i : Nat} {q : Rat}
     (h : (ledgerAt A p).Nodup) : ¬ Reads (repay A p i q) p i q := by
-  rw [Reads, repay, ledgerAt_cons_self]
+  rw [Reads, ledgerAt_repay]
   exact not_mem_erase_self h (i, q)
 
 /-! ## The arithmetic of one node's shares -/
@@ -196,6 +487,23 @@ theorem le_sum_snd_of_mem {l : List (Nat × Rat)} (hn : ∀ e ∈ l, 0 ≤ e.2) 
         have h2 : 0 ≤ x.snd := hn x (by simp)
         grind
 
+/-- Erasing an entry of a list of nonnegative numbers does not raise the list's
+sum of fractions. -/
+theorem sum_erase_le {l : List (Nat × Rat)} (hn : ∀ e ∈ l, 0 ≤ e.2) (e : Nat × Rat) :
+    ((l.erase e).map Prod.snd).sum ≤ (l.map Prod.snd).sum := by
+  induction l with
+  | nil => simp
+  | cons x xs ih =>
+      have hx : 0 ≤ x.2 := hn x (by simp)
+      by_cases hxe : x = e
+      · rw [hxe, List.erase_cons_head, List.map_cons, List.sum_cons]
+        have hS : 0 ≤ (xs.map Prod.snd).sum := sum_snd_nonneg (fun z hz => hn z (by simp [hz]))
+        grind
+      · rw [List.erase_cons_tail (by simpa [beq_iff_eq] using hxe), List.map_cons, List.sum_cons,
+          List.map_cons, List.sum_cons]
+        have h1 := ih (fun z hz => hn z (by simp [hz]))
+        grind
+
 /-- Two entries of a list of nonnegative numbers with *different* identifiers sum
 to at most the list's sum: the identifiers are what make the two loans distinct
 entries rather than one counted twice. -/
@@ -223,30 +531,6 @@ theorem add_le_sum_of_mem_ne {l : List (Nat × Rat)} (hn : ∀ e ∈ l, 0 ≤ e.
         · have h1 := ih (fun z hz => hn z (by simp [hz])) hq' hr'
           grind
 
-/-- The ledger a valid account holds at a node satisfies the account's own
-conditions: the entry is the account's if it has one there, and the empty ledger
-does so trivially. -/
-theorem ledgerAt_valid {d : Layout} (A : Account d) (p : Path d) : ValidAccount A →
-    (∀ x ∈ ledgerAt A p, ValidShare x.2)
-      ∧ ((ledgerAt A p).map Prod.snd).sum ≤ 1 ∧ (ledgerAt A p).Nodup := by
-  induction A with
-  | nil =>
-      intro _
-      exact ⟨by intro x hx; simp [ledgerAt] at hx, by rw [ledgerAt]; grind, by rw [ledgerAt]; simp⟩
-  | cons e es ih =>
-      intro hA
-      obtain ⟨k, l⟩ := e
-      obtain ⟨hval, hkeys⟩ := hA
-      rw [List.forall_mem_cons] at hval
-      rw [List.map_cons, List.nodup_cons] at hkeys
-      by_cases hk : p = k
-      · have hlook : ledgerAt ((k, l) :: es) p = l := by simp [ledgerAt, hk]
-        rw [hlook]
-        exact hval.1
-      · have hlook : ledgerAt ((k, l) :: es) p = ledgerAt es p := by simp [ledgerAt, hk]
-        rw [hlook]
-        exact ih ⟨hval.2, hkeys.2⟩
-
 /-- Two distinct holders of one node fit in the whole: the sum of their shares is
 at most one. -/
 theorem share_fit {d : Layout} {A : Account d} (hA : ValidAccount A) {p : Path d}
@@ -264,6 +548,18 @@ theorem share_le_one {d : Layout} {A : Account d} (hA : ValidAccount A) {p : Pat
   have h1 := le_sum_snd_of_mem (fun e he => by have h := (hv e he).1; grind) hq
   grind
 
+/-- A valid account's node lends positive fractions: every holder holds something
+rather than nothing. -/
+theorem node_shares_positive {d : Layout} {A : Account d} (hA : ValidAccount A)
+    {p : Path d} {x : Nat × Rat} (hx : x ∈ ledgerAt A p) : 0 < x.2 :=
+  ((ledgerAt_valid A p hA).1 x hx).1
+
+/-- A valid account's node lends fractions that fit in the whole: the node's own
+sum is at most one. -/
+theorem node_sum_le_one {d : Layout} {A : Account d} (hA : ValidAccount A) {p : Path d} :
+    ((ledgerAt A p).map Prod.snd).sum ≤ 1 :=
+  (ledgerAt_valid A p hA).2.1
+
 /-- A node held whole has no other holder: the holder's share is the whole, so no
 positive fraction fits beside it. -/
 theorem writer_excludes_reader {d : Layout} {A : Account d} {p : Path d} (hW : Writes A p)
@@ -273,7 +569,7 @@ theorem writer_excludes_reader {d : Layout} {A : Account d} {p : Path d} (hW : W
   rw [hW] at hq
   exact List.not_mem_nil hq
 
-/-! ## The subtree of a path -/
+/-! ## The subscriber path and the subtree of a path -/
 
 /-- A node is in the subtree of a path when the path is a prefix of it. -/
 def InSubtree {d : Layout} (p q : Path d) : Prop := ∃ r : Path (At p), q = Path.append p r
@@ -297,94 +593,147 @@ theorem spine_writer_excludes {d : Layout} {A : Account d} {p : Path d}
     {i : Nat} {r : Rat} (hr : Reads A q i r) : False :=
   writer_excludes_reader (hW q hq) hr
 
-/-! ## The branch tree of one node
+/-! ## The loans of a read
 
-The shares of the concurrent holders of a *single* node: a leaf is one holder at
-its whole share, and a fork halves the parent's share between two concurrent
-branches. This is the exact arithmetic of the existing read-thread fork, at one
-node rather than at one root. -/
+A read's borrow is a proposition, not a structure: it names the ghost identifier
+the read returns its loans under, the leaf it observes, and the share it holds at
+each node of the leaf's path. Its shares are accounted *per node* — the leaf's
+loan is that node's, the ancestors' are their own — and every one of them is
+positive. -/
 
-/-- The branch tree of one node's holders: one leaf per concurrent holder, forked
-where a holder split itself. -/
-inductive Branch where
-  /-- One holder, holding `q`. -/
-  | leaf (q : Rat)
-  /-- Two concurrent holders, each of half the fork's share. -/
-  | fork (l r : Branch)
-
-/-- The shares of a branch tree's holders. -/
-def Branch.leafSum : Branch → Rat
-  | .leaf q => q
-  | .fork l r => l.leafSum + r.leafSum
-
-/-- Every holder of a branch tree holds a positive share. -/
-def Branch.sharesPositive : Branch → Prop
-  | .leaf q => 0 < q
-  | .fork l r => l.sharesPositive ∧ r.sharesPositive
-
-/-- A branch tree is well formed at a share: a leaf holds it whole, and a fork
-gives each of its branches half of it. -/
-def Branch.WF (q : Rat) : Branch → Prop
-  | .leaf q' => q' = q
-  | .fork l r => Branch.WF (q / 2) l ∧ Branch.WF (q / 2) r
-
-/-- A well-formed branch tree's holders sum to its share. -/
-theorem Branch.wf_leafSum : ∀ {b : Branch} {q : Rat}, b.WF q → b.leafSum = q
-  | .leaf _, _, h => h
-  | .fork l r, q, h => by
-      rw [Branch.leafSum, wf_leafSum h.1, wf_leafSum h.2, halves_rejoin]
-
-/-- A well-formed branch tree with a positive share has every holder positive: a
-fork of a positive share has two positive halves. -/
-theorem Branch.wf_sharesPositive : ∀ {b : Branch} {q : Rat}, b.WF q → 0 < q →
-    b.sharesPositive
-  | .leaf _, _, h, hq => by simpa [Branch.WF] using h ▸ hq
-  | .fork l r, q, h, hq => by
-      have hq' : 0 < q / 2 := by grind
-      exact ⟨wf_sharesPositive h.1 hq', wf_sharesPositive h.2 hq'⟩
-
-/-- A fork's two branches hold between them exactly what the fork held: forking
-splits a share and joining it puts it back. -/
-theorem Branch.fork_conservation {q : Rat} {l r : Branch} (h : Branch.WF q (.fork l r)) :
-    l.leafSum + r.leafSum = q := by
-  rw [← Branch.leafSum, wf_leafSum h]
-
-/-- A fork's share is the halves its branches run at, and its two leaves are
-positive when its share is. -/
-theorem Branch.fork_halves {q : Rat} {l r : Branch} (h : Branch.WF q (.fork l r)) :
-    Branch.WF (q / 2) l ∧ Branch.WF (q / 2) r := h
-
-/-! ## A read's loans along its path -/
-
-/-- A read through a leaf path: the ghost identifier it is entitled to return and
-the share it holds at every node of its path. The shares are accounted *per node*
-— the leaf's loan is this node's, the ancestors' are their own — and every one of
-them is positive. -/
-structure ReadLoan (d : Layout) (A : Account d) where
-  /-- The ghost identifier the read returns its loans under. -/
-  id : Nat
-  /-- The leaf path the read observes. -/
-  leaf : ObsPath d
-  /-- The share the read holds at each node of its path. -/
-  share : (p : Path d) → Rat
-  /-- The read holds a positive share at every node it traverses. -/
-  positive : ∀ p, PrefixOf p leaf.path → 0 < share p
-  /-- Each of those shares is accounted at that node. -/
-  held : ∀ p, PrefixOf p leaf.path → Reads A p id (share p)
+/-- A read's borrow: the identifier it returns its loans under, the leaf it
+observes, and the share it holds at each node of that leaf's path. Every one of
+those shares is positive and is accounted at its own node. -/
+def ReadLoan {d : Layout} (A : Account d) (id : Nat) (leaf : ObsPath d)
+    (share : Path d → Rat) : Prop :=
+  (∀ p, PrefixOf p leaf.path → 0 < share p)
+    ∧ (∀ p, PrefixOf p leaf.path → Reads A p id (share p))
 
 /-- A read holds a strictly positive share of every node it traverses and of the
 leaf it observes: the read-through positivity law. -/
-theorem spine_readThrough_positive {d : Layout} {A : Account d} (L : ReadLoan d A)
-    {p : Path d} (hp : PrefixOf p L.leaf.path) :
-    ∃ s, 0 < s ∧ Reads A p L.id s :=
-  ⟨L.share p, L.positive p hp, L.held p hp⟩
+theorem spine_readThrough_positive {d : Layout} {A : Account d} {id : Nat}
+    {leaf : ObsPath d} {share : Path d → Rat} (L : ReadLoan A id leaf share)
+    {p : Path d} (hp : PrefixOf p leaf.path) : 0 < share p ∧ Reads A p id (share p) :=
+  ⟨L.1 p hp, L.2 p hp⟩
 
 /-- A read's loan at each node it traverses fits beside every *other* holder of
 that node: the reader's share plus the other holder's is at most the whole. -/
-theorem readThrough_fits {d : Layout} {A : Account d} (hA : ValidAccount A)
-    (L : ReadLoan d A) {p : Path d} (hp : PrefixOf p L.leaf.path) {j : Nat} {r : Rat}
-    (hj : j ≠ L.id) (hr : Reads A p j r) : L.share p + r ≤ 1 :=
-  share_fit (A := A) (p := p) (i := L.id) (j := j) hA (fun h => hj h.symm) (L.held p hp) hr
+theorem readThrough_fits {d : Layout} {A : Account d} (hA : ValidAccount A) {id : Nat}
+    {leaf : ObsPath d} {share : Path d → Rat} (L : ReadLoan A id leaf share)
+    {p : Path d} (hp : PrefixOf p leaf.path) {j : Nat} {r : Rat} (hj : j ≠ id)
+    (hr : Reads A p j r) : share p + r ≤ 1 :=
+  share_fit hA (fun h => hj h.symm) (L.2 p hp) hr
+
+/-- A read's loan never exceeds the node it holds: the account's validity is what
+bounds what a borrow can be. -/
+theorem readThrough_le_one {d : Layout} {A : Account d} (hA : ValidAccount A) {id : Nat}
+    {leaf : ObsPath d} {share : Path d → Rat} (L : ReadLoan A id leaf share)
+    {p : Path d} (hp : PrefixOf p leaf.path) : share p ≤ 1 :=
+  share_le_one hA (L.2 p hp)
+
+/-! ## The validity-preserving account operations
+
+Each operation below is a transition of the account, and each is shown to keep the
+account valid and to conserve the node's own fraction. -/
+
+/-- Lending keeps the account valid when the loan is a valid share that the node
+still holds: a loan bigger than what the owner holds would overfill the node. -/
+theorem lend_valid {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat)
+    (hA : ValidAccount A) (hq : ValidShare q) (hfit : q ≤ heldAt A p)
+    (hfresh : (i, q) ∉ ledgerAt A p) : ValidAccount (lend A p i q) := by
+  refine updateLedger_valid A p _ hA ⟨?_, ?_, ?_⟩
+  · intro x hx
+    rw [List.mem_append] at hx
+    rcases hx with hx | hx
+    · exact (ledgerAt_valid A p hA).1 x hx
+    · rw [List.mem_singleton] at hx
+      rw [hx]
+      exact hq
+  · rw [List.nodup_append]
+    refine ⟨(ledgerAt_valid A p hA).2.2, by simp, ?_⟩
+    intro a ha b hb
+    rw [List.mem_singleton] at hb
+    rw [hb]
+    intro hab
+    exact hfresh (hab ▸ ha)
+  · rw [sum_append_singleton]
+    have h1 := node_sum_le_one (A := A) (p := p) hA
+    rw [heldAt, Scidonia.FracPerm.Ledger.held] at hfit
+    grind
+
+/-- Returning a loan keeps the account valid: the node's ledger only loses an
+entry. -/
+theorem repay_valid {d : Layout} (A : Account d) (p : Path d) (i : Nat) (q : Rat)
+    (hA : ValidAccount A) : ValidAccount (repay A p i q) := by
+  refine updateLedger_valid A p _ hA ⟨?_, ?_, ?_⟩
+  · intro x hx
+    exact (ledgerAt_valid A p hA).1 x (List.mem_of_mem_erase hx)
+  · exact (ledgerAt_valid A p hA).2.2.erase _
+  · have h1 := sum_erase_le (fun e he => by
+      have h := ((ledgerAt_valid A p hA).1 e he).1
+      grind) (i, q)
+    have h2 := node_sum_le_one (A := A) (p := p) hA
+    grind
+
+/-- Forking a holder's loan keeps the account valid: the node's own fraction is
+unchanged and the two halves are valid shares. -/
+theorem fork_valid {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat)
+    (hA : ValidAccount A) (hq : ValidShare q) (hij : i ≠ j) (h : Reads A p i q)
+    (hfi : (i, q / 2) ∉ ledgerAt A p) (hfj : (j, q / 2) ∉ ledgerAt A p) :
+    ValidAccount (fork A p i j q) := by
+  have hq' : ValidShare (q / 2) := half_valid hq
+  refine updateLedger_valid A p _ hA ⟨?_, ?_, ?_⟩
+  · intro x hx
+    rw [List.mem_append] at hx
+    rcases hx with hx | hx
+    · exact (ledgerAt_valid A p hA).1 x (List.mem_of_mem_erase hx)
+    · rw [List.mem_cons] at hx
+      rcases hx with hx | hx
+      · rw [hx]; exact hq'
+      · rw [List.mem_singleton] at hx
+        rw [hx]; exact hq'
+  · rw [List.nodup_append]
+    refine ⟨(ledgerAt_valid A p hA).2.2.erase (i, q), ?_, ?_⟩
+    · have hne : (i, q / 2) ≠ (j, q / 2) := fun hh => hij (Prod.mk.inj hh).1
+      simp [List.nodup_cons, hne]
+    · intro a ha b hb
+      rw [List.mem_cons, List.mem_singleton] at hb
+      have ha' : a ∈ ledgerAt A p := List.mem_of_mem_erase ha
+      rcases hb with rfl | rfl
+      · intro hab; exact hfi (hab ▸ ha')
+      · intro hab; exact hfj (hab ▸ ha')
+  · rw [sum_append_two, sum_erase_of_mem h]
+    have h2 := node_sum_le_one (A := A) (p := p) hA
+    have h4 := halves_rejoin q
+    grind
+
+/-- Joining two halves keeps the account valid when the joined loan is a valid
+share the node does not already hold. -/
+theorem join_valid {d : Layout} (A : Account d) (p : Path d) (i j : Nat) (q : Rat)
+    (hA : ValidAccount A) (hq : ValidShare q) (hij : i ≠ j)
+    (h₁ : Reads A p i (q / 2)) (h₂ : Reads A p j (q / 2))
+    (hfresh : (i, q) ∉ ledgerAt A p) : ValidAccount (join A p i j q) := by
+  have hq' : ValidShare (q / 2) := half_valid hq
+  have hne : (i, q / 2) ≠ (j, q / 2) := fun hh => hij (Prod.mk.inj hh).1
+  refine updateLedger_valid A p _ hA ⟨?_, ?_, ?_⟩
+  · intro x hx
+    rw [List.mem_append] at hx
+    rcases hx with hx | hx
+    · exact (ledgerAt_valid A p hA).1 x (List.mem_of_mem_erase (List.mem_of_mem_erase hx))
+    · rw [List.mem_singleton] at hx
+      rw [hx]; exact hq
+  · rw [List.nodup_append]
+    refine ⟨((ledgerAt_valid A p hA).2.2.erase (i, q / 2)).erase (j, q / 2), by simp, ?_⟩
+    intro a ha b hb
+    rw [List.mem_singleton] at hb
+    rw [hb]
+    intro hab
+    exact hfresh (hab ▸ List.mem_of_mem_erase (List.mem_of_mem_erase ha))
+  · rw [sum_append_singleton, sum_erase_of_mem (mem_erase_of_ne h₂ hne.symm),
+      sum_erase_of_mem h₁]
+    have h2 := node_sum_le_one (A := A) (p := p) hA
+    have h5 := halves_rejoin q
+    grind
 
 /-! ## The sibling witness
 
@@ -522,6 +871,147 @@ theorem sibling_read_allowed :
   refine ⟨by grind, ?_, ?_⟩
   · rw [Reads, sibling_ledger_right]; simp
   · rw [Reads, sibling_ledger_left]; simp [siblingLeftLedger]
+
+/-! ## The three-holder witness
+
+One node taken from its owner by a loan, forked between two holders, and lent
+again to a third: the account is valid at every step, the node's own fraction is
+conserved at every step, and the three holders hold a half, a quarter and a
+quarter. -/
+
+/-- The one-node layout the fork witness is read at. -/
+abbrev nodeLayout : Layout := .leaf .nat
+
+/-- The one-node path. -/
+abbrev nodePath : Path nodeLayout := .here
+
+/-- The one-node account: nothing is lent at the root, so its owner holds it
+whole. -/
+abbrev nodeAccount : Account nodeLayout := [(nodePath, [])]
+
+/-- The one-node account is valid. -/
+theorem nodeAccount_valid : ValidAccount nodeAccount := by
+  refine ⟨?_, ?_⟩
+  · intro e he
+    simp only [nodeAccount, List.mem_cons, List.not_mem_nil, or_false] at he
+    rw [he]
+    exact ⟨by simp, by grind, by simp⟩
+  · decide
+
+/-- The owner's fraction at the one node, before anything is lent: the whole. -/
+theorem nodeAccount_held : heldAt nodeAccount nodePath = 1 := by
+  rw [heldAt, ledgerAt_cons_self, Scidonia.FracPerm.Ledger.held_nil]
+
+/-- The fraction a fork of a half gives each of its two holders. -/
+theorem quarter_eq : ((1 : Rat) / 4) = 1 / 2 / 2 := by grind
+
+/-- A fork's half is not the loan it came from. -/
+theorem quarter_ne_half : ((1 : Rat) / 2 / 2) ≠ 1 / 2 := by grind
+
+/-- The owner lends the first half to holder 0. -/
+def halfAccount : Account nodeLayout := lend nodeAccount nodePath 0 (1 / 2)
+
+/-- The one-node ledger after the first loan: holder 0 holds a half there. -/
+theorem halfAccount_ledger : ledgerAt halfAccount nodePath = [(0, 1 / 2)] := by
+  rw [halfAccount, ledgerAt_lend, ledgerAt_cons_self]
+  rfl
+
+/-- The first loan is admitted: half is a valid share that fits in what the owner
+still holds, and nothing was lent there before. -/
+theorem halfAccount_valid : ValidAccount halfAccount :=
+  lend_valid nodeAccount nodePath 0 (1 / 2) nodeAccount_valid one_half_valid
+    (by rw [nodeAccount_held]; exact one_half_valid.2)
+    (by rw [ledgerAt_cons_self]; simp)
+
+/-- The owner's fraction after the first loan: a half. -/
+theorem halfAccount_held : heldAt halfAccount nodePath = 1 / 2 := by
+  rw [heldAt, halfAccount_ledger, Scidonia.FracPerm.Ledger.held]
+  grind
+
+/-- The fork of the first half: holders 0 and 1 hold a quarter each. -/
+def forkAccount : Account nodeLayout := fork halfAccount nodePath 0 1 (1 / 2)
+
+/-- The one-node ledger after the fork: a quarter for each of holders 0 and 1. -/
+theorem forkAccount_ledger :
+    ledgerAt forkAccount nodePath = [(0, 1 / 2 / 2), (1, 1 / 2 / 2)] := by
+  rw [forkAccount, ledgerAt_fork, halfAccount_ledger, List.erase_cons_head]
+  rfl
+
+/-- The first loan is where the account holds it. -/
+theorem halfAccount_reads : Reads halfAccount nodePath 0 (1 / 2) := by
+  show (0, 1 / 2) ∈ ledgerAt halfAccount nodePath
+  rw [halfAccount_ledger]
+  exact List.mem_cons_self
+
+/-- The fork is admitted: its loan is where the account holds it, half is a valid
+share, and neither half is lent there already. -/
+theorem forkAccount_valid : ValidAccount forkAccount :=
+  fork_valid halfAccount nodePath 0 1 (1 / 2) halfAccount_valid one_half_valid
+    (by decide)
+    halfAccount_reads
+    (by show ((0, (1 : Rat) / 2 / 2)) ∉ ledgerAt halfAccount nodePath
+        rw [halfAccount_ledger]
+        simp [quarter_ne_half])
+    (by show ((1, (1 : Rat) / 2 / 2)) ∉ ledgerAt halfAccount nodePath
+        rw [halfAccount_ledger]
+        simp [quarter_ne_half])
+
+/-- The owner's fraction after the fork: unchanged, a half. -/
+theorem forkAccount_held : heldAt forkAccount nodePath = 1 / 2 := by
+  rw [heldAt, forkAccount_ledger, Scidonia.FracPerm.Ledger.held]
+  have h := halves_rejoin ((1 : Rat) / 2)
+  grind
+
+/-- The second loan: holder 2 takes the other half. -/
+def multiAccount : Account nodeLayout := lend forkAccount nodePath 2 (1 / 2)
+
+/-- The three-holder ledger: a quarter for each of holders 0 and 1, and a half
+for holder 2. -/
+theorem multiAccount_ledger :
+    ledgerAt multiAccount nodePath = [(0, 1 / 2 / 2), (1, 1 / 2 / 2), (2, 1 / 2)] := by
+  rw [multiAccount, ledgerAt_lend, forkAccount_ledger]
+  rfl
+
+/-- The three-holder account is valid: one node's holders hold a half, a quarter
+and a quarter, and they fit in the node. -/
+theorem multiAccount_valid : ValidAccount multiAccount :=
+  lend_valid forkAccount nodePath 2 (1 / 2) forkAccount_valid one_half_valid
+    (by rw [forkAccount_held]; grind)
+    (by show ((2, (1 : Rat) / 2)) ∉ ledgerAt forkAccount nodePath
+        rw [forkAccount_ledger]
+        simp)
+
+/-- The three-holder account's node is filled: its own fraction is zero. -/
+theorem multi_held_zero : heldAt multiAccount nodePath = 0 := by
+  rw [heldAt, multiAccount_ledger, Scidonia.FracPerm.Ledger.held]
+  have := halves_rejoin (1 / 2 : Rat)
+  grind
+
+/-- The three holders of the node: a half, a quarter and a quarter. -/
+theorem multi_reads :
+    Reads multiAccount nodePath 0 (1 / 4) ∧ Reads multiAccount nodePath 1 (1 / 4)
+      ∧ Reads multiAccount nodePath 2 (1 / 2) := by
+  refine ⟨?_, ?_, ?_⟩
+  · show ((0, (1 : Rat) / 4)) ∈ ledgerAt multiAccount nodePath
+    rw [multiAccount_ledger, quarter_eq]
+    exact List.mem_cons_self
+  · show ((1, (1 : Rat) / 4)) ∈ ledgerAt multiAccount nodePath
+    rw [multiAccount_ledger, quarter_eq]
+    exact List.mem_cons_of_mem _ List.mem_cons_self
+  · show ((2, (1 : Rat) / 2)) ∈ ledgerAt multiAccount nodePath
+    rw [multiAccount_ledger]
+    exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)
+
+/-- The three-holder account's conservation, step by step: the first loan lowers
+the owner's fraction by exactly a half, the fork leaves it where it was, and the
+second loan lowers it by the second half. -/
+theorem multi_conservation :
+    heldAt halfAccount nodePath = heldAt nodeAccount nodePath - 1 / 2
+      ∧ heldAt forkAccount nodePath = heldAt halfAccount nodePath
+      ∧ heldAt multiAccount nodePath = heldAt forkAccount nodePath - 1 / 2 := by
+  refine ⟨heldAt_lend nodeAccount nodePath 0 (1 / 2), ?_,
+    heldAt_lend forkAccount nodePath 2 (1 / 2)⟩
+  exact heldAt_fork halfAccount nodePath 0 1 (1 / 2) halfAccount_reads
 
 end TreeOwnership
 
