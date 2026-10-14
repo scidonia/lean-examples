@@ -6,7 +6,7 @@
 - But there is a trick: A compiler can update ==in place== when it doesn't change what a program ==means==.
 - We want to show you how we can get *unobservable updates* in easy steps:
   - ==type discipline== → writes are ==unobservable== → an in-place update is ==correct==;
-  - A compiler can emit a program where a ==reference count=1== yields an in-place update.
+  - A compiler can emit a program where a ==reference count of 1== yields an in-place update.
   - A type discipline can ==ensure== that reference count when we mean it.
 
 ## The problem in a nutshell
