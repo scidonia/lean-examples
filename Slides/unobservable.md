@@ -1,12 +1,12 @@
 # Fast functional updates: Type discipline for unobservable updates
 
 ## Pure Functional Programming
-- A pure functional progrmaming language cannot mutate.
+- A pure functional programming language cannot mutate.
 - This is not merely an inconvenience: Certain algorithms can only be low complexity in a language with in-place updates (See: Union Find).
 - But there is a trick: A compiler can update ==in place== when it doesn't change what a program ==means==.
 - We want to show you how we can get *unobservable updates* in easy steps:
   - ==type discipline== → writes are ==unobservable== → an in-place update is ==correct==;
-  - A compiler can emit a program where a ==reference count=1== yields in place update.
+  - A compiler can emit a program where a ==reference count=1== yields an in-place update.
   - A type discipline can ==ensure== that reference count when we mean it.
 
 ## The problem in a nutshell
@@ -19,22 +19,22 @@
 
 ## Yes: make the write unobservable
 - Unobservable? That doesn't sound very helpful! What does unobservable mean?
-- Nobody knows that we're *cheating* and doing an in place update because they can't see the original value anymore.
-- The moto: An update in place is ==correct== exactly when it ==cannot be observed==.
+- Nobody knows that we're *cheating* and doing an in-place update because they can't see the original value anymore.
+- The motto: An update in place is ==correct== exactly when it ==cannot be observed==.
 - If the old cell has ==no other reference==, then "the same object with one slot changed" and "a new object, copied" are ==indistinguishable==.
 - A write becomes legal ==exactly when it is unobservable==.
 
 ## Realised as a compiler optimisation
 - In fact, the ==Lean== compiler already does this.
 - At every store operation it asks the question: ==is this object's reference count exactly 1 here?==
-  - count ==1== → the old value is dead, store on-top of it — an in place mutation.
+  - count ==1== → the old value is dead, store on top of it — an in-place mutation.
   - count ==2+== → others are looking, someone may still read the old value — we have to allocate a copy.
   - count ==0== → this is a compile-time constant — this is never unique, always copy.
 - The backend mechanism already exists. ==Lean== compiles away the copy ==whenever it can see== the count is one.
 
 ## The rub: can we ensure RC = 1?
 - This strategy kicks off ==only if the count is 1==.
-- Is there a way to ==make the count 1==.
+- Is there a way to ==make the count 1==?
 - We want a ==static== property of the program source.
 - A ==type discipline== which can ensure we will always do our update when RC=1.
 - We don't want to *think* we are using an update only to find we have a copy!
@@ -42,7 +42,7 @@
 - The compiler's mutation should be both ==correct== (unobservable) and ==real== (performed).
 
 ## The type discipline: ownership
-- The discipline is ==ownership== (rust fans shout hurray!).
+- The discipline is ==ownership== (Rust fans shout hurray!).
 - A write goes through a cell the program holds ==exactly once==.
 - A written name is used ==once== in the scope that binds it.
 - This name is bound to a ==construction==.
@@ -107,4 +107,4 @@ def WriteHolds {d : Layout} (A : Account d) (w : Nat) (p : Path d) : Prop :=
 - We have ==checked== experimentally and found that our discipline appears to work in the C code.
 - ==⚠== We have not shown that the λ-RC behaviour is faithfully reflected in the C
 - ==⚠== We have not shown that our type discipline in Lean will survive to λ-Pure
-- But it is ==should== be quite persuasive and the full chain should be possible!
+- But it ==should== be quite persuasive and the full chain should be possible!
