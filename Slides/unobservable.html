@@ -98,7 +98,11 @@
   background: linear-gradient(90deg, #42affa, #c792ea 55%, #4ec9b0);
   -webkit-background-clip: text;
   background-clip: text;
-  -webkit-text-fill-color: transparent;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .reveal .deck-title h1 {
+    -webkit-text-fill-color: transparent;
+  }
 }
 .reveal .deck-title p {
   font-size: 28px;
