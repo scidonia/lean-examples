@@ -3,7 +3,7 @@ Checks for `Scidonia.RC.TreeOwnership` from outside the library.
 
 The subject is a layout-indexed state, its quotation, its per-node fractional
 account, the laws that account obeys and the ownership discipline read at
-concrete configurations. The checks here are of five kinds:
+concrete configurations. The checks here are of six kinds:
 
 * **The quotation, evaluated**: the round trip at a struct of two naturals and at
   a nested array, the detector on a leaf's observation and on a leaf's node, and
@@ -20,6 +20,10 @@ concrete configurations. The checks here are of five kinds:
   pinned by a `#guard`, and the library's simulation against the existing
   `RC.StepStar` is applied to the admitted derivation. Each refusal is the
   library's `¬ TreeOwn` proposition at a concrete configuration.
+* **The executable's surface.** The evaluation's signature is pinned and an
+  account in the state's position is refused, so the guarantee that no authority
+  representation reaches the executable is checked at the boundary rather than
+  stated alone.
 * **Axioms**: each representative theorem's `#print axioms` output is pinned, so
   a proof that acquires an axiom fails the build rather than printing a longer
   list for a reader to notice.
@@ -626,6 +630,53 @@ theorem takeout_level_check :
 #check @evalTree_total
 #check @evalTree_no_protected
 #check @runTreeIO_of_evalTree
+
+/-! ## The executable takes no account
+
+The guarantee the account carries is that no authority representation reaches the
+executable: the account and its conditions are proof-side, and what a caller runs
+is handed the layout's state and the term and nothing else. The checks below read
+that off the executable's own surface.
+
+`runTree` is the interpreter, and it is private, so an outside client cannot name
+it — the refused lookup below is that failure — and its own signature is not
+readable here. The surface a client does reach is `evalTree`, and the message
+pinned first is its signature: the layout, the state and the term, and no account.
+`#guard_msgs` compares the whole of the message, so an argument added, dropped or
+retyped — an `Account` among them — fails the build. The second pin is the
+boundary itself: the application with an account in the state's position does not
+elaborate. The control beside that refusal is the same application with the state
+in that position, which the session checks above already evaluate.
+-/
+
+/--
+info: Scidonia.RC.TreeOwnership.evalTree (d : Layout) (s : State d) (e : Expr) : Option Expr
+-/
+#guard_msgs (whitespace := lax) in
+#check Scidonia.RC.TreeOwnership.evalTree
+
+-- The interpreter itself is private: an outside client cannot name it.
+/--
+info: Unknown identifier `Scidonia.RC.TreeOwnership.runTree`
+-/
+#guard_msgs (whitespace := lax) in
+#check_failure Scidonia.RC.TreeOwnership.runTree
+
+/--
+info: Application type mismatch: The argument
+  siblingAccount
+has type
+  Account siblingLayout
+but is expected to have type
+  State siblingLayout
+in the application
+  evalTree siblingLayout siblingAccount
+-/
+#guard_msgs (whitespace := lax) in
+#check_failure (evalTree siblingLayout siblingAccount witnessState siblingProgram)
+
+-- The control beside the refusal: the state in the state's position elaborates.
+#check (evalTree siblingLayout witnessState siblingProgram)
 
 /-! ## Axioms
 

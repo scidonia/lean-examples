@@ -21,14 +21,24 @@ two holders of that node and leaves the node's own fraction exactly where it was
 (`heldAt_fork`), and `join` puts the halves back (`heldAt_join`). The halving is
 the existing `ValidShare`/`half_valid`/`halves_rejoin` arithmetic.
 
-**The account is evidence, not data.** `ValidAccount` requires every lent share
-to be a positive fraction of at most the whole, the shares at one node to fit in
-it, a node's ledger to name each loan at most once, and no node to be listed
-twice; `lend`, `repay`, `fork` and `join` each preserve it (`lend_valid`,
-`repay_valid`, `fork_valid`, `join_valid`). The borrow scope of a read is a
-`Prop` — `ReadLoan` — naming its identifier, its leaf and the share it holds at
-each node of that leaf's path, so nothing about a borrow is data a caller could
-inspect.
+**The account's authority is proof-side, and reaches no executable.** `Account d`
+is `Type`-level data — a finite association list from paths to the existing
+`Ledger` — and it is proof-side only: it is never a parameter or a result of the
+evaluation. `evalTree` is a function of the layout, the state and the term, and
+the private interpreter `runTree` of those and the session's own handle function
+and environment; neither names an account, so a caller reaches the executable
+with no authority in hand. The `IO` runner's account is only the index of the
+judgement it is handed, which is a `Prop` argument rather than a run-time value.
+The guarantee is that **no authority representation reaches the executable**.
+
+**The account's conditions are propositions.** `ValidAccount` requires every lent
+share to be a positive fraction of at most the whole, the shares at one node to
+fit in it, a node's ledger to name each loan at most once, and no node to be
+listed twice; `lend`, `repay`, `fork` and `join` each preserve it (`lend_valid`,
+`repay_valid`, `fork_valid`, `join_valid`). `ValidAccount` itself, `HandleWF`,
+`WriteHolds` and the borrow scope `ReadLoan` are `Prop`s. The borrow scope of a
+read names its identifier, its leaf and the share it holds at each node of that
+leaf's path, so nothing about a borrow is data a caller could inspect.
 
 **What is proved.** A node whose account is empty is held whole
 (`writes_holds_one`), and no other holder fits beside it (`cannot_add_reader`,
@@ -64,7 +74,15 @@ open Scidonia.FracPerm.StateVar.Layout5
 /-- A per-node account: for each node of the layout, the reads lent out there.
 A node the account does not mention has lent out nothing, and the account is a
 finite association list rather than a function, so a validity claim about one is
-a finite conjunction. -/
+a finite conjunction.
+
+The account is `Type`-level proof-side data, and the guarantee it is held to is
+that **no authority representation reaches the executable**: it is never a
+parameter or a result of the evaluation. `evalTree` is handed the layout, the
+state and the term, and `runTree` those and the session's own handle function and
+environment; the runner's account is only the index of the judgement it is
+handed. The account's own conditions `ValidAccount`, `HandleWF`, `WriteHolds` and
+`ReadLoan` are `Prop`s. -/
 abbrev Account (d : Layout) := List (Path d × Ledger)
 
 /-- The ledger at a node: the account's first entry for it, or the empty ledger
