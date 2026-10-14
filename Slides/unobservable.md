@@ -1,37 +1,53 @@
-# Type discipline for unobservable update
+# Fast functional updates: Type discipline for unobservable updates
 
-## The idea, in one line
-- A pure language cannot mutate. But a compiler can update ==in place== — without changing what a program ==means==.
-- This deck walks one implication, in easy steps:
-  - ==type discipline== → writes are ==unobservable== → so an update is ==correct==;
-  - a compiler realises it as an ==optimisation on reference count one==;
-  - and a type discipline can ==ensure== that count.
+## Pure Functional Programming
+- A pure functional progrmaming language cannot mutate.
+- This is not merely an inconvenience: Certain algorithms can only be low complexity in a language with in-place updates (See: Union Find).
+- But there is a trick: A compiler can update ==in place== when it doesn't change what a program ==means==.
+- We want to show you how we can get *unobservable updates* in easy steps:
+  - ==type discipline== → writes are ==unobservable== → an in-place update is ==correct==;
+  - A compiler can emit a program where a ==reference count=1== yields in place update.
+  - A type discipline can ==ensure== that reference count when we mean it.
 
-## The problem
-- Lean has no mutable state. `a.set! i v` is a function: it denotes a ==new== array. Nothing in the source can change a value that already exists.
-- Copying is the price of that purity: a whole-object allocation for every "update".
-- We want the cheap thing — a mutation — without losing the pure meaning.
+## The problem in a nutshell
+- Lean has no mutable state but we sometimes pretend it does. For instance `a.set! i v` is a function. This, mathematically speaking, refers to two structures: the one before and the one after.
+- Nothing in a theorem prover (or functional language) can change a value that already exists or it breaks the maths.
+- Copying is therefore the price of purity: schematically this means a whole-object allocation for every single "update".
+- This is clearly insane if you are trying to sort an array.
+- This is unfair! We want speed. We want what all imperative programmers have. We want ==mutation==.
+- Can we have our cake and eat it too? (think about how literally this aphorism applies!)
 
-## The idea: make the write unobservable
-- An update in place is ==correct== exactly when it ==cannot be observed==.
-- If the old cell has ==no other reference==, then "the same object with one slot changed" and "a new object, copied" are ==indistinguishable== — the same value.
-- So: a write is legal to mutate ==exactly when it is unobservable==. That is the whole trick.
+## Yes: make the write unobservable
+- Unobservable? That doesn't sound very helpful! What does unobservable mean?
+- Nobody knows that we're *cheating* and doing an in place update because they can't see the original value anymore.
+- The moto: An update in place is ==correct== exactly when it ==cannot be observed==.
+- If the old cell has ==no other reference==, then "the same object with one slot changed" and "a new object, copied" are ==indistinguishable==.
+- A write becomes legal ==exactly when it is unobservable==.
 
 ## Realised as a compiler optimisation
-- The ==Lean== compiler already does this. At every store it asks one question: ==is this object's reference count exactly 1 here?==
-  - count ==1== → the old value is dead: store into it, in place.
-  - count ==2+== → something may still read the old value: allocate a copy.
-  - count ==0== → a compile-time constant: never unique, always copy.
-- So the mechanism is ==given==. ==It== compiles away the rest ==whenever it can see== the count is one.
+- In fact, the ==Lean== compiler already does this.
+- At every store operation it asks the question: ==is this object's reference count exactly 1 here?==
+  - count ==1== → the old value is dead, store on-top of it — an in place mutation.
+  - count ==2+== → others are looking, someone may still read the old value — we have to allocate a copy.
+  - count ==0== → this is a compile-time constant — this is never unique, always copy.
+- The backend mechanism already exists. ==Lean== compiles away the copy ==whenever it can see== the count is one.
 
-## So the real question is: can we ensure RC = 1?
-- The mechanism fires ==if the count is 1==. The whole problem is now: ==make the count 1==.
-- And that is a ==static== property of the program — how many references the code holds — so a ==type discipline== can decide it.
-- A type discipline that ensures RC = 1 ⇒ the compiler's in-place update is both ==correct== (unobservable) and ==real== (performed).
+## The rub: can we ensure RC = 1?
+- This strategy kicks off ==only if the count is 1==.
+- Is there a way to ==make the count 1==.
+- We want a ==static== property of the program source.
+- A ==type discipline== which can ensure we will always do our update when RC=1.
+- We don't want to *think* we are using an update only to find we have a copy!
+- This would break our ability to reason about performance.
+- The compiler's mutation should be both ==correct== (unobservable) and ==real== (performed).
 
 ## The type discipline: ownership
-- The discipline is ==ownership==: a write goes through a cell the program holds ==exactly once==.
-- A written name is used ==once== in the scope that binds it, and is bound to a ==construction== — the shapes where a ==second holder== exists are ==refused==: duplication, an alias, a use in a sibling position.
+- The discipline is ==ownership== (rust fans shout hurray!).
+- A write goes through a cell the program holds ==exactly once==.
+- A written name is used ==once== in the scope that binds it.
+- This name is bound to a ==construction==.
+- The shapes where a ==second holder== exists are ==refused==.
+- These refused shapes are: duplication, an alias, a use in a sibling position.
 
 ```@../lean/Scidonia/RC/OwnershipTyped/Judgement.lean
   /-- A write is admitted only at the owner the subject names, on the subject's
@@ -40,17 +56,13 @@
       (ha : Obs Γ a slotObs) : Own Γ (.held x) (.store (.var x) 0 a) .cell
 ```
 
-## The implication, step by step
-- ==Typed program== ⇒ the write's cell is ==uniquely held== (the ownership rule).
+## Revisiting the reasoning chain
+- A ==Typed program== ⇒ the write's cell is ==uniquely held== (the ownership rule).
 - ⇒ under a ==correspondence==, the runtime ==count is 1== (`bridge`).
-- ⇒ so the write is ==destructive== (`store_owned_is_destructive`).
-- ⇒ and it is ==unobservable==: the in-place run and the copy run are the ==same value== (`evalArray_sound`).
+- ⇒ therefore the write is ==destructive== (`store_owned_is_destructive`).
+- ⇒ *And* it is ==unobservable==: i.e. the in-place run and the copy run are the ==same value== (`evalArray_sound`).
 
 ```@../lean/Scidonia/RC/Correspondence.lean
-/-- The bridge: a store typed at `Γ`, whose environment `Γ` counts its subject once,
-at a configuration corresponding to `(ρ, m)` in the sense of `Corr`, meets the target
-write theorem's two premises --- the account holds the subject's occurrence (`Owns`),
-and the account counts the reference the environment names for it exactly once. -/
 theorem bridge {ρ : TEnv} {m : Multi} {Γ : Occs} {y : Var} {r : Ref} {i : Nat} {v : Expr}
     (h : Corr ρ m Γ) (hlook : ρ.lookup y = some r) (hone : Γ.count y = 1) :
     Owns ρ m (.store (.var y) i v) ∧ (expand m).count r = 1 := by
@@ -74,36 +86,25 @@ theorem store_owned_is_destructive {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : 
 - That is the payoff: the update is not just correct in intent — it is ==proved equal== to the pure meaning.
 
 ```@../lean/Scidonia/RC/OwnershipTyped/Refinement.lean
-/-- The agreement: an admitted, closed program of the fragment evaluated by the
-sealed runner reaches exactly the value the copying λPure reduction of the *same*
-term reaches. The reduction hypothesis is a statement about the existing
-`Scidonia.RC.StepStar`, and `evalArray` is the direct side's evaluation. -/
 theorem evalArray_sound {o : ObsDesc} {e v : Expr}
     (h : Own (TyEnv.empty : TyEnv) .none e (.obs o)) (_hc : Closed e)
     (hs : StepStar e v) (hv : Value v) : evalArray e = some v := by
 ```
 
 ## A tree: much shared for reads, only the write total
-- The same discipline scales to trees: a ==read== borrows a ==fraction== of the spine's nodes — so ==many== readers can share one spine — and a ==write== holds the ==whole== of its target subtree.
+- This same discipline scales to ==trees==: a ==read== borrows a ==fraction== of the spine's nodes — so ==many== readers can share one spine — and a ==write== holds the ==whole== of its target subtree.
 - That is "much of the tree shared out for reads, and only the write has to be a total fraction."
 
 ```@../lean/Scidonia/RC/TreeOwnership/Judgement.lean
-/-- The account admits a write by the holder `w` at a node: the holder has the
-whole of every node of the target's subtree, and a positive share of every proper
-ancestor of the target. The two are read at the same nodes by construction — one
-`Writes` per node of the subtree, one positive `Reads` per proper ancestor — so
-nothing is inferred from a fraction somewhere else. -/
 def WriteHolds {d : Layout} (A : Account d) (w : Nat) (p : Path d) : Prop :=
   (∀ q, InSubtree p q → Writes A q) ∧ (∀ r, PrefixOf r p → r ≠ p → ∃ q, 0 < q ∧ Reads A r w q)
 ```
 
-## The honest boundary
-- This is a ==model== claim, proved: the discipline yields count 1 ==in the counted heap==, and the update is correct.
-- ==Not== proved: that the model's count ==is== the machine's `lean_is_exclusive` on a real object — that correspondence is the open link.
-- And Lean's reuse pass needs the update's ==shape==: RC = 1 alone is not sufficient without it.
-- In-place update of ==compiled== code is ==measured==, not a theorem.
-
-## What is proved, and what is not
-- ==Proved==: writes unobservable (the two semantics agree); the correspondence from ownership to count 1; the store pair; the per-node fractional spine and the whole write.
-- ==Not proved==: the model-to-machine correspondence; the compiler emitting the reuse shape for arbitrary code; functions and closures.
-- The bottom line: ==if the discipline makes the actual count 1, everything else is already compiled away.== The open question is whether it does — and that is the next piece.
+## What we have shown vs. what we haven't
+- Our proof is a claim about a ==model==: the discipline yields a count of 1 ==in the λ-RC heap== and the update is correct (unobservable).
+- We have used the idea of the following notional compile chain: L∃∀N ⇒ λ-Pure ⇒ λ-RC ⇒ C
+- We have ==proved== that the type discipline in λ-Pure obtains the desired behaviour in λ-RC
+- We have ==checked== experimentally and found that our discipline appears to work in the C code.
+- ==⚠== We have not shown that the λ-RC behaviour is faithfully reflected in the C
+- ==⚠== We have not shown that our type discipline in Lean will survive to λ-Pure
+- But it is ==should== be quite persuasive and the full chain should be possible!
