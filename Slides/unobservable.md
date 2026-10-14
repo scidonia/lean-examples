@@ -18,11 +18,11 @@
 - So: a write is legal to mutate ==exactly when it is unobservable==. That is the whole trick.
 
 ## Realised as a compiler optimisation
-- The compiler already does this. At every store it asks one question: ==is this object's reference count exactly 1 here?==
+- The ==Lean== compiler already does this. At every store it asks one question: ==is this object's reference count exactly 1 here?==
   - count ==1== → the old value is dead: store into it, in place.
   - count ==2+== → something may still read the old value: allocate a copy.
   - count ==0== → a compile-time constant: never unique, always copy.
-- So the mechanism is ==given==. The compiler compiles away the rest ==whenever it can see== the count is one.
+- So the mechanism is ==given==. ==It== compiles away the rest ==whenever it can see== the count is one.
 
 ## So the real question is: can we ensure RC = 1?
 - The mechanism fires ==if the count is 1==. The whole problem is now: ==make the count 1==.
@@ -100,7 +100,7 @@ def WriteHolds {d : Layout} (A : Account d) (w : Nat) (p : Path d) : Prop :=
 ## The honest boundary
 - This is a ==model== claim, proved: the discipline yields count 1 ==in the counted heap==, and the update is correct.
 - ==Not== proved: that the model's count ==is== the machine's `lean_is_exclusive` on a real object — that correspondence is the open link.
-- And the compiler's reuse pass needs the update's ==shape==: RC = 1 alone is not sufficient without it.
+- And Lean's reuse pass needs the update's ==shape==: RC = 1 alone is not sufficient without it.
 - In-place update of ==compiled== code is ==measured==, not a theorem.
 
 ## What is proved, and what is not
