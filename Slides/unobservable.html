@@ -244,7 +244,7 @@
 <body>
 <div class="reveal">
 <div class="slides">
-<section class="deck-title"><h1>Fast functional updates: Type discipline for unobservable updates</h1><p>How a type discipline makes a write correct, and how that becomes a compiler optimisation on reference count one</p></section>
+<section class="deck-title"><h1>Fast functional updates: Type discipline for unobservable updates</h1><p>Can theorem provers and functional languages get mutation safely?</p></section>
 <section>
 <section class="prose-title"><h2>Fast functional updates: Type discipline for unobservable updates</h2></section>
 <section class="prose"><h3>Pure Functional Programming</h3><ul><li>A pure functional programming language cannot mutate.</li><li>This is not merely an inconvenience: Certain algorithms can only be low complexity in a language with in-place updates (See: Union Find).</li><li>But there is a trick: A compiler can update <mark class="pop">in place</mark> when it doesn&#x27;t change what a program <mark class="pop">means</mark>.</li><li>We want to show you how we can get <em>unobservable updates</em> in easy steps:<ul><li><mark class="pop">type discipline</mark> → writes are <mark class="pop">unobservable</mark> → an in-place update is <mark class="pop">correct</mark>;</li><li>A compiler can emit a program where a ==reference count=1== yields an in-place update.</li><li>A type discipline can <mark class="pop">ensure</mark> that reference count when we mean it.</li></ul></li></ul></section>
