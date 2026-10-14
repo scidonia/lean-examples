@@ -274,7 +274,7 @@ theorem handle_unique {d : Layout} {Γ : Var → Option (TreeTy d)} {ρ : VEnv} 
 
 /-- Every admitted derivation's account is valid: the per-node conservation
 discipline is an index of the rules. -/
-theorem admitted_account_valid {τ : TreeTy (.leaf .nat)} {v : Expr} {s' : State (.leaf .nat)} :
+theorem admitted_account_valid {_τ : TreeTy (.leaf .nat)} {_v : Expr} {_s' : State (.leaf .nat)} :
     ValidAccount cellAccount :=
   treeOwn_validAccount cell_handoff_admitted (τ := (.node cellTy)) (v := .con1 rootTag (.con0 6))
     (s' := _)
@@ -376,7 +376,7 @@ theorem sessionCtx_mid : sessionCtx midName = some (.node sessionLeftTy) := by
 /-- The session's context binds its right component's name to the right
 component's node. -/
 theorem sessionCtx_tail : sessionCtx tailName = some (.node sessionRightTy) := by
-  simp [sessionCtx, sessionCtxL, extendTy, midName, tailName]
+  simp [sessionCtx, extendTy, tailName]
 
 /-- The session's context holds nothing at a name the descent did not bind. -/
 theorem sessionCtx_out : sessionCtx outName = none := by
@@ -411,10 +411,10 @@ theorem session_write_admitted :
   · simp only [rootEnv, sessionName, reduceIte]
     rw [cellVal_struct, cellVal_leaf, cellVal_leaf, quoteEl]
     rfl
-  · simp [rootCtx, sessionName, midName, tailName]
-  · simp [rootEnv, sessionName, midName, tailName]
-  · simp [rootCtx, sessionName, midName, tailName]
-  · simp [rootEnv, sessionName, midName, tailName]
+  · simp [rootCtx, sessionName, midName]
+  · simp [rootEnv, sessionName, midName]
+  · simp [rootCtx, sessionName, tailName]
+  · simp [rootEnv, sessionName, tailName]
   · decide
   · refine TreeOwn.write (x := tailName) (a := .con0 5) (w := 0) (p := sessionRight)
       (o := .nat) (h := rfl) (v := .con0 9) (xel := 5)
@@ -465,10 +465,10 @@ theorem session_read_admitted :
       simp only [rootEnv, sessionName, reduceIte]
       rw [cellVal_struct, cellVal_leaf, cellVal_leaf, quoteEl]
       rfl)
-    (by simp [rootCtx, sessionName, midName, tailName])
-    (by simp [rootEnv, sessionName, midName, tailName])
-    (by simp [rootCtx, sessionName, midName, tailName])
-    (by simp [rootEnv, sessionName, midName, tailName])
+    (by simp [rootCtx, sessionName, midName])
+    (by simp [rootEnv, sessionName, midName])
+    (by simp [rootCtx, sessionName, tailName])
+    (by simp [rootEnv, sessionName, tailName])
     (by decide)
     (TreeOwn.read (x := midName) (y := outName) (body := .var outName) (w := 0) (p := sessionLeft)
       (o := .nat) (h := rfl) (share := fun _ => 1 / 2) (v := .con0 7) (xel := 7)
@@ -476,12 +476,11 @@ theorem session_read_admitted :
       (hA := siblingAccount_valid) (hΓ := sessionCtx_handleWF) sessionCtx_mid
       (by rw [VEnv.extend_of_ne (by decide : midName ≠ tailName), VEnv.extend_self])
       rfl witnessLoan_read (by decide)
-      (by simp [sessionCtx, sessionCtxL, rootCtx, extendTy, midName, tailName, outName,
-        sessionName])
+      (by simp [rootCtx, extendTy, midName, tailName, outName, sessionName])
       (by simp [VEnv.extend, rootEnv, sessionName, midName, tailName, outName])
       (TreeOwn.obs (Obs.var outName (by
-        simp [obsEnv, sessionCtx, sessionCtxL, rootCtx, extendTy, midName, tailName, outName,
-          sessionName]) Fragment.nat) siblingAccount_valid sessionCtx_handleWF.extendTy_obs))
+        simp [obsEnv, extendTy, outName]) Fragment.nat) siblingAccount_valid
+        sessionCtx_handleWF.extendTy_obs))
 
 /-
 The session's read of the left leaf, evaluated: the real interpreter returns the
@@ -610,7 +609,85 @@ theorem nonleaf_frame_check :
 theorem replacement_lands_check : subAt pairLeft ((5, 9) : State pairLayout) = 5 :=
   replaceAt_subAt pairLeft 5 pairState rfl
 
-/-- The array's take-out and put-back equation at one level. -/
+/-
+The array's take-out, at one level and at the concrete array: the element is taken
+out of its slot with the layout's default left behind, the update runs on the
+extracted element, and the result is put back at that slot. The checks below name
+each part of that discipline — the exchange and the element it hands back, the
+placeholder it leaves, the size, the slot the put-back fills and the slots it
+leaves — beside the value equation the replacement's output satisfies.
+
+What they claim is the *shape* of the update the replacement runs, read off the
+library's equation for its array case and evaluated at one array. Whether that
+exchange runs in place or copies is a machine claim about the compiled program, and
+no theorem here makes it: the in-place harness is the instrument that reports it,
+observing the library's own path write (`ScidoniaInPlace`'s `layout5-*` cases), and
+`replaceAt` is not a route that harness runs. An address or reference assertion
+about `replaceAt` would be a harness case and is not in scope here.
+-/
+
+/-- The array the take-out checks are read at: the state of the one-element array
+layout, written at the layout the replacement's array case is indexed by. -/
+abbrev takeoutState : Array (State (.leaf .nat)) := #[1, 2, 3]
+
+/-- The take-out's exchange at index 1: the element it hands back and the sibling
+array it leaves, with the layout's default in the slot it emptied. -/
+abbrev takeoutExchange : State (.leaf .nat) × Array (State (.leaf .nat)) :=
+  takeoutState.swapAt 1 (stateDefault (.leaf .nat)) (by decide)
+
+/-- The array the replacement leaves: the update put back into the slot the take-out
+emptied. -/
+abbrev takeoutPutBack : Array (State (.leaf .nat)) := takeoutExchange.2.set! 1 5
+
+/-- The placeholder the take-out left at the slot is the slot the put-back fills: the
+update reads back at the index the element came from, so neither the placeholder nor
+the element it replaced is there. -/
+theorem takeout_slot_check : takeoutPutBack[1]? = some 5 :=
+  putBack_getElem?_self takeoutState 1 (stateDefault (.leaf .nat)) (h := by decide) 5
+
+/-- Every other slot of the put-back's array is the array's own: the exchange and the
+put-back write one slot and no other. -/
+theorem takeout_siblings_check :
+    takeoutPutBack[0]? = takeoutState[0]? ∧ takeoutPutBack[2]? = takeoutState[2]? :=
+  ⟨putBack_getElem?_ne takeoutState 1 (stateDefault (.leaf .nat)) (h := by decide) 5
+      (by decide),
+    putBack_getElem?_ne takeoutState 1 (stateDefault (.leaf .nat)) (h := by decide) 5
+      (by decide)⟩
+
+/-- The take-out's exchange and the put-back keep the array's size, read at the
+concrete array: every index the array had is still there. -/
+theorem takeout_size_check : takeoutPutBack.size = takeoutState.size :=
+  putBack_size takeoutState 1 (stateDefault (.leaf .nat)) (h := by decide) 5
+
+/-- The replacement's array case at the take-out's own array: the replacement at the
+in-bounds index 1 is the update run on the element the exchange handed back, put back
+at the slot the exchange emptied. The right side is the shape the case is written as
+— the exchange, the element it took out, the update on that element, the put-back —
+and not only the value the equation below leaves. -/
+theorem takeout_step_check :
+    replaceAt arrLayout (.index 1 (.here : Path (.leaf .nat))) (5 : State (.leaf .nat))
+        takeoutState
+      = (replaceAt (.leaf .nat) (.here : Path (.leaf .nat)) (5 : State (.leaf .nat))
+          takeoutExchange.1).map (fun e' => takeoutExchange.2.set! 1 e') :=
+  replaceAt_index 1 (Path.here : Path (.leaf .nat)) 5 takeoutState (by decide)
+
+-- The take-out's parts, evaluated: the exchange handed the slot's own element back
+-- and left the layout's default (a natural leaf's default is `0`) in that slot, and
+-- the put-back's array holds the update at that slot. The second guard is the
+-- affirmative control for the third: the detector that finds no placeholder in the
+-- put-back's array finds the placeholder in the array the take-out left.
+#guard decide (takeoutExchange.1 = 2)
+
+#guard decide (takeoutExchange.2[1]? = some 0)
+
+#guard decide (takeoutPutBack[1]? = some 5)
+
+#guard decide (takeoutPutBack = #[1, 5, 3])
+
+#guard decide (takeoutPutBack.size = takeoutState.size)
+
+/-- The array's take-out and put-back equation at one level, as the value the
+replacement leaves. -/
 theorem takeout_level_check :
     replaceAt arrLayout (.index 1 (.here : Path (.leaf .nat))) (5 : State (.leaf .nat))
         (#[1, 2, 3] : Array (State (.leaf .nat)))
@@ -855,6 +932,18 @@ longer list for a reader. -/
 /-- info: 'Scidonia.RC.TreeOwnership.replaceAt_index' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in
 #print axioms Scidonia.RC.TreeOwnership.replaceAt_index
+
+/-- info: 'Scidonia.RC.TreeOwnership.putBack_getElem?_self' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.putBack_getElem?_self
+
+/-- info: 'Scidonia.RC.TreeOwnership.putBack_getElem?_ne' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.putBack_getElem?_ne
+
+/-- info: 'Scidonia.RC.TreeOwnership.putBack_size' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
+#print axioms Scidonia.RC.TreeOwnership.putBack_size
 
 /-- info: 'Scidonia.RC.TreeOwnership.replaceAt_subAt' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in

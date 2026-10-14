@@ -359,9 +359,8 @@ private def runTree (d : Layout) (hnd : Var → Option (NodeTy d)) (ρ : VEnv) (
           match hnd x with
           | some (.at _ pth (.leaf o) h) =>
               (unquoteEl o p.1).bind (fun xel =>
-                if (setLeaf ⟨pth, o, h⟩ xel s).2 then
-                  some (.con1 rootTag p.1, (setLeaf ⟨pth, o, h⟩ xel s).1)
-                else none)
+                let r := setLeaf ⟨pth, o, h⟩ xel s
+                if r.2 then some (.con1 rootTag p.1, r.1) else none)
           | some (.at _ pth (.struct a _) h) =>
               match ρ x with
               | some (.con2 c' _ v₂) =>

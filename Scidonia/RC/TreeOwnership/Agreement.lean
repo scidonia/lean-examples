@@ -6,10 +6,14 @@ snapshots are evaluated at, and the conditional take-out transfer of the counted
 heap.
 
 **The replacement.** `replaceAt` rebuilds a struct from its updated component and,
-at an array, replaces the element at the index the state has. It answers `some`
+at an array, takes the addressed element out of its slot with the layout's default
+left behind, runs the replacement on the extracted element, and puts the result back
+at that slot. It answers `some`
 only where every index on the path addresses a node, so its callers carry the
 state's bounds with their success: the array case's own equation is
-`replaceAt_index` and `replaceAt_inBounds` turns a success into the path's bounds.
+`replaceAt_index`, `putBack_getElem?_self` and `putBack_getElem?_ne` are the
+put-back's own two slots — the one the take-out emptied and every other one — and
+`replaceAt_inBounds` turns a success into the path's bounds.
 `replaceAt_subAt` is the replacement's own effect: where it answers `some`, the
 accessor at that path reads exactly the state that was
 installed, so the replacement writes one node and no other level of the path.
@@ -79,7 +83,7 @@ theorem replaceAt_subAt {d : Layout} : ∀ (p : Path d) (y : State (At p)) (s : 
       obtain ⟨u', hu', hu''⟩ := h
       rw [← hu'']
       exact ih y v hu'
-  | index i r ih =>
+  | @index a i r ih =>
       intro y s s' h
       rw [replaceAt] at h
       split at h
@@ -87,7 +91,9 @@ theorem replaceAt_subAt {d : Layout} : ∀ (p : Path d) (y : State (At p)) (s : 
         rw [Option.map_eq_some_iff] at h
         obtain ⟨e', he', he''⟩ := h
         rw [← he'']
-        rw [subAt_index, Array.getElem?_set_self hlt]
+        have hput : ((s.swapAt i (stateDefault a) hlt).2.set! i e')[i]? = some e' :=
+          putBack_getElem?_self s i (stateDefault a) (h := hlt) e'
+        rw [subAt_index, hput]
         exact ih y s[i] he'
       · exact absurd h (by simp)
 
@@ -123,7 +129,7 @@ theorem replaceAt_subAt_of_disjoint {d : Layout} : ∀ (p q : Path d) (y : State
       | here => exact absurd hd (not_disjoint_here_right (Path.right r))
       | left q' => rfl
       | right q' => exact ih q' y v hu' (disjoint_right_iff.mp hd)
-  | index i r ih =>
+  | @index a i r ih =>
       intro q y s s' h hd
       rw [replaceAt] at h
       split at h
@@ -136,10 +142,13 @@ theorem replaceAt_subAt_of_disjoint {d : Layout} : ∀ (p q : Path d) (y : State
         | index j q' =>
             by_cases hij : i = j
             · subst hij
-              rw [subAt_index, Array.getElem?_set_self hlt, subAt_index,
-                Array.getElem?_eq_some_iff.mpr ⟨hlt, rfl⟩]
+              have hput : ((s.swapAt i (stateDefault a) hlt).2.set! i e')[i]? = some e' :=
+                putBack_getElem?_self s i (stateDefault a) (h := hlt) e'
+              rw [subAt_index, hput, subAt_index, Array.getElem?_eq_some_iff.mpr ⟨hlt, rfl⟩]
               exact ih q' y s[i] he' ((disjoint_index_iff i).mp hd)
-            · rw [subAt_index, subAt_index, Array.getElem?_set_ne hlt hij]
+            · have hput : ((s.swapAt i (stateDefault a) hlt).2.set! i e')[j]? = s[j]? :=
+                putBack_getElem?_ne s i (stateDefault a) (h := hlt) e' hij
+              rw [subAt_index, subAt_index, hput]
       · exact absurd h (by simp)
 
 /-- The frame at the node value a read or a write inspects: the replacement at a

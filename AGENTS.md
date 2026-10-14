@@ -200,7 +200,13 @@ The compile-time checks live in the check library:
   Its frame checks apply the library's leaf frame at the witness, the same-path
   snapshot at the pair with `7` before the write and `9` after, the nonleaf frame
   and the replacement's landing at the pair, and the array take-out's per-level
-  equation; its axiom checks pin the list each of those theorems prints.
+  equation with the parts of that discipline read beside it: the step the case runs
+  at the concrete array, the slot the put-back fills with the placeholder the
+  exchange left in it, the slots it leaves, and the size, beside the value the
+  replacement leaves. What those checks claim is the shape of the update the array
+  case runs; whether the exchange updates in place is a machine claim the in-place
+  harness reports, and `replaceAt` is not a route that harness runs. Its axiom
+  checks pin the list each of those theorems prints.
 - `ScidoniaTest/OwnershipTyped.lean` checks `Scidonia.RC.OwnershipTyped` from
   outside, in the same style. Its behavioural checks are `#guard`s of the
   quotation's round trip at the empty slot, at `full 7` and at a payload of thirty
@@ -1263,7 +1269,12 @@ own `setLeaf` reports, and no rule is a catch-all. `writeHolds` is the account's
 write right at a node, and `replaceAt`/`setStructLeft` are the state-level
 replacement the replacement rule and the interpreter share, answering `some` only
 where every index on the path addresses a node and `none` where one does not
-(`replaceAt_inBounds`). The refusals are `¬ TreeOwn` for
+(`replaceAt_inBounds`). At an array the replacement is the take-out discipline: the
+element is taken out of its slot with the layout's default left behind, the update
+runs on the extracted element, and the result is put back at that slot
+(`replaceAt_index`), where it reads back and every other slot is the array's own
+(`putBack_getElem?_self`, `putBack_getElem?_ne`) at the array's size
+(`putBack_size`). The refusals are `¬ TreeOwn` for
 specific expressions — a write at a node the root's subtree contains while a
 reader holds it, a write through the handle the hand-off consumed, a write handed
 two names of one subtree, a read at a node that is not a leaf, and a nonleaf
@@ -1563,7 +1574,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `Scidonia/RC/OwnershipTyped/Refinement.lean` | The agreement, the totality, the quotation lemma and the runner's logical `IO` equation |
 | `Scidonia/RC/TreeOwnership/Quote.lean` | A `Layout5.State`'s quotation as a λPure term, its node values and their decode, the sub-state and node accessors, the in-bounds path check, the protected-node detector, the observation path of a path, and path navigation with its resolution law |
 | `Scidonia/RC/TreeOwnership/Spine.lean` | The per-node fractional account: the node ledgers, the held fraction and the loan and return laws, the whole-holding exclusion, the fork and join of one node's holder with the conservation and validity each preserves, the `Prop`-valued borrow, the read-through positivity and fit, the sibling witness and the three-holder witness, and the account's proof-side standing — `Type`-level data no executable takes, its conditions `Prop`s |
-| `Scidonia/RC/TreeOwnership/Judgement.lean` | The tree ownership discipline over the existing term: the handle context and its one-live-handle-per-path condition, `writeHolds`, the `some`-valued state-level `replaceAt` and `setStructLeft` with the bounds a success carries, the `Recipe` node quotations, the eight rules of `TreeOwn` — each naming its value and the state it leaves, each carrying the account's validity and the context's condition — no catch-all, and the refusals with their admitted counterparts, including the write handed two names of one subtree and the nonleaf replacement at an index the state does not have |
+| `Scidonia/RC/TreeOwnership/Judgement.lean` | The tree ownership discipline over the existing term: the handle context and its one-live-handle-per-path condition, `writeHolds`, the `some`-valued state-level `replaceAt` and `setStructLeft` with the bounds a success carries — the array case a take-out that leaves the layout's default in the slot and puts the update back into it, with `putBack_getElem?_self`, `putBack_getElem?_ne` and `putBack_size` its two kinds of slot and its size — the `Recipe` node quotations, the eight rules of `TreeOwn` — each naming its value and the state it leaves, each carrying the account's validity and the context's condition — no catch-all, and the refusals with their admitted counterparts, including the write handed two names of one subtree and the nonleaf replacement at an index the state does not have |
 | `Scidonia/RC/TreeOwnership/Agreement.lean` | The state replacement's own laws — the focus it lands at a path, the disjoint frame and its node-value form — the leaf frame and the same-path snapshot through the library's write, and the conditional take-out injectivity from two `Counted` premises |
 | `Scidonia/RC/TreeOwnership/Executor.lean` | The private interpreter of the tree fragment, the value-level `evalTree` on the state it is given, the simulation against `RC.StepStar`, the totality, the detachment of an admitted result, the session context's own invariant, and the runner's logical `IO` equation |
 | `Scidonia/FracPerm/InPlace.lean` | The optional run-time check the in-place check calls |
@@ -1582,7 +1593,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaTest/Run.lean` | The run model's controls — evaluated steps and resolutions with a pinned control beside each, the held-pair copies and dropped-pair keeps pair at one heap and path, and asserted axiom lists |
 | `ScidoniaTest/RC.lean` | The calculus's controls — evaluated steps and translations with a control beside each, the capture pair, and asserted axiom lists |
 | `ScidoniaTest/OwnershipTyped.lean` | The ownership-typed fragment's controls — the quotation, the witnesses with their copying paths and direct evaluation, the refusals with their accepted counterparts and pinned rejections, the sealing, and asserted axiom lists |
-| `ScidoniaTest/TreeOwnership.lean` | The tree slice's controls — the quotation and its round trip at a struct and a nested array, the detector's two sides, the one-cell fragment's alignment, the path resolution at a struct leaf and at an in-bounds nested-array element, the sibling and three-holder accounts, the discipline's admitted write beside the refused one, the reader's read beside the read at a struct node, the sequential hand-off beside the spent handle, the two-name refusal beside its one-name control, the nonleaf replacement's out-of-bounds refusal beside its in-bounds control, the same controls evaluated by the real `evalTree` at the session boundary beside the simulation applied to their derivations, the leaf frame, the same-path snapshot at `7` and `9`, the nonleaf frame and the replacement's landing, the executable's surface with no account in it — `evalTree`'s signature pinned, the private interpreter's name refused from outside and an `Account` in the state's position rejected — and asserted `#print axioms` lists |
+| `ScidoniaTest/TreeOwnership.lean` | The tree slice's controls — the quotation and its round trip at a struct and a nested array, the detector's two sides, the one-cell fragment's alignment, the path resolution at a struct leaf and at an in-bounds nested-array element, the sibling and three-holder accounts, the discipline's admitted write beside the refused one, the reader's read beside the read at a struct node, the sequential hand-off beside the spent handle, the two-name refusal beside its one-name control, the nonleaf replacement's out-of-bounds refusal beside its in-bounds control, the same controls evaluated by the real `evalTree` at the session boundary beside the simulation applied to their derivations, the leaf frame, the same-path snapshot at `7` and `9`, the nonleaf frame and the replacement's landing, the array take-out's exchange with the slot its put-back fills and the slots it leaves beside the value it leaves, the executable's surface with no account in it — `evalTree`'s signature pinned, the private interpreter's name refused from outside and an `Account` in the state's position rejected — and asserted `#print axioms` lists |
 | `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |

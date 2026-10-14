@@ -491,24 +491,23 @@ round trip: the list recursion the array case of the state round trip rests on. 
 theorem unquoteSpine_spineVal_of (a : Layout)
     (h : ∀ x : State a, unquoteVal a (cellVal a x) = some x) :
     ∀ (l : List (State a)), unquoteSpine a (spineVal a l) = some l
-  | [] => by simp [cellVal, spineVal, unquoteVal, unquoteSpine]
+  | [] => by simp [spineVal, unquoteSpine]
   | x :: t => by
-      simp [cellVal, spineVal, unquoteVal, unquoteSpine, h x,
-        unquoteSpine_spineVal_of a h t]
+      simp [spineVal, unquoteSpine, h x, unquoteSpine_spineVal_of a h t]
 
 /-- A state's node decoder inverts its node value. -/
 theorem unquoteVal_cellVal (d : Layout) : ∀ s : State d, unquoteVal d (cellVal d s) = some s := by
   induction d with
   | leaf o =>
       intro x
-      simp [cellVal, spineVal, unquoteVal, unquoteSpine, unwrapRoot, unquoteEl_quoteEl]
+      simp [cellVal, unquoteVal, unwrapRoot, unquoteEl_quoteEl]
   | struct a b iha ihb =>
       intro s
       obtain ⟨u, v⟩ := s
-      simp [cellVal, spineVal, unquoteVal, unquoteSpine, structTag_ne_pairTag, iha u, ihb v]
+      simp [cellVal, unquoteVal, iha u, ihb v]
   | arr a iha =>
       intro s
-      simp only [cellVal, spineVal, unquoteVal, unquoteSpine]
+      simp only [cellVal, unquoteVal]
       rw [unquoteSpine_spineVal_of a iha s.toList]
       simp [Array.toArray_toList]
 
@@ -590,7 +589,7 @@ theorem quoteEl_hasProtected (o : ObsDesc) : ∀ x : ObsEl o, hasProtected (quot
 /-- A leaf node's value carries the protected root node: it is one. -/
 theorem cellVal_leaf_hasProtected (o : ObsDesc) (x : ObsEl o) :
     hasProtected (cellVal (.leaf o) x) = true := by
-  simp [cellVal, spineVal, hasProtected, rootTag]
+  simp [cellVal, hasProtected, rootTag]
 
 /-! ## The binding path of a read -/
 
@@ -688,9 +687,9 @@ def nav {d : Layout} : (p : Path d) → Expr → Option Expr
 nothing when the spine is shorter. -/
 theorem nthSpine_spineVal : ∀ {a : Layout} (i : Nat) (l : List (State a)),
     nthSpine i (spineVal a l) = (l[i]?).map (cellVal a)
-  | _, 0, [] => by simp [spineVal, nthSpine, nilTag, consTag]
+  | _, 0, [] => by simp [spineVal, nthSpine, nilTag]
   | _, 0, x :: t => by simp [spineVal, nthSpine, consTag]
-  | _, n + 1, [] => by simp [spineVal, nthSpine, nilTag, consTag]
+  | _, n + 1, [] => by simp [spineVal, nthSpine, nilTag]
   | _, n + 1, x :: t => by
       simp [spineVal, nthSpine, consTag, nthSpine_spineVal n t]
 
@@ -698,14 +697,14 @@ theorem nthSpine_spineVal : ∀ {a : Layout} (i : Nat) (l : List (State a)),
 theorem unwrapNode_struct {a b : Layout} (u : State a) (v : State b) :
     unwrapNode (.con2 structTag (cellVal a u) (cellVal b v)) =
       .con2 structTag (cellVal a u) (cellVal b v) := by
-  simp [unwrapNode, structTag, rootTag]
+  simp [unwrapNode, structTag]
 
 /-- A spine is its own unwrapped node. -/
 theorem unwrapNode_spine {a : Layout} (l : List (State a)) :
     unwrapNode (spineVal a l) = spineVal a l := by
   cases l with
-  | nil => simp [spineVal, unwrapNode, nilTag, rootTag]
-  | cons x t => simp [spineVal, unwrapNode, consTag, rootTag]
+  | nil => simp [spineVal, unwrapNode, nilTag]
+  | cons x t => simp [spineVal, unwrapNode, consTag]
 
 /-- Navigating a state's quotation along an in-bounds path is the quotation of
 the state's own node there: the path-resolution law. -/
@@ -737,8 +736,8 @@ theorem nav_cellVal (d : Layout) (s : State d) : ∀ (p : Path d), InBounds p s 
       obtain ⟨e, he, hb⟩ := hb
       rw [cellVal_arr]
       have hli : s.toList[i]? = some e := by rw [Array.getElem?_toList]; exact he
-      simp only [nav, unwrapNode_spine, nthSpine_spineVal, Array.getElem?_toList, he, hli,
-        Option.map_some, Option.bind_some, nodeVal]
+      simp only [nav, unwrapNode_spine, nthSpine_spineVal, hli, Option.map_some,
+        Option.bind_some, nodeVal]
       rw [subAt_index, he]
       exact ih e hb
 

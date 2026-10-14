@@ -420,7 +420,8 @@ def replaceAt : (d : Layout) → (p : Path d) → State (At p) → State d → O
   | .struct _ b, .right q, y, (u, v) => (replaceAt b q y v).map (fun u' => (u, u'))
   | .arr a, .index i q, y, s =>
       if h : i < s.size then
-        (replaceAt a q y s[i]).map (fun e' => s.set i e' h)
+        let r := s.swapAt i (stateDefault a) h
+        (replaceAt a q y r.1).map (fun e' => r.2.set! i e')
       else none
 
 /-- The replacement's array case, level by level: at an in-bounds index the element
@@ -428,13 +429,41 @@ is taken out of its slot with the layout's default left behind, the replacement 
 on the extracted element, and the result is put back at that slot. -/
 theorem replaceAt_index {a : Layout} (i : Nat) (q : Path a) (y : State (At q))
     (s : Array (State a)) (h : i < s.size) :
-    replaceAt (.arr a) (.index i q) y s = (replaceAt a q y s[i]).map (fun e' => s.set i e' h) := by
-  show (if h' : i < s.size then (replaceAt a q y s[i]).map (fun e' => s.set i e' h') else none)
-    = (replaceAt a q y s[i]).map (fun e' => s.set i e' h)
+    replaceAt (.arr a) (.index i q) y s =
+      (replaceAt a q y (s.swapAt i (stateDefault a) h).1).map
+        (fun e' => (s.swapAt i (stateDefault a) h).2.set! i e') := by
+  rw [replaceAt]
   split
   · rfl
   · rename_i hlt
     exact absurd h hlt
+
+/-- The put-back writes the slot the take-out emptied: the sibling array the exchange
+left still holds that index, so the update reads back at the slot the element came
+from — the slot the take-out put the layout's default in. -/
+theorem putBack_getElem?_self {a : Layout} (s : Array (State a)) (i : Nat) (d : State a)
+    {h : i < s.size} (v : State a) : ((s.swapAt i d h).2.set! i v)[i]? = some v := by
+  have hsib : (s.swapAt i d h).2 = s.set i d h := rfl
+  have hb : i < (s.set i d h).size := by rw [Array.size_set]; exact h
+  rw [hsib, Array.set!_eq_setIfInBounds]
+  exact Array.getElem?_setIfInBounds_self_of_lt hb
+
+/-- The put-back leaves every other slot as the state had it: the take-out's exchange
+and the put-back write one slot each, so a read at any other index reads the array's
+own element. -/
+theorem putBack_getElem?_ne {a : Layout} (s : Array (State a)) (i : Nat) (d : State a)
+    {h : i < s.size} (v : State a) {j : Nat} (hij : i ≠ j) :
+    ((s.swapAt i d h).2.set! i v)[j]? = s[j]? := by
+  have hsib : (s.swapAt i d h).2 = s.set i d h := rfl
+  rw [hsib, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hij,
+    Array.getElem?_set_ne h hij]
+
+/-- The take-out's exchange and the put-back keep the array's size: one slot is
+emptied and one slot is filled, so every index the array had is still there and the
+array the replacement leaves has the array's own size. -/
+theorem putBack_size {a : Layout} (s : Array (State a)) (i : Nat) (d : State a)
+    {h : i < s.size} (v : State a) : ((s.swapAt i d h).2.set! i v).size = s.size := by
+  rw [Array.size_set!, Array.size_swapAt]
 
 /-- A replacement at an index the state does not have answers `none`: the rule's
 own success premise is what refuses it. -/
@@ -1267,17 +1296,11 @@ theorem arr_write_admitted : WriteHolds arrAccount 0 (.index 1 (.here : Path (.l
     obtain ⟨r, hr⟩ := hq
     subst hr
     show ledgerAt arrAccount (Path.index 1 r) = []
-    have hne : (Path.index 1 r : Path arrLayout) ≠ Path.here := by
-      intro h
-      cases h
-    have hne' : (Path.index 1 r : Path arrLayout) ≠ .index 5 (.here : Path (.leaf .nat)) := by
-      intro h
-      exact (by decide : (1 : Nat) ≠ 5) (Path.index.inj h).1
-    simp only [arrAccount, ledgerAt, hne, hne', reduceIte]
+    simp only [arrAccount, ledgerAt]
     rfl
   · intro r hr hne
     rcases prefixOf_arrElement hr with rfl | rfl
-    · exact ⟨1 / 2, by grind, by simp [Reads, arrAccount, ledgerAt, rootName]⟩
+    · exact ⟨1 / 2, by grind, by simp [Reads, arrAccount, ledgerAt]⟩
     · exact absurd rfl hne
 
 /-- A leaf write's success report does not depend on the observation written:
@@ -1360,7 +1383,7 @@ theorem subCtx_handleWF : HandleWF subCtx := by
     have hm := hb z m hz
     simp only [List.mem_singleton] at hm
     rw [hm]
-    simp only [NodeTy.path, subMissingTy, subTy]
+    simp only [NodeTy.path, subMissingTy]
     decide
 
 /-- The array-of-structs environment: each name holds the struct node of the pair
@@ -1408,13 +1431,11 @@ theorem sub_missing_writeHolds : WriteHolds subAccount 0 subMissing := by
     obtain ⟨r, hr⟩ := hq
     subst hr
     show ledgerAt subAccount (Path.index 5 r) = []
-    have hne : (Path.index 5 r : Path subLayout) ≠ Path.here := by
-      intro h; cases h
-    simp only [subAccount, ledgerAt, hne, reduceIte]
+    simp only [subAccount, ledgerAt]
     rfl
   · intro r hr hne
     rcases prefixOf_subMissing hr with rfl | rfl
-    · exact ⟨1 / 2, by grind, by simp [Reads, subAccount, ledgerAt, rootName]⟩
+    · exact ⟨1 / 2, by grind, by simp [Reads, subAccount, ledgerAt]⟩
     · exact absurd rfl hne
 
 /-- The paths that prefix the array's element 0: the root and the element
@@ -1438,13 +1459,11 @@ theorem sub_present_writeHolds : WriteHolds subAccount 0 subPath := by
     obtain ⟨r, hr⟩ := hq
     subst hr
     show ledgerAt subAccount (Path.index 0 r) = []
-    have hne : (Path.index 0 r : Path subLayout) ≠ Path.here := by
-      intro h; cases h
-    simp only [subAccount, ledgerAt, hne, reduceIte]
+    simp only [subAccount, ledgerAt]
     rfl
   · intro r hr hne
     rcases prefixOf_subPath hr with rfl | rfl
-    · exact ⟨1 / 2, by grind, by simp [Reads, subAccount, ledgerAt, rootName]⟩
+    · exact ⟨1 / 2, by grind, by simp [Reads, subAccount, ledgerAt]⟩
     · exact absurd rfl hne
 
 /-- A subtree replacement whose path descends through an index the state does not
@@ -1459,7 +1478,7 @@ theorem sub_out_of_bounds_refused (b : Expr) {v : Expr} {s' : State subLayout} :
       unfold setStructLeft at hwrite
       have hb : InBounds subMissing subState := replaceAt_inBounds subMissing _ subState hwrite
       obtain ⟨e, he, _⟩ := hb
-      simp only [subMissing, subState] at he
+      simp only [subState] at he
       exact absurd he (by simp)
 
 /-- The in-bounds replacement of the same shape is admitted: the same expression
@@ -1481,7 +1500,7 @@ theorem sub_in_bounds_admitted :
     (by
       show subEnv rootName = some (.con2 structTag (.con1 rootTag (.con0 1))
         (.con1 rootTag (.con0 2)))
-      simp [subEnv, rootName, leftName])
+      simp [subEnv, rootName])
     (Recipe.leaf (Obs.nat 5) rfl) sub_present_writeHolds
     (by
       simp only [setStructLeft, subPath, subLayout, subElem]
