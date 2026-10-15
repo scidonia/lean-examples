@@ -24,8 +24,14 @@ The two runs differ in one thing: what else refers to the arrays while a step's
 writes run.
 
 * `runDisciplined` carries `parent` and `rank` as the recursion's parameters and
-  holds nothing else, so a step's writes meet the only reference to each array and
-  each take-out updates the buffer in place, O(1) per write.
+  holds nothing else, which is the exclusive shape: in the harness's measured runs
+  of that shape a step's writes met the only reference to each array and each
+  take-out reused the buffer, O(1) per write. The type does not enforce that
+  ownership — its arguments are ordinary arrays and the instance supplies only the
+  layout and the equality — so a caller remains free to retain an alias of either,
+  and the reuse is what was observed of the fresh arrays the harness handed this
+  definition rather than a guarantee. Under an alias the same writes meet the
+  second reference and copy, which is the shape `runAliased` below takes.
 * `runAliased` takes a second reference to both arrays at every step and reads it
   after that step's writes. That is the shape in which a step's first write meets
   a buffer another name reaches and replaces it with a copy — one whole-buffer
@@ -178,8 +184,16 @@ differ in what else refers to those arrays while a step's writes run, which is t
 one thing a compiled write's cost depends on. -/
 
 /-- The disciplined run of a list of unions: the two arrays are the recursion's
-parameters and nothing else refers to them, so each step's writes meet the only
-reference to each array and each take-out updates the buffer in place. -/
+parameters and nothing else refers to them in its body, which is the exclusive
+shape.
+
+That shape is the condition under which in-place reuse was observed in the
+harness: on the fresh arrays it handed this definition, each step's writes met the
+only reference to each array and each take-out reused the buffer. The type does
+not enforce unique ownership — the arguments are ordinary arrays, so a caller may
+retain an alias of either and a step's writes would then meet it and copy, which
+is the shape `runAliased` below takes. The reuse is a measurement of the named
+cases and not a guarantee of the sealed type. -/
 def runDisciplined : Nat → List (Nat × Nat) → Array UInt64 → Array UInt64 →
     Array UInt64 × Array UInt64
   | _, [], parent, rank => (parent, rank)

@@ -1400,7 +1400,14 @@ def ufCheckedFocusCase : IO (Array String) := do
 
 /-- The aliased union-find in a child with the check enabled must end the
 process, naming the `Layout5` array site: the first write of the first step is
-about to copy the parent buffer, which a second reference reaches. -/
+about to copy the parent buffer, which a second reference reaches.
+
+The two markers pin which of the take-out's two objects stopped the child, and
+they do so in both directions: this case requires the array site's marker and the
+focus site's marker's absence, and `ufCheckedFocusCase` requires the focus site's
+marker and the array site's marker's absence. The focus case's positive check on
+the focus marker is this one's absence check's control, in the same run of the
+harness. -/
 def ufCheckedSharedCase : IO (Array String) := do
   let out ← launchChecked "uf-shared"
   let status :=
@@ -1412,6 +1419,8 @@ def ufCheckedSharedCase : IO (Array String) := do
       ++ status
       ++ markerFailure "uf-checked-shared" "the child's standard error"
         "Scidonia.FracPerm.StateVar.Layout5.open" out.stderr
+      ++ absentMarkerFailure "uf-checked-shared" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.struct" out.stderr
   return failures
 
 /-! ## The benchmark

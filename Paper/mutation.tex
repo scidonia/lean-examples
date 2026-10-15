@@ -257,8 +257,8 @@ replaces the buffer. Before the timed runs, each shape is probed once and the
 address the update kept or moved is reported beside the times.
 
 %!check: def runBenchmark (seed : Nat) : IO Unit := do
-\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1805--1816}
-\codeframe[linerange=1805-1816]{../ScidoniaInPlace/Main.lean}
+\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1814--1825}
+\codeframe[linerange=1814-1825]{../ScidoniaInPlace/Main.lean}
 
 \textbf{Measured.} The two tables below are one run of \code{nix develop -c lake
 exe inplace} on the machine used here. The times are means over $100$ updates and
@@ -332,16 +332,16 @@ words, sealed the same way the nested array is --- the layout
 \code{rep} is \code{rfl} and the cast a sealed write performs erases:
 
 %!check: instance : SealedStateVar (Array UInt64) := ⟨sealedWords, rfl⟩
-\sourceline{The union-find's arrays, sealed}{ScidoniaExamples/UnionFind.lean}{64--68}
-\codeframe[linerange=64-68]{../ScidoniaExamples/UnionFind.lean}
+\sourceline{The union-find's arrays, sealed}{ScidoniaExamples/UnionFind.lean}{70--74}
+\codeframe[linerange=70-74]{../ScidoniaExamples/UnionFind.lean}
 
 Each write is therefore the class's take-out update at a one-step path rather than
 a bare \code{Array.set!} --- the library's owned exchange, its two checks and its
 put-back, with no \code{Layout5} written by hand:
 
 %!check: def writeWord (a : Array UInt64) (i : Nat) (v : UInt64) : Array UInt64 :=
-\sourceline{One slot of a machine-word array}{ScidoniaExamples/UnionFind.lean}{83--84}
-\codeframe[linerange=83-84]{../ScidoniaExamples/UnionFind.lean}
+\sourceline{One slot of a machine-word array}{ScidoniaExamples/UnionFind.lean}{89--90}
+\codeframe[linerange=89-90]{../ScidoniaExamples/UnionFind.lean}
 
 \code{find} walks from an element to its root and halves the path on the way, so
 the walk itself writes; \code{union} finds both roots and links the lower-ranked
@@ -349,12 +349,12 @@ one under the higher, which is one write to \code{parent} and, at equal ranks, a
 second to \code{rank}:
 
 %!check: def find : Nat → Array UInt64 → Nat → Array UInt64 × Nat
-\sourceline{The walk, halving the path}{ScidoniaExamples/UnionFind.lean}{119--126}
-\codeframe[linerange=119-126]{../ScidoniaExamples/UnionFind.lean}
+\sourceline{The walk, halving the path}{ScidoniaExamples/UnionFind.lean}{125--132}
+\codeframe[linerange=125-132]{../ScidoniaExamples/UnionFind.lean}
 
 %!check: def union (fuel : Nat) (parent rank : Array UInt64) (x y : Nat) :
-\sourceline{The link, by rank}{ScidoniaExamples/UnionFind.lean}{137--147}
-\codeframe[linerange=137-147]{../ScidoniaExamples/UnionFind.lean}
+\sourceline{The link, by rank}{ScidoniaExamples/UnionFind.lean}{143--153}
+\codeframe[linerange=143-153]{../ScidoniaExamples/UnionFind.lean}
 
 Two runs perform the same unions of the same fixed sequence on the same two
 arrays, and they differ in one thing: what else refers to those arrays while a

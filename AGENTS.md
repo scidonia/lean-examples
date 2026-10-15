@@ -372,14 +372,16 @@ did not go through still reads the arrays the run started from, and the same
 partition, which is the assertion that the two shapes differ in cost and not in
 value. `uf-checked-shared` runs the aliased shape in a child with the check armed
 and must end the process naming the `Layout5` *array* site — the write about to
-copy. `uf-checked-focus` is the one case here whose child does not exit zero, and
-it pins a limit of the check rather than a copy: on the disciplined run the array
-is exclusively owned, so the array guard does not fire, and the element the
-take-out extracted is a machine word — an element of an `Array UInt64` is a value
-and not a heap object — for which `isExclusiveUnsafe` answers `false`, so the
-child stops at the *focus* site; the case asserts that abort, the focus marker's
-presence and the array marker's absence (the split shown by `uf-checked-shared`,
-whose child does name the array site). `uf-unique`'s address assertion is what
+copy — and with the focus site's marker absent. `uf-checked-focus` is the one case
+here whose child does not exit zero, and it pins a limit of the check rather than
+a copy: on the disciplined run the array is exclusively owned, so the array guard
+does not fire, and the element the take-out extracted is a machine word — an
+element of an `Array UInt64` is a value and not a heap object — for which
+`isExclusiveUnsafe` answers `false`, so the child stops at the *focus* site; the
+case asserts that abort, the focus marker's presence and the array marker's
+absence, so the two cases pin the sites in both directions and the focus marker's
+presence here is the control for the absence asserted of `uf-checked-shared`,
+whose child does name the array site. `uf-unique`'s address assertion is what
 shows the write was in place all the same, so the check's array guard is what this
 path can be armed against. `bench-union-find` prints, rather than asserts, the
 measured nanoseconds per union and the mean total of a sequence whose length grows
