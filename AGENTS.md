@@ -270,6 +270,21 @@ The compile-time checks live in the check library:
   path-disjointness, path-leaf and sibling-value facts rest on nothing, the two
   array theorems and the tree's write equations on `propext`, and the
   read-after-write, snapshot and frame statements on `propext` and `Quot.sound`.
+- `ScidoniaTest/UnionFind.lean` checks the union-find of
+  `ScidoniaExamples.UnionFind` from outside, and it checks the algorithm and the
+  discipline separately. Its behavioural checks are `#guard`s, because the arrays
+  are `Array UInt64` and every write goes through `SealedStateVar.setLeaf`, whose
+  traversal reads an array the kernel does not reduce: `find` on an untouched
+  array is the identity, one union gives the root the link implies, and the four
+  unions of `smallSchedule` leave the partition `#[0, 0, 0, 0, 4, 4, 6, 7]` with
+  every reported representative its own parent. Two of those guards have a control
+  of the same shape whose message is pinned, so a guard is shown to fire. Its
+  semantic check is the one the cost contrast must not disturb: the disciplined
+  run and the aliased run of the same unions leave the same parent array, the same
+  rank array and the same partition. Its discipline checks are the sealed class's
+  own laws at the path the algorithm writes — the read-back at the written slot and
+  the frame at another slot, stated at `setLeaf` with the write's equation a
+  hypothesis — and its axiom checks print `propext` and `Quot.sound` for both.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -345,6 +360,31 @@ per update of the exclusive and the aliased shape of each update at increasing
 array sizes and tree depths, with the address relation an untimed probe of each
 shape observed and a checksum over what the updates read; the benchmark section
 of the file states what those numbers do and do not show.
+
+The union-find of `ScidoniaExamples.UnionFind` is checked the same way, and it is
+the case where the unit is an algorithm rather than one write. `uf-unique` runs
+the disciplined shape — the two arrays as the recursion's parameters, nothing else
+referring to them — and asserts that both buffers keep their addresses and that
+the unions leave the partition the small schedule names; `uf-shared` runs the same
+unions with a live second reference to both arrays, read after each step's writes,
+and asserts that both addresses change (the copies), that the reference the writes
+did not go through still reads the arrays the run started from, and the same
+partition, which is the assertion that the two shapes differ in cost and not in
+value. `uf-checked-shared` runs the aliased shape in a child with the check armed
+and must end the process naming the `Layout5` *array* site — the write about to
+copy. `uf-checked-focus` is the one case here whose child does not exit zero, and
+it pins a limit of the check rather than a copy: on the disciplined run the array
+is exclusively owned, so the array guard does not fire, and the element the
+take-out extracted is a machine word — an element of an `Array UInt64` is a value
+and not a heap object — for which `isExclusiveUnsafe` answers `false`, so the
+child stops at the *focus* site; the case asserts that abort, the focus marker's
+presence and the array marker's absence (the split shown by `uf-checked-shared`,
+whose child does name the array site). `uf-unique`'s address assertion is what
+shows the write was in place all the same, so the check's array guard is what this
+path can be armed against. `bench-union-find` prints, rather than asserts, the
+measured nanoseconds per union and the mean total of a sequence whose length grows
+with the element count, for the same two shapes, with the same kind of per-row
+probes.
 
 `ScidoniaTest/Structured.lean` checks `Scidonia.FracPerm.Structured` from
 outside, in the same library and the same style. Its behavioural checks are
@@ -729,6 +769,29 @@ the spine keeps its address in the first and changes in the second — and
 the depth and their *difference* as the allocation. The example library also
 carries the flat array (`arrSet`, the `Array.set!` primitive, O(1) in place and
 O(n) on a copy) and the nested array (`nestedSet`, a two-step sealed path write).
+
+`ScidoniaExamples.UnionFind` seals the flat array itself — `Array UInt64` at
+`.arr (.leaf .uint)`, with `rep := rfl` — and writes a union-find with it, so its
+writes are the sealed take-out update and not the primitive: `find` halves the path
+it walks and `union` links by rank, and each write is `SealedStateVar.setLeaf` at a
+one-step path. That makes the transfer of the primitive's cost to a real algorithm
+measurable: `uf-unique` and `uf-shared` assert the addresses of the two arrays for
+the two shapes, `bench-union-find` times them, and the disciplined and the aliased
+run leave the same partition — a near-constant cost per union against a copy of the
+buffer per step. Two limits belong beside it. The first is the one the sealed class
+already has: the class supplies the layout and the equality and no code, so what
+the algorithm gets from the discipline is the take-out update and a read whose
+result is an element of the observation universe, and whether a compiled write went
+in place is measured (`uf-unique`'s addresses), not proved; the ownership typing
+the library develops elsewhere has first-order expressions as its subject and does
+not reach this Lean function. The second is a limit of the in-place *check*:
+`Layout5`'s array case checks the array and, on the element a take-out extracted,
+the focus, and `isExclusiveUnsafe` answers `false` for an element of an
+`Array UInt64`, which is a machine word and not a heap object. Arming
+`SCIDONIA_CHECK_INPLACE=1` therefore stops a disciplined union-find at the focus
+site where no copy would happen — the harness's `uf-checked-focus` pins that — so
+on a machine-word array the array guard is the one the check can be armed against
+and the address assertion is the in-place evidence.
 
 ## Writing an instance
 
@@ -1652,6 +1715,8 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
 | `ScidoniaExamples/Updates.lean` | The example library of updates: a flat array, a nested array and a struct tree of depth `k` |
+| `ScidoniaExamples/UnionFind.lean` | The example algorithm: a union-find over `Array UInt64` whose writes are the sealed class's take-out update, in a disciplined and an aliased run |
+| `ScidoniaTest/UnionFind.lean` | The union-find's controls — the partition `find` reports, the two runs' agreement, the sealed class's read-back and frame laws at the algorithm's write path, and asserted axiom lists |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
 | `Slides/` | The slide deck's sources: prose series and stepped proofs |
 | `Paper/` | The two papers: their sources and built PDFs, and the tools that keep their quotations to the library |

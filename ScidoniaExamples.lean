@@ -2,3 +2,4 @@
 import ScidoniaExamples.Linearity
 import ScidoniaExamples.Structured
 import ScidoniaExamples.Updates
+import ScidoniaExamples.UnionFind

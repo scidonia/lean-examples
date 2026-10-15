@@ -35,6 +35,11 @@
 \newunicodechar{∧}{\ensuremath{\wedge}}
 \newunicodechar{∨}{\ensuremath{\vee}}
 \newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{⟨}{\ensuremath{\langle}}
+\newunicodechar{⟩}{\ensuremath{\rangle}}
+\newunicodechar{₀}{\textsubscript{0}}
+\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{₂}{\textsubscript{2}}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage[margin=1in]{geometry}
@@ -252,8 +257,8 @@ replaces the buffer. Before the timed runs, each shape is probed once and the
 address the update kept or moved is reported beside the times.
 
 %!check: def runBenchmark (seed : Nat) : IO Unit := do
-\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1467--1474}
-\codeframe[linerange=1467-1474]{../ScidoniaInPlace/Main.lean}
+\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1805--1816}
+\codeframe[linerange=1805-1816]{../ScidoniaInPlace/Main.lean}
 
 \textbf{Measured.} The two tables below are one run of \code{nix develop -c lake
 exe inplace} on the machine used here. The times are means over $100$ updates and
@@ -317,6 +322,119 @@ nothing in these four rows separates the walk from the allocation by a theorem;
 that separation is in the model, as the allocation of the spine, and
 \cref{sec:boundary} states it as the scoped claim it is.
 
+The three updates above are one write each. A fourth example is an algorithm
+rather than an update, a union-find, and it is the canonical place where updating
+in place rather than copying is the whole point of the program: a union's
+amortized cost is near-constant because the two arrays are updated where they lie,
+and a copy on every write destroys that. Its arrays are flat arrays of machine
+words, sealed the same way the nested array is --- the layout
+\code{.arr (.leaf .uint)} has that type as its state type, so the instance's
+\code{rep} is \code{rfl} and the cast a sealed write performs erases:
+
+%!check: instance : SealedStateVar (Array UInt64) := ⟨sealedWords, rfl⟩
+\sourceline{The union-find's arrays, sealed}{ScidoniaExamples/UnionFind.lean}{64--68}
+\codeframe[linerange=64-68]{../ScidoniaExamples/UnionFind.lean}
+
+Each write is therefore the class's take-out update at a one-step path rather than
+a bare \code{Array.set!} --- the library's owned exchange, its two checks and its
+put-back, with no \code{Layout5} written by hand:
+
+%!check: def writeWord (a : Array UInt64) (i : Nat) (v : UInt64) : Array UInt64 :=
+\sourceline{One slot of a machine-word array}{ScidoniaExamples/UnionFind.lean}{83--84}
+\codeframe[linerange=83-84]{../ScidoniaExamples/UnionFind.lean}
+
+\code{find} walks from an element to its root and halves the path on the way, so
+the walk itself writes; \code{union} finds both roots and links the lower-ranked
+one under the higher, which is one write to \code{parent} and, at equal ranks, a
+second to \code{rank}:
+
+%!check: def find : Nat → Array UInt64 → Nat → Array UInt64 × Nat
+\sourceline{The walk, halving the path}{ScidoniaExamples/UnionFind.lean}{119--126}
+\codeframe[linerange=119-126]{../ScidoniaExamples/UnionFind.lean}
+
+%!check: def union (fuel : Nat) (parent rank : Array UInt64) (x y : Nat) :
+\sourceline{The link, by rank}{ScidoniaExamples/UnionFind.lean}{137--147}
+\codeframe[linerange=137-147]{../ScidoniaExamples/UnionFind.lean}
+
+Two runs perform the same unions of the same fixed sequence on the same two
+arrays, and they differ in one thing: what else refers to those arrays while a
+step's writes run. The disciplined run carries the arrays as the recursion's
+parameters and holds nothing else; the undisciplined run takes a second reference
+to both at every step and reads it after that step's writes, which is what makes
+the step's first write meet a buffer another name reaches:
+
+%!check: def unionStepsAliased : Nat → List (Nat × Nat) → Array UInt64 → Array UInt64 →
+\sourceline{The undisciplined shape}{ScidoniaInPlace/Main.lean}{1298--1310}
+\codeframe[linerange=1298-1310]{../ScidoniaInPlace/Main.lean}
+
+The two compute the same partition --- the semantics does not change, only the cost
+--- and that is checked rather than assumed: \code{ScidoniaTest/UnionFind}
+evaluates both runs on eight elements and four unions and compares the
+representatives \code{find} reports, asserts that every reported representative is
+its own parent, and states the sealed class's read-back law and its frame law at
+the algorithm's write path.
+
+\textbf{Measured.} The table below is a run of the same harness on the same
+machine as the two above, and a run of its own: the array and tree tables were
+taken before this algorithm's rows existed, so the three are three runs, each
+read for the shape of its columns. The means and the probes are the same kind ---
+\code{ufReps} measurements of \code{ufOps} unions per row, each shape probed once
+before the timed runs. The sequence's length grows with $n$, which is what makes a
+row's \emph{total} readable as a shape as well as its per-union mean.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{The union-find, measured: nanoseconds per union and the mean total of the
+row's whole sequence, at four element counts. Measured, not a theorem; one run's
+numerals, read for the shape of the columns rather than for the last digit.}
+\label{tab:bench-union-find}
+\begin{tabular}{rrrrrrr}
+\toprule
+$n$ & unions & excl.\ total ($\mu$s) & aliased total ($\mu$s) & excl.\ (ns/op) & aliased (ns/op) & ratio \\
+\midrule
+$256$ & 64 & 17.7 & 83.9 & 277 & 1\,310 & 4.7 \\
+$1\,024$ & 256 & 67.8 & 1\,195.2 & 264 & 4\,668 & 17.6 \\
+$4\,096$ & 1\,024 & 280.5 & 28\,568.9 & 273 & 27\,899 & 102.1 \\
+$16\,384$ & 4\,096 & 1\,013.9 & 298\,075.4 & 247 & 72\,772 & 294.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The exclusive column is flat across the four sizes --- $247$ to $277$ nanoseconds
+per union over a $64$-fold range of $n$ --- and its total grows in step with the
+sequence, which is one near-constant cost per union. The aliased column is the
+copy: $1\,310$ nanoseconds per union at $n = 256$ against $72\,772$ at
+$n = 16\,384$, growing with the buffer, so the totals diverge --- $84$ microseconds
+to $298$ milliseconds, a factor of about $3\,550$ where $n$ grew by a factor of
+$64$ --- and the ratio of the two per-union columns reaches $295$. That is the
+contrast the example exists to show: the same algorithm, the same unions, the same
+partition, and one near-constant cost against a linear one, decided by nothing but
+what else refers to the arrays.
+
+What the discipline gives this algorithm is the sealed take-out update for its
+writes and observation-bounded reads --- the class's \code{read?} returns an
+element of the closed observation universe, never the array --- and what it does
+not give is a proof that any of those writes went in place. That is measured, here
+and in \cref{sec:boundary}. The ownership typing the library develops elsewhere
+has first-order expressions as its subject and does not reach this Lean function:
+the union-find is written \emph{with} the sealed class and is not checked by that
+typing.
+
+Two checked children arm the in-place check on this path, and they stop at
+different guards. \code{uf-checked-shared} runs the aliased shape and must end the
+process naming the \emph{array} site, which is the copy the step would take --- the
+loud failure the other examples' children have, and the one the check exists for.
+\code{uf-checked-focus} runs the disciplined shape and stops too, at the
+\emph{focus} site, and that is a fact about the check rather than about the
+update: the array is exclusively owned there, and the element the take-out
+extracted is a machine word --- an element of an \code{Array UInt64} is a value and
+not a heap object --- for which the guard's exclusivity test answers \code{false}.
+The same run with the check off settles it: \code{uf-unique} asserts that both
+buffers keep their addresses, so nothing copies. The array guard is therefore what
+this path can be armed against, and the in-place evidence for the exclusive run is
+that address assertion.
+
 \section{The honest boundary}\label{sec:boundary}
 
 Three seams separate what is proved here from what the machine does.
@@ -338,9 +456,14 @@ of it is constructed, here or in the checks that accompany the library.
 
 \item \emph{In-place update is measured.} The evidence that a compiled write
 updates in place is that an executable observed the address the write kept, in
-the cases the harness names and in the probes behind \cref{tab:bench-array}. That
-is an observation of named cases on one toolchain, and no theorem here certifies
-it.
+the cases the harness names and in the probes behind \cref{tab:bench-array} and
+\cref{tab:bench-union-find}. That is an observation of named cases on one
+toolchain, and no theorem here certifies it. The check that turns such a copy into
+a terminated process has a limit of its own, which the union-find's cases report:
+it tests the exclusivity of the array \emph{and} of the element a take-out
+extracted, and a focused element that is a machine word rather than a heap object
+stops that test where no copy would happen, so a checked child on such a path
+stops at the focus site and the in-place evidence there is the address assertion.
 \end{enumerate}
 
 The complexity claim is scoped the same way. For the tree, an update walks

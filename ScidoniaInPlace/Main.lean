@@ -80,19 +80,38 @@ must copy — and the child processes are what carry
   case asserts the addresses are kept, and the aliased case holds a live second
   reference and asserts they change, which is the copy. Their checked children
   run the unique writes with `SCIDONIA_CHECK_INPLACE=1` and must exit zero.
-* the benchmark of those updates: `bench-array` and `bench-tree` print the
-  measured nanoseconds per update for the exclusive and the aliased shape, at
-  increasing array sizes and tree depths, with the address relation an untimed
-  probe of each shape observed. The numbers are printed rather than asserted,
-  and what they measure is a run of this program on this toolchain.
+* the union-find of `ScidoniaExamples.UnionFind`, whose writes are that sealed
+  class's take-out update on a flat `Array UInt64`: `uf-unique` runs the
+  disciplined shape and asserts both buffers kept their addresses and that the
+  unions left the partition the schedule names, `uf-shared` runs the same unions
+  with a live second reference to both arrays and asserts both addresses changed
+  — the copies — that the reference the writes did not go through still reads the
+  arrays the run started from, and the same partition. `uf-checked-shared` is the
+  aliased shape in a child with the check armed, which must end the process
+  naming the `Layout5` *array* site, because that is the write about to copy.
+  `uf-checked-focus` is the disciplined shape in a child with the check armed,
+  and it is the one case here that does not exit zero: an element of an
+  `Array UInt64` is a machine word and not a heap object, `isExclusiveUnsafe`
+  answers `false` for it, and the library's focus guard therefore stops that child
+  at the focus site — where no copy would happen, as `uf-unique`'s addresses show.
+  The case pins that pair of facts instead of a zero exit, so a change in either
+  fails the run.
+* the benchmark of those updates and of the union-find: `bench-array`,
+  `bench-tree` and `bench-union-find` print the measured nanoseconds per update
+  (per union) for the exclusive and the aliased shape, at increasing array sizes,
+  tree depths and element counts, with the address relation an untimed probe of
+  each shape observed. The numbers are printed rather than asserted, and what
+  they measure is a run of this program on this toolchain.
 -/
 import Scidonia.FracPerm
 import ScidoniaExamples.Updates
+import ScidoniaExamples.UnionFind
 
 open Scidonia.FracPerm
 open Scidonia.FracPerm.StateVar
 open Scidonia.FracPerm.HSt
 open ScidoniaExamples.Updates
+open ScidoniaExamples.UnionFind
 
 /-! ## The programs
 
@@ -280,6 +299,15 @@ that was expected and the text that was observed otherwise. -/
 def markerFailure (name label marker text : String) : Array String :=
   if text.contains marker then #[] else
     #[s!"{name}: {label}: expected the marker {repr marker}, observed:\n{text}"]
+
+/-- `#[]` when `text` contains `marker`, and one line naming the case, the marker
+that was expected to be absent and the text that was observed otherwise. Its
+control is `markerFailure` at the same detector on the other stream of the pair it
+is used in, which reports that the marker is there when it is. -/
+def absentMarkerFailure (name label marker text : String) : Array String :=
+  if text.contains marker then
+    #[s!"{name}: {label}: expected {repr marker} to be absent, observed:\n{text}"]
+  else #[]
 
 /-- `#[]` when the child exited with the expected status, and one line naming the
 case, the expected and observed statuses, and the child's standard error
@@ -1207,6 +1235,185 @@ def updatesTreeCheckedUniqueCase : IO (Array String) := do
       ++ markerFailure "updates-tree-checked-unique" "the child's standard output" "ok   updates-tree-unique" out.stdout
   return failures
 
+/-! ## The union-find
+
+`ScidoniaExamples.UnionFind` is the example library's algorithm rather than a
+single update: `find` walks to a root and halves the path on the way, `union`
+links one root under the other by rank, and every write of both is
+`SealedStateVar.setLeaf` at a one-step path of an `Array UInt64`, which is the
+sealed class's take-out update on an exclusively owned array and a whole-buffer
+copy on one a second reference reaches. The cases below drive the two shapes of
+it, and they differ in one thing: what else refers to the arrays while a step's
+writes run.
+
+`uf-unique` carries the two arrays as the recursion's parameters and holds
+nothing else, so every write meets the only reference to its array: both buffers
+must keep their addresses, and the eight unions must leave the partition the
+schedule names. `uf-shared` takes a live second reference to both arrays at every
+step and reads it after that step's writes, so each step's first write replaces a
+buffer with a copy: both addresses must change, the reference the writes did not
+go through must still read the arrays the run started from, and the partition
+must be the one `uf-unique` found — the two shapes differ in cost and not in
+value. `uf-checked-shared` is the aliased run in a child with the check armed,
+which must end the process naming the `Layout5` array site, that being the write
+about to copy; `uf-checked-focus` is the disciplined run in the same child, which
+stops at the *focus* site instead — an element of a machine-word array is not a
+heap object, so the library's focus guard answers `false` for it — and that case
+pins the stop, the site and the array site's absence.
+
+The loops below are the two shapes at the level a case observes them: a step's
+arrays are the recursion's parameters, and the aliased one reads each alias
+through `addressIO` after the step's writes, which is both what keeps the
+reference alive across them and what keeps the read from being scheduled
+before them. -/
+
+/-- A fresh rank array of `n` zeros, with room for one more, as `freshWords`
+builds its arrays. The pushes are impure, so the compiler cannot make a persistent
+constant of it, which matters for the same reason it does there: an array a
+constant names can never be exclusively owned. -/
+def freshRanks (n : Nat) : IO (Array UInt64) := do
+  let mut a : Array UInt64 := Array.mkEmpty (n + 1)
+  for _ in [0:n] do
+    a := a.push 0
+  return a
+
+/-- Run a list of unions on the two arrays, the disciplined shape: a recursive
+call carries the arrays as its parameters and nothing else refers to them, and
+each step's resulting parent address is folded into the total, so that no step and
+no address read is eliminated. -/
+def unionStepsDisciplined : Nat → List (Nat × Nat) → Array UInt64 → Array UInt64 →
+    Nat → IO (Array UInt64 × Array UInt64 × Nat)
+  | _, [], parent, rank, total => return (parent, rank, total)
+  | fuel, (x, y) :: rest, parent, rank, total => do
+    let (parent', rank') := union fuel parent rank x y
+    let here ← addressIO parent'
+    unionStepsDisciplined fuel rest parent' rank' (total + here.toNat)
+
+/-- Run the same unions with a live second reference to both arrays at every
+step, read after that step's writes through `addressIO`: the reference makes the
+step's first write meet a buffer another name reaches, so it replaces the buffer
+with a copy, and the read is what keeps the reference alive while the writes run
+and what keeps it from being scheduled before them. The values the aliases read
+are folded into the total beside the addresses. -/
+def unionStepsAliased : Nat → List (Nat × Nat) → Array UInt64 → Array UInt64 →
+    Nat → IO (Array UInt64 × Array UInt64 × Nat)
+  | _, [], parent, rank, total => return (parent, rank, total)
+  | fuel, (x, y) :: rest, parent, rank, total => do
+    let aliasParent := parent
+    let aliasRank := rank
+    let (parent', rank') := union fuel parent rank x y
+    let parentHere ← addressIO aliasParent
+    let rankHere ← addressIO aliasRank
+    let seen := ((aliasParent[x]?).map UInt64.toNat).getD 0
+      + ((aliasRank[y]?).map UInt64.toNat).getD 0
+    unionStepsAliased fuel rest parent' rank'
+      (total + parentHere.toNat + rankHere.toNat + seen)
+
+/-- The partition the small schedule leaves: `0` to `3` in one set, `4` and `5`
+in another, and `6` and `7` each alone. -/
+def ufSmallRoots : Array Nat := #[0, 0, 0, 0, 4, 4, 6, 7]
+
+/-- The disciplined union-find on the small schedule: both buffers keep their
+addresses — every write was the take-out update of an exclusively owned array —
+and the eight elements are partitioned as `ufSmallRoots` says. -/
+def ufUniqueCase (name : String) : IO (Array String) := do
+  let parent ← freshWords 0 smallElements
+  let rank ← freshRanks smallElements
+  let exclusiveBefore := exclusive parent
+  let parentBefore ← addressIO parent
+  let rankBefore ← addressIO rank
+  let (parent', rank', total) ←
+    unionStepsDisciplined smallElements smallSchedule parent rank 0
+  let parentAfter ← addressIO parent'
+  let rankAfter ← addressIO rank'
+  let (_, roots) := representatives smallElements parent'
+  IO.println s!"{name}: the parent buffer: {parentBefore}, then {parentAfter}; the rank buffer: {rankBefore}, then {rankAfter}; total={total}"
+  let failures : Array String :=
+    exclusiveFailure name "parent array" true exclusiveBefore
+      ++ addressFailure name "the parent buffer's address" true parentBefore parentAfter
+      ++ addressFailure name "the rank buffer's address" true rankBefore rankAfter
+      ++ disagree name "the partition the run left" ufSmallRoots roots
+      ++ disagree name "the parent array's size" smallElements parent'.size
+      ++ disagree name "the rank array's size" smallElements rank'.size
+  return failures
+
+/-- The undisciplined union-find on the same eight elements and the same unions:
+a live second reference to both arrays is held across every step, so each step's
+first write replaces a buffer with a copy — both addresses change — the reference
+the writes did not go through still reads the arrays the run started from, and the
+partition is the one the disciplined run left. -/
+def ufSharedCase (name : String) : IO (Array String) := do
+  let parent ← freshWords 0 smallElements
+  let rank ← freshRanks smallElements
+  let keptParent := parent
+  let keptRank := rank
+  let exclusiveBefore := exclusive parent
+  let parentBefore ← addressIO parent
+  let rankBefore ← addressIO rank
+  let (parent', rank', total) ← unionStepsAliased smallElements smallSchedule parent rank 0
+  let parentAfter ← addressIO parent'
+  let rankAfter ← addressIO rank'
+  let keptParentAfter := keptParent
+  let keptRankAfter := keptRank
+  let (_, roots) := representatives smallElements parent'
+  IO.println s!"{name}: the parent buffer: {parentBefore}, then {parentAfter}; the rank buffer: {rankBefore}, then {rankAfter}; total={total}"
+  let failures : Array String :=
+    exclusiveFailure name "parent array" false exclusiveBefore
+      ++ addressFailure name "the parent buffer's address" false parentBefore parentAfter
+      ++ addressFailure name "the rank buffer's address" false rankBefore rankAfter
+      ++ disagree name "the partition the run left" ufSmallRoots roots
+      ++ disagree name "the parent array the alias still reads" (singletons smallElements) keptParentAfter
+      ++ disagree name "the rank array the alias still reads" (zeroRanks smallElements) keptRankAfter
+  return failures
+
+/-- The disciplined union-find in a child with the check enabled: what stops the
+child is the library's *focus* guard, and this case pins that.
+
+A write of `union` is `SealedStateVar.setLeaf` at `.index i .here`, and the
+`Layout5` array case checks two objects: the array, before the take-out, and the
+element the take-out extracted. The array is exclusively owned here, so that guard
+does not fire; the extracted element is a machine word, an element of an
+`Array UInt64` being a value and not a heap object, and `isExclusiveUnsafe`
+answers `false` for it. So the child stops on its first write at the focus site
+and not at the array site, which is what the two markers below pin — the array
+marker absent, the focus marker and the report present.
+
+That the write was in place all the same is `uf-unique`'s assertion, and the two
+are the same run of the same write: with the check off, every buffer keeps its
+address. The focus guard is therefore not armable on a layout whose focused
+element is a scalar, and the in-place evidence for this path is the address
+assertion and not a checked child. -/
+def ufCheckedFocusCase : IO (Array String) := do
+  let out ← launchChecked "uf-unique"
+  let status :=
+    if out.exitCode == 0 then
+      #[s!"uf-checked-focus: the exit status: expected a nonzero status, observed {out.exitCode}"]
+    else #[]
+  let failures :=
+    markerFailure "uf-checked-focus" "the child's standard output" "check-enabled=true" out.stdout
+      ++ status
+      ++ markerFailure "uf-checked-focus" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.struct" out.stderr
+      ++ absentMarkerFailure "uf-checked-focus" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.open" out.stderr
+  return failures
+
+/-- The aliased union-find in a child with the check enabled must end the
+process, naming the `Layout5` array site: the first write of the first step is
+about to copy the parent buffer, which a second reference reaches. -/
+def ufCheckedSharedCase : IO (Array String) := do
+  let out ← launchChecked "uf-shared"
+  let status :=
+    if out.exitCode == 0 then
+      #[s!"uf-checked-shared: the exit status: expected a nonzero status, observed {out.exitCode}"]
+    else #[]
+  let failures :=
+    markerFailure "uf-checked-shared" "the child's standard output" "check-enabled=true" out.stdout
+      ++ status
+      ++ markerFailure "uf-checked-shared" "the child's standard error"
+        "Scidonia.FracPerm.StateVar.Layout5.open" out.stderr
+  return failures
+
 /-! ## The benchmark
 
 `IO.monoNanosNow` measures the two shapes of each update — on an object the caller
@@ -1461,9 +1668,140 @@ def benchTreeRow (k : Nat) (seed : UInt64) : IO TreeBenchRow := do
 def reportTreeBench (row : TreeBenchRow) : IO Unit :=
   IO.println s!"bench-tree: depth={row.depth} leaves={2 ^ row.depth} exclusive={row.exclusiveNanos} ns/op aliased={row.aliasedNanos} ns/op extra={row.extraNanos} ns/op ratio={ratioText row.aliasedNanos row.exclusiveNanos} in-place={row.inPlace} copies={row.copied} checksum={row.checksum}"
 
-/-- The benchmark: the two shapes of the array update at each size, then the two
-shapes of the tree update at each depth. The numbers are printed rather than
-asserted, and the run reports what it measured rather than what it must find. -/
+/-! ## The union-find benchmark
+
+The union-find is measured the same way as the updates above, with one difference
+that is the point of it: the unit is a *union*, and what a union costs depends on
+what else refers to the arrays. Each timed measurement runs a whole sequence of
+`schedule`'s unions — a value, so every row and every measurement performs the same
+work — on two fresh arrays, in the recursive-parameter shape the cases above
+assert the addresses of, because a `for` loop would hold the arrays in its closure
+and make every write copy.
+
+What the measurement shows is the shape of the two columns, and it is a
+measurement of one program on one toolchain rather than a complexity theorem:
+
+* the exclusive column stays near flat as `n` grows — the amortized cost of a
+  union in a union-find is near-constant, and the writes it makes are the
+  take-out updates of arrays nothing else refers to — while the aliased column
+  grows with `n`, because a step's first write meets a buffer a second reference
+  reaches and replaces it with a whole-buffer copy. The `extra` column is that
+  copy's cost, and the rows' ratio is that cost against the near-constant one;
+* each row's untimed probe reports which of the two the *first* union did —
+  `in-place=true` for the exclusive shape, `copies=true` for the aliased one —
+  and the address assertion in `uf-unique` and `uf-shared` beside this benchmark
+  is the same measurement over the whole schedule. -/
+
+/-- The union-find sizes the benchmark measures, from small to large. -/
+def ufBenchSizes : List Nat := [256, 1024, 4096, 16384]
+
+/-- The unions one timed union-find measurement at size `n` runs: a quarter of the
+array. The sequence's length therefore grows with `n`, which is what makes a row's
+*total* readable as a shape — the exclusive total grows with the work it does and
+the aliased one with the copies — and the schedule's pairs are two elements half
+the array apart, so every one of those unions links two roots of two different
+sets and writes. -/
+def ufOps (n : Nat) : Nat := n / 4
+
+/-- The timed measurements the union-find benchmark averages per row and shape. -/
+def ufReps : Nat := 5
+
+/-- The timed disciplined union-find at size `n`: `ufOps n` unions of the schedule
+on two fresh arrays, carried by the recursion's parameters. -/
+def timeUfExclusive (n : Nat) : IO (Nat × Nat) := do
+  let parent ← freshWords 0 n
+  let rank ← freshRanks n
+  let t0 ← IO.monoNanosNow
+  let (parent', _, total) ← unionStepsDisciplined n (schedule n (ufOps n)) parent rank 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, total + ((parent'[0]?).getD 0).toNat)
+
+/-- The timed undisciplined union-find at size `n`: as the disciplined shape, with
+a live second reference to both arrays taken at every step, so each step's first
+write replaces a buffer with a copy. -/
+def timeUfAliased (n : Nat) : IO (Nat × Nat) := do
+  let parent ← freshWords 0 n
+  let rank ← freshRanks n
+  let t0 ← IO.monoNanosNow
+  let (parent', _, total) ← unionStepsAliased n (schedule n (ufOps n)) parent rank 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, total + ((parent'[0]?).getD 0).toNat)
+
+/-- The timed runs of one union-find row: `reps` measurements of each shape at
+size `n`, accumulating their times and the totals the runs folded their reads
+into, so that no address read and no update is eliminated. -/
+def timeUfRounds (n : Nat) : Nat → Nat → Nat → Nat → IO (Nat × Nat × Nat)
+  | 0, exclusiveTotal, aliasedTotal, checksum => return (exclusiveTotal, aliasedTotal, checksum)
+  | reps + 1, exclusiveTotal, aliasedTotal, checksum => do
+    let (exclusive, exclusiveSum) ← timeUfExclusive n
+    let (aliased, aliasedSum) ← timeUfAliased n
+    timeUfRounds n reps (exclusiveTotal + exclusive) (aliasedTotal + aliased)
+      (checksum + exclusiveSum + aliasedSum)
+
+/-- One row of the union-find benchmark. -/
+structure UnionFindBenchRow where
+  /-- The number of elements the two arrays hold. -/
+  size : Nat
+  /-- The unions each timed run performs, which is `ufOps` at this size. -/
+  ops : Nat
+  /-- Mean nanoseconds the whole exclusive sequence took. -/
+  exclusiveTotal : Nat
+  /-- Mean nanoseconds the whole aliased sequence took. -/
+  aliasedTotal : Nat
+  /-- Nanoseconds per union on arrays the caller alone refers to. -/
+  exclusiveNanos : Nat
+  /-- Nanoseconds per union with a live second reference to both arrays. -/
+  aliasedNanos : Nat
+  /-- The difference of the two per-operation times, which is what the second
+  reference costs. -/
+  extraNanos : Nat
+  /-- Whether the untimed exclusive probe's first union kept the parent buffer's
+  address. -/
+  inPlace : Bool
+  /-- Whether the untimed aliased probe's first union moved it. -/
+  copied : Bool
+  /-- A sum over the addresses and values the timed runs and the probes read, so
+  that none of them is eliminated. -/
+  checksum : Nat
+
+/-- One row of the union-find benchmark: an untimed probe of each shape — which is
+where the address relation comes from — then the two timed runs. They time a whole
+sequence of `ufOps n` unions per measurement and the row reports the sequence's
+mean total beside the mean per union, since the sequence's length grows with `n`
+and a total is then not comparable between rows while a per-union time is. -/
+def benchUfRow (n : Nat) : IO UnionFindBenchRow := do
+  let probeParent ← freshWords 0 n
+  let probeRank ← freshRanks n
+  let probeBefore ← addressIO probeParent
+  let (probeParent', _, probeSum) ←
+    unionStepsDisciplined n (schedule n 1) probeParent probeRank 0
+  let probeAfter ← addressIO probeParent'
+  let aliasedProbeParent ← freshWords 0 n
+  let aliasedProbeRank ← freshRanks n
+  let aliasedBefore ← addressIO aliasedProbeParent
+  let (aliasedProbeParent', _, aliasedProbeSum) ←
+    unionStepsAliased n (schedule n 1) aliasedProbeParent aliasedProbeRank 0
+  let aliasedAfter ← addressIO aliasedProbeParent'
+  let (exclusiveRounds, aliasedRounds, checksum) ← timeUfRounds n ufReps 0 0 0
+  let ops := ufOps n
+  let rounds := ufReps * ops
+  let exclusiveTotal := exclusiveRounds / ufReps
+  let aliasedTotal := aliasedRounds / ufReps
+  let exclusiveNanos := exclusiveRounds / rounds
+  let aliasedNanos := aliasedRounds / rounds
+  return { size := n, ops, exclusiveTotal, aliasedTotal, exclusiveNanos, aliasedNanos,
+           extraNanos := aliasedNanos - exclusiveNanos,
+           inPlace := probeBefore == probeAfter, copied := aliasedBefore != aliasedAfter,
+           checksum := checksum + probeSum + aliasedProbeSum }
+
+/-- Print one row of the union-find benchmark. -/
+def reportUfBench (row : UnionFindBenchRow) : IO Unit :=
+  IO.println s!"bench-union-find: n={row.size} unions={row.ops} exclusive={row.exclusiveNanos} ns/op total={row.exclusiveTotal} ns aliased={row.aliasedNanos} ns/op total={row.aliasedTotal} ns extra={row.extraNanos} ns/op ratio={ratioText row.aliasedNanos row.exclusiveNanos} in-place={row.inPlace} copies={row.copied} checksum={row.checksum}"
+
+/-- The benchmark: the two shapes of the array update at each size, the two shapes
+of the tree update at each depth, and the two shapes of the union-find at each
+size. The numbers are printed rather than asserted, and the run reports what it
+measured rather than what it must find. -/
 def runBenchmark (seed : Nat) : IO Unit := do
   IO.println "bench: the array update, exclusive (the caller alone refers to the array) against aliased (a live second reference)"
   for n in benchSizes do
@@ -1471,7 +1809,10 @@ def runBenchmark (seed : Nat) : IO Unit := do
   IO.println "bench: the tree update, exclusive against aliased; the walk is in both columns, so the extra is the allocation of the cells the update rebuilt"
   for k in benchDepths do
     reportTreeBench (← benchTreeRow k seed.toUInt64)
-  IO.println "bench: per-operation times are means over arrayOps (treeOps) updates and arrayReps (treeReps) measurements; a measurement of this program on this toolchain, not a complexity theorem"
+  IO.println "bench: the union-find, exclusive against aliased; a union's writes are take-out updates of the two arrays, and the aliased shape copies a buffer at every step"
+  for n in ufBenchSizes do
+    reportUfBench (← benchUfRow n)
+  IO.println "bench: per-operation times are means over arrayOps (treeOps, ufOps) updates and arrayReps (treeReps, ufReps) measurements; a measurement of this program on this toolchain, not a complexity theorem"
 
 /-! ## The entry point -/
 
@@ -1535,7 +1876,11 @@ def runAll : IO UInt32 := do
     ("updates-tree-shared", ← updatesTreeSharedCase "updates-tree-shared" seed),
     ("updates-arr-checked-unique", ← updatesArrayCheckedUniqueCase),
     ("updates-nested-checked-unique", ← updatesNestedCheckedUniqueCase),
-    ("updates-tree-checked-unique", ← updatesTreeCheckedUniqueCase)
+    ("updates-tree-checked-unique", ← updatesTreeCheckedUniqueCase),
+    ("uf-unique", ← ufUniqueCase "uf-unique"),
+    ("uf-shared", ← ufSharedCase "uf-shared"),
+    ("uf-checked-focus", ← ufCheckedFocusCase),
+    ("uf-checked-shared", ← ufCheckedSharedCase)
   ]
   let mut status : UInt32 := 0
   for (name, failures) in cases do
@@ -1568,6 +1913,8 @@ def runChild (command : String) : IO UInt32 := do
   | "updates-nested-shared" => report "updates-nested-shared" (← updatesNestedSharedCase "updates-nested-shared" seed)
   | "updates-tree-unique" => report "updates-tree-unique" (← updatesTreeUniqueCase "updates-tree-unique" seed)
   | "updates-tree-shared" => report "updates-tree-shared" (← updatesTreeSharedCase "updates-tree-shared" seed)
+  | "uf-unique" => report "uf-unique" (← ufUniqueCase "uf-unique")
+  | "uf-shared" => report "uf-shared" (← ufSharedCase "uf-shared")
   | _ => do
     IO.eprintln s!"inplace: unknown command {command}"
     return 2
@@ -1577,5 +1924,5 @@ def main (args : List String) : IO UInt32 := do
   | [] => runAll
   | [command] => runChild command
   | _ => do
-    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure|layout5-unique|layout5-shared|layout5-nest|layout5-nest-shared|sealed-unique|updates-arr-unique|updates-arr-shared|updates-nested-unique|updates-nested-shared|updates-tree-unique|updates-tree-shared]"
+    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure|layout5-unique|layout5-shared|layout5-nest|layout5-nest-shared|sealed-unique|updates-arr-unique|updates-arr-shared|updates-nested-unique|updates-nested-shared|updates-tree-unique|updates-tree-shared|uf-unique|uf-shared]"
     return 2

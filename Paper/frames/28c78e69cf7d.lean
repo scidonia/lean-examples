@@ -5,4 +5,7 @@ def runBenchmark (seed : Nat) : IO Unit := do
   IO.println "bench: the tree update, exclusive against aliased; the walk is in both columns, so the extra is the allocation of the cells the update rebuilt"
   for k in benchDepths do
     reportTreeBench (← benchTreeRow k seed.toUInt64)
-  IO.println "bench: per-operation times are means over arrayOps (treeOps) updates and arrayReps (treeReps) measurements; a measurement of this program on this toolchain, not a complexity theorem"
+  IO.println "bench: the union-find, exclusive against aliased; a union's writes are take-out updates of the two arrays, and the aliased shape copies a buffer at every step"
+  for n in ufBenchSizes do
+    reportUfBench (← benchUfRow n)
+  IO.println "bench: per-operation times are means over arrayOps (treeOps, ufOps) updates and arrayReps (treeReps, ufReps) measurements; a measurement of this program on this toolchain, not a complexity theorem"
