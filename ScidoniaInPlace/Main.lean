@@ -70,12 +70,29 @@ must copy — and the child processes are what carry
   and `layout5-nest-shared` (a live reference to the focused element) must end
   the process naming the `Layout5` site of the array and of the element
   respectively.
+* the updates of `ScidoniaExamples.Updates`: a flat array (`arrSet`, the
+  primitive), a nested array (`nestedSet`, a two-step path write through the
+  sealed class) and a struct tree of depth four (`treeSet`, a path write of
+  depth four through the sealed class). Each case observes the addresses the
+  update is about — the flat array's buffer, the nested array's outer buffer
+  and focused inner array, and the tree's spine cells down the written path —
+  with the same `addressIO` instrument the path-write cases use. The unique
+  case asserts the addresses are kept, and the aliased case holds a live second
+  reference and asserts they change, which is the copy. Their checked children
+  run the unique writes with `SCIDONIA_CHECK_INPLACE=1` and must exit zero.
+* the benchmark of those updates: `bench-array` and `bench-tree` print the
+  measured nanoseconds per update for the exclusive and the aliased shape, at
+  increasing array sizes and tree depths, with the address relation an untimed
+  probe of each shape observed. The numbers are printed rather than asserted,
+  and what they measure is a run of this program on this toolchain.
 -/
 import Scidonia.FracPerm
+import ScidoniaExamples.Updates
 
 open Scidonia.FracPerm
 open Scidonia.FracPerm.StateVar
 open Scidonia.FracPerm.HSt
+open ScidoniaExamples.Updates
 
 /-! ## The programs
 
@@ -929,6 +946,533 @@ def checkedSealedUniqueCase : IO (Array String) := do
       ++ markerFailure "sealed-checked-unique" "the child's standard output" "ok   sealed-unique" out.stdout
   return failures
 
+/-! ## The update examples
+
+`ScidoniaExamples.Updates` is the example library of updates: a flat array
+(`arrSet`, the Lean primitive), a nested array (`nestedSet`, a two-step path write
+through the sealed class) and a struct tree of depth `k` (`treeSet`, a path write
+of depth `k` through the sealed class). Each case below observes the addresses the
+update is about — the flat array's buffer, the nested array's outer buffer and
+focused inner array, and the tree's spine cells down the written path — with the
+same `addressIO` instrument the path-write cases use. The unique case asserts the
+addresses are kept, which is the update in place; the aliased case holds a live
+second reference and asserts they change, which is the copy.
+
+The tree cases run at depth four: four cells on the spine, which the case prints,
+and a leaf at the end of four left steps. A live reference to the tree makes every
+cell on the path shared, each level's projection then copies, and all four cells
+are rebuilt — that is the O(log n) allocation the write costs when the tree is not
+exclusively owned. -/
+
+/-- A fresh array of `n` machine words from `seed`, with room for one more, built
+by run-time pushes so that the caller holds the single reference. -/
+def freshWords (seed n : Nat) : IO (Array UInt64) := do
+  let mut a : Array UInt64 := Array.mkEmpty (n + 1)
+  for i in [0:n] do
+    a := a.push (seed + i).toUInt64
+  return a
+
+/-- What one run of the flat-array update leaves to check. -/
+structure ArrayRun where
+  /-- Whether the array handed to the update was exclusively owned. -/
+  exclusiveBefore : Bool
+  /-- The array's buffer address before the update. -/
+  addressBefore : USize
+  /-- The array's buffer address after the update. -/
+  addressAfter : USize
+  /-- The array the update left behind. -/
+  array : Array UInt64
+
+/-- Run `arrSet` on `a` and observe the buffer's address. -/
+def observeArrSet (a : Array UInt64) (i : Nat) (v : UInt64) : IO ArrayRun := do
+  let exclusiveBefore := exclusive a
+  let addressBefore ← addressIO a
+  let a' := arrSet a i v
+  let addressAfter ← addressIO a'
+  return { exclusiveBefore, addressBefore, addressAfter, array := a' }
+
+/-- The flat-array update on an array the caller alone refers to: the buffer keeps
+its address — one slot was written in place — the written slot holds the new word,
+a sibling slot holds its own, and the array keeps its size. -/
+def updatesArrayUniqueCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshWords seed 8
+  let run ← observeArrSet a 3 (seed + 7).toUInt64
+  IO.println s!"{name}: the buffer address: {run.addressBefore}, then {run.addressAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "array" true run.exclusiveBefore
+      ++ addressFailure name "the buffer address" true run.addressBefore run.addressAfter
+      ++ disagree name "the value at the written index" (seed + 7).toUInt64 run.array[3]!
+      ++ disagree name "a sibling slot" seed.toUInt64 run.array[0]!
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- The flat-array update with a live second reference to the array: it is not
+exclusively owned, the write replaces the buffer with a copy, the address changes,
+and the reference the write did not go through keeps its values. -/
+def updatesArraySharedCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshWords seed 8
+  let kept := a
+  let run ← observeArrSet a 3 (seed + 7).toUInt64
+  let keptAfter := kept
+  IO.println s!"{name}: the buffer address: {run.addressBefore}, then {run.addressAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "array" false run.exclusiveBefore
+      ++ addressFailure name "the buffer address" false run.addressBefore run.addressAfter
+      ++ disagree name "the value at the written index" (seed + 7).toUInt64 run.array[3]!
+      ++ disagree name "the value the alias still reads" (seed + 3).toUInt64 keptAfter[3]!
+      ++ disagree name "the array size" 8 run.array.size
+  return failures
+
+/-- Run the nested-array update of the examples library on the inner array at index
+2 and observe the outer array's and that inner array's addresses. -/
+def observeUpdatesNest (outer : Array (Array UInt64)) (v : UInt64) : IO NestRun := do
+  let outerExclusive := exclusive outer
+  let innerExclusive := exclusive (outer[2]!)
+  let outerBefore ← addressIO outer
+  let innerBefore ← addressIO (outer[2]!)
+  let r := nestedSet outer 2 1 v
+  let outerAfter ← addressIO r.1
+  let innerAfter ← addressIO (r.1[2]!)
+  return { outerExclusive, innerExclusive, outerBefore, outerAfter, innerBefore, innerAfter,
+           ok := r.2, outer := r.1, inner := r.1[2]! }
+
+/-- The nested-array update on an outer array and a focused inner array the caller
+alone refers to: both keep their addresses — each level was updated in place — the
+written slot holds the new word, a sibling slot of the inner array and another
+inner array hold theirs, and the write reported that it took effect. -/
+def updatesNestedUniqueCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshNested seed 4
+  let run ← observeUpdatesNest a 99
+  IO.println s!"{name}: the outer array address: {run.outerBefore}, then {run.outerAfter}; the focused inner array address: {run.innerBefore}, then {run.innerAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "outer array" true run.outerExclusive
+      ++ exclusiveFailure name "focused inner array" true run.innerExclusive
+      ++ addressFailure name "the outer array address" true run.outerBefore run.outerAfter
+      ++ addressFailure name "the focused inner array address" true run.innerBefore run.innerAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" (99 : UInt64) run.inner[1]!
+      ++ disagree name "a sibling slot of the inner array" (seed + 20).toUInt64 run.inner[0]!
+      ++ disagree name "another inner array" (seed).toUInt64 (run.outer[0]!)[0]!
+  return failures
+
+/-- The nested-array update with a live second reference to the *focused inner
+array*: that level copies, so the inner array's address changes and the alias
+keeps its values, while the outer array still keeps its own address. -/
+def updatesNestedSharedCase (name : String) (seed : Nat) : IO (Array String) := do
+  let a ← freshNested seed 4
+  let kept := a[2]!
+  let run ← observeUpdatesNest a 99
+  let keptAfter := kept
+  IO.println s!"{name}: the outer array address: {run.outerBefore}, then {run.outerAfter}; the focused inner array address: {run.innerBefore}, then {run.innerAfter}"
+  let failures : Array String :=
+    addressFailure name "the outer array address" true run.outerBefore run.outerAfter
+      ++ addressFailure name "the focused inner array address" false run.innerBefore run.innerAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ disagree name "the value at the path" (99 : UInt64) run.inner[1]!
+      ++ disagree name "the value the alias still reads" (seed + 21).toUInt64 keptAfter[1]!
+  return failures
+
+/-- The addresses of a struct tree's spine cells, from the root down the all-left
+path: the cells the update's recursion walks and rebuilds. A depth-`k` tree's
+spine holds `k` such cells — the struct at depth `k`, the struct at depth `k - 1`
+inside it, and so on down to the struct at depth `1` — and the walk stops before
+the leaf, whose word is a scalar and has no cell of its own to observe.
+
+Each address is read through `addressIO`, which is what keeps a read of a
+projection from leaving a reference to it behind: a plain `let` of an address can
+be scheduled at the point the address is used, and the projection then stays alive
+across the update it was meant to observe. -/
+def treeSpine : (k : Nat) → Layout5.State (structTree k) → IO (Array USize)
+  | 0, _ => return #[]
+  | k + 1, t => do
+    let cell ← addressIO t
+    let rest ← treeSpine k t.1
+    return #[cell] ++ rest
+
+/-- `#[]` when every spine cell kept its address, and one line naming the case, the
+label and both lists otherwise. -/
+def addressesKeptFailure (name label : String) (before after : Array USize) : Array String :=
+  if before == after then #[] else
+    #[s!"{name}: {label}: expected the same address at every cell, observed {repr before}, then {repr after}"]
+
+/-- `#[]` when every spine cell's address changed and the two lists have the same
+length, and one line naming the case, the label and both lists otherwise. -/
+def addressesChangedFailure (name label : String) (before after : Array USize) : Array String :=
+  if before.size == after.size && (before.zip after).all (fun p => p.1 != p.2) then #[] else
+    #[s!"{name}: {label}: expected a different address at every cell, observed {repr before}, then {repr after}"]
+
+/-- `#[]` when the read at a path observed the expected value, and one line naming
+the case, the label, the expectation and the observation otherwise. The read
+returns the library's `Option Value`, whose equality is decidable but which
+`disagree` cannot use, so the comparison is `decide`d here. -/
+def observationFailure (name label : String) (expected observed : Option Value) : Array String :=
+  if decide (observed = expected) then #[] else
+    #[s!"{name}: {label}: expected {repr expected}, observed {repr observed}"]
+
+/-- What one run of the struct-tree update leaves to check. -/
+structure TreeRun (k : Nat) where
+  /-- Whether the tree handed to the update was exclusively owned. -/
+  exclusiveBefore : Bool
+  /-- The spine cells' addresses before the update, from the root down. -/
+  spineBefore : Array USize
+  /-- The spine cells' addresses after the update. -/
+  spineAfter : Array USize
+  /-- Whether the update reported that it took effect. -/
+  ok : Bool
+  /-- The tree the update left behind. -/
+  tree : Layout5.State (structTree k)
+
+/-- Run `treeSet` at the leftmost leaf of `t` and observe the spine cells'
+addresses before and after. -/
+def observeTreeSet (k : Nat) (v : UInt64) (t : Layout5.State (structTree k)) : IO (TreeRun k) := do
+  let exclusiveBefore := exclusive t
+  let spineBefore ← treeSpine k t
+  let r := treeSet k v t
+  let spineAfter ← treeSpine k r.1
+  return { exclusiveBefore, spineBefore, spineAfter, ok := r.2, tree := r.1 }
+
+/-- The struct-tree update on a tree the caller alone refers to: every spine cell
+keeps its address — the recursion rewrote the cells it walked in place, so the
+spine was built once and reused — the leftmost leaf holds the new word, and the
+leaf beside it holds its own. -/
+def updatesTreeUniqueCase (name : String) (seed : Nat) : IO (Array String) := do
+  let t := treeFilled 4 seed.toUInt64
+  let run ← observeTreeSet 4 (seed + 7).toUInt64 t
+  IO.println s!"{name}: the spine cells: {repr run.spineBefore}, then {repr run.spineAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "tree" true run.exclusiveBefore
+      ++ addressesKeptFailure name "the spine cells" run.spineBefore run.spineAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ observationFailure name "the value at the path" (some (.uint (seed + 7).toUInt64))
+        (SealedStateVar.read? (treePath 4) run.tree)
+      ++ observationFailure name "the leaf beside it" (some (.uint (seed + 1).toUInt64))
+        (SealedStateVar.read? (treeSiblingPath 3) run.tree)
+  return failures
+
+/-- The struct-tree update with a live second reference to the tree: the root is
+shared, every cell on the written path is rebuilt, and the spine's addresses all
+change, which is the O(log n) allocation the update costs when the tree is not
+exclusively owned. The alias keeps the values it had. -/
+def updatesTreeSharedCase (name : String) (seed : Nat) : IO (Array String) := do
+  let t := treeFilled 4 seed.toUInt64
+  let kept := t
+  let run ← observeTreeSet 4 (seed + 7).toUInt64 t
+  let keptAfter := kept
+  IO.println s!"{name}: the spine cells: {repr run.spineBefore}, then {repr run.spineAfter}"
+  let failures : Array String :=
+    exclusiveFailure name "tree" false run.exclusiveBefore
+      ++ addressesChangedFailure name "the spine cells" run.spineBefore run.spineAfter
+      ++ disagree name "the write took effect" true run.ok
+      ++ observationFailure name "the value at the path" (some (.uint (seed + 7).toUInt64))
+        (SealedStateVar.read? (treePath 4) run.tree)
+      ++ observationFailure name "the value the alias still reads" (some (.uint seed.toUInt64))
+        (SealedStateVar.read? (treePath 4) keptAfter)
+  return failures
+
+/-- The flat-array update in a child with the check enabled. The update is
+`Array.set!`, whose compiled implementation `lean_array_set` decides between an
+update in place and a copy by the array's reference count alone and consults no
+library check, so the child's evidence is that the whole case runs to completion
+with the check armed; the parent's address assertion is what shows the update was
+in place. -/
+def updatesArrayCheckedUniqueCase : IO (Array String) := do
+  let out ← launchChecked "updates-arr-unique"
+  let failures :=
+    markerFailure "updates-arr-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "updates-arr-checked-unique" 0 out
+      ++ markerFailure "updates-arr-checked-unique" "the child's standard output" "ok   updates-arr-unique" out.stdout
+  return failures
+
+/-- The nested-array update in a child with the check enabled must pass: the write
+is the sealed class's, so both of the library's checks — the take-out's array and
+the extracted inner array — are armed and neither fires. -/
+def updatesNestedCheckedUniqueCase : IO (Array String) := do
+  let out ← launchChecked "updates-nested-unique"
+  let failures :=
+    markerFailure "updates-nested-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "updates-nested-checked-unique" 0 out
+      ++ markerFailure "updates-nested-checked-unique" "the child's standard output" "ok   updates-nested-unique" out.stdout
+  return failures
+
+/-- The struct-tree update in a child with the check enabled. The tree is structs
+and one word, so no array check runs on this path and the library's checks have
+nothing to say about it: the child's evidence is that the whole case runs to
+completion with the check armed, and the parent's spine assertion — every cell
+kept its address — is what shows the write reused them. -/
+def updatesTreeCheckedUniqueCase : IO (Array String) := do
+  let out ← launchChecked "updates-tree-unique"
+  let failures :=
+    markerFailure "updates-tree-checked-unique" "the child's standard output" "check-enabled=true" out.stdout
+      ++ exitFailure "updates-tree-checked-unique" 0 out
+      ++ markerFailure "updates-tree-checked-unique" "the child's standard output" "ok   updates-tree-unique" out.stdout
+  return failures
+
+/-! ## The benchmark
+
+`IO.monoNanosNow` measures the two shapes of each update — on an object the caller
+alone refers to and on one with a live second reference — in the same code shape
+the cases above assert the addresses of. Each timed measurement runs a fixed
+number of updates, so that a single clock read does not dominate it; the reported
+per-operation time is the total over the repetitions divided by the operations and
+the repetitions. The updates run in a recursive loop that carries the object as a
+parameter, because a `for` loop body is a closure holding it, which is a second
+reference: the loop the measurement runs in must not be what makes an update copy.
+The numbers are printed, not asserted.
+
+What the measurement shows is the shape of each update, and it is a measurement of
+one program on one toolchain rather than a complexity theorem:
+
+* the flat array's exclusive column stays flat as `n` grows — the write touches
+  one slot of the buffer the caller owns — while its aliased column grows with
+  `n`, because a shared array is replaced by a whole-buffer copy. The `extra`
+  column is that copy's cost;
+* the tree's two columns both walk the path, O(depth) each — the depth is `log₂` of
+  the leaf count — so both grow with the depth. What the columns differ in is the
+  *allocation* of the cells the update rebuilt: none for the spine when the tree is
+  exclusively owned, one cell per level when it is shared, which is the `extra`
+  column. That difference is small next to the walk — tens to a few hundred
+  nanoseconds against columns of hundreds to thousands — and it is the noisiest
+  number here, so what establishes *which* cells are reused is the address
+  assertion in `updates-tree-unique` and `updates-tree-shared` beside this
+  benchmark: every cell on the spine keeps its address in the first and changes in
+  the second. Neither column is a constant-time operation, and nothing here measures
+  the ratio of one to a logarithmic one. -/
+
+/-- The array sizes the benchmark measures, from small to large. -/
+def benchSizes : List Nat := [1000, 10000, 100000, 1000000]
+
+/-- The tree depths the benchmark measures: a depth-`k` tree has `2^k` leaves, so
+the spine the aliased update rebuilds has `k` cells. -/
+def benchDepths : List Nat := [8, 12, 16, 20]
+
+/-- The updates one timed measurement of the array benchmark runs. -/
+def arrayOps : Nat := 100
+
+/-- The timed measurements the array benchmark averages per row and shape. -/
+def arrayReps : Nat := 5
+
+/-- The updates one timed measurement of the tree benchmark runs. More than the
+array's, because the tree's two shapes differ by the allocation of one cell per
+level and a longer run is what keeps that difference above the noise of a single
+measurement. -/
+def treeOps : Nat := 200
+
+/-- The timed measurements the tree benchmark averages per row and shape. -/
+def treeReps : Nat := 11
+
+/-- The ratio of two per-operation times, with one decimal place, and `-` when the
+divisor is zero. -/
+def ratioText (aliased exclusive : Nat) : String :=
+  if exclusive == 0 then "-" else
+    let tenths := aliased * 10 / exclusive
+    s!"{tenths / 10}.{tenths % 10}"
+
+/-- One row of the array benchmark. -/
+structure ArrayBenchRow where
+  /-- The array's size. -/
+  size : Nat
+  /-- Nanoseconds per update on an array the caller alone refers to. -/
+  exclusiveNanos : Nat
+  /-- Nanoseconds per update on an array with a live second reference. -/
+  aliasedNanos : Nat
+  /-- The difference of the two, which is what the second reference costs. -/
+  extraNanos : Nat
+  /-- Whether the untimed exclusive probe's update kept the buffer's address. -/
+  inPlace : Bool
+  /-- Whether the untimed aliased probe's update moved the buffer. -/
+  copied : Bool
+  /-- A sum over the addresses and values the timed updates read, so that none of
+  them is eliminated. -/
+  checksum : Nat
+
+/-- The updates of one exclusive array measurement, carried out by a recursive
+call that takes the array as a *parameter*: each call receives the only reference
+to it, so each update writes the buffer in place. A `for` loop would hold the
+array in the closure the loop body is, which is a second reference, and every
+update would copy the buffer instead — the shape this benchmark is about must not
+be an artifact of the loop it is measured in. The address of each result and one
+of its slots are folded into the checksum. -/
+def exclusiveArrayUpdates (n seed round : Nat) : Nat → Array UInt64 → Nat →
+    IO (Array UInt64 × Nat)
+  | 0, a, checksum => return (a, checksum)
+  | ops + 1, a, checksum => do
+    let a' := arrSet a (ops &&& 7) (seed + round + ops).toUInt64
+    let here ← addressIO a'
+    exclusiveArrayUpdates n seed round ops a' (checksum + here.toNat + a'[0]!.toNat)
+
+/-- The timed updates of the exclusive array shape. -/
+def timeExclusiveArray (n seed round : Nat) : IO (Nat × Nat) := do
+  let a ← freshWords (seed + round) n
+  let t0 ← IO.monoNanosNow
+  let (a', checksum) ← exclusiveArrayUpdates n seed round arrayOps a 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, checksum + a'[0]!.toNat + (address a').toNat)
+
+/-- The updates of one aliased array measurement: as the exclusive shape, with a
+live second reference (`alias`) to the array held across the update, so that each
+one replaces the buffer with a copy. The alias is read after the update and through
+`addressIO`, for the reason the tree loops give: the read is what makes the binding
+live while the update runs, and an `IO` action is what keeps it from being
+scheduled before the update. -/
+def aliasedArrayUpdates (n seed round : Nat) : Nat → Array UInt64 → Nat →
+    IO (Array UInt64 × Nat)
+  | 0, a, checksum => return (a, checksum)
+  | ops + 1, a, checksum => do
+    let alias := a
+    let a' := arrSet a (ops &&& 7) (seed + round + ops).toUInt64
+    let here ← addressIO alias
+    aliasedArrayUpdates n seed round ops a' (checksum + here.toNat + alias[0]!.toNat)
+
+/-- The timed updates of the aliased array shape. -/
+def timeAliasedArray (n seed round : Nat) : IO (Nat × Nat) := do
+  let a ← freshWords (seed + round) n
+  let t0 ← IO.monoNanosNow
+  let (a', checksum) ← aliasedArrayUpdates n seed round arrayOps a 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, checksum + a'[0]!.toNat + (address a').toNat)
+
+/-- One row of the array benchmark: an untimed probe of each shape, which is where
+the address relation comes from, then the two timed runs. -/
+def benchArrayRow (n seed : Nat) : IO ArrayBenchRow := do
+  let probe ← freshWords (seed + 1) n
+  let probeBefore ← addressIO probe
+  let probeAfter ← addressIO (arrSet probe (n / 2) seed.toUInt64)
+  let aliasedProbe ← freshWords (seed + 2) n
+  let keptProbe := aliasedProbe
+  let aliasedBefore ← addressIO aliasedProbe
+  let aliasedAfter ← addressIO (arrSet aliasedProbe (n / 2) seed.toUInt64)
+  let keptProbeValue := keptProbe[n / 2]!
+  let mut exclusiveTotal := 0
+  let mut aliasedTotal := 0
+  let mut checksum := keptProbeValue.toNat
+  for r in [0:arrayReps] do
+    let (exclusive, exclusiveSum) ← timeExclusiveArray n seed r
+    exclusiveTotal := exclusiveTotal + exclusive
+    checksum := checksum + exclusiveSum
+    let (aliased, aliasedSum) ← timeAliasedArray n seed r
+    aliasedTotal := aliasedTotal + aliased
+    checksum := checksum + aliasedSum
+  let rounds := arrayReps * arrayOps
+  let exclusiveNanos := exclusiveTotal / rounds
+  let aliasedNanos := aliasedTotal / rounds
+  return { size := n, exclusiveNanos, aliasedNanos, extraNanos := aliasedNanos - exclusiveNanos,
+           inPlace := probeBefore == probeAfter, copied := aliasedBefore != aliasedAfter,
+           checksum }
+
+/-- Print one row of the array benchmark. -/
+def reportArrayBench (row : ArrayBenchRow) : IO Unit :=
+  IO.println s!"bench-array: n={row.size} exclusive={row.exclusiveNanos} ns/op aliased={row.aliasedNanos} ns/op extra={row.extraNanos} ns/op ratio={ratioText row.aliasedNanos row.exclusiveNanos} in-place={row.inPlace} copies={row.copied} checksum={row.checksum}"
+
+/-- One row of the tree benchmark. -/
+structure TreeBenchRow where
+  /-- The tree's depth, and so the number of cells on the spine. -/
+  depth : Nat
+  /-- Nanoseconds per update on a tree the caller alone refers to. -/
+  exclusiveNanos : Nat
+  /-- Nanoseconds per update on a tree with a live second reference. -/
+  aliasedNanos : Nat
+  /-- The difference of the two: what rebuilding the cells on the path costs. -/
+  extraNanos : Nat
+  /-- Whether the untimed exclusive probe's update kept the root's address. -/
+  inPlace : Bool
+  /-- Whether the untimed aliased probe's update moved the root. -/
+  copied : Bool
+  /-- A sum over the addresses and values the timed updates read, so that none of
+  them is eliminated. -/
+  checksum : Nat
+
+/-- The updates of one exclusive tree measurement, carried out by a recursive call
+that takes the tree as a *parameter*, for the reason the array loops do: a `for`
+loop would hold it in a closure, which is a second reference, and each update would
+then rebuild the spine instead of reusing it. -/
+def exclusiveTreeUpdates (k : Nat) (seed round : UInt64) : Nat →
+    Layout5.State (structTree k) → Nat → IO (Layout5.State (structTree k) × Nat)
+  | 0, t, checksum => return (t, checksum)
+  | ops + 1, t, checksum => do
+    let t' := (treeSet k (seed + round + ops.toUInt64) t).1
+    let here ← addressIO t'
+    exclusiveTreeUpdates k seed round ops t' (checksum + here.toNat)
+
+/-- The timed updates of the exclusive tree shape. -/
+def timeExclusiveTree (k : Nat) (seed round : UInt64) : IO (Nat × Nat) := do
+  let t := treeFilled k (seed + round)
+  let t0 ← IO.monoNanosNow
+  let (t', checksum) ← exclusiveTreeUpdates k seed round treeOps t 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, checksum + (address t').toNat)
+
+/-- The updates of one aliased tree measurement: as the exclusive shape, with a
+live second reference (`alias`) to the tree held across the update, so that each
+one rebuilds every cell on the path.
+
+The alias is read *after* the update and through `addressIO`, and both matter: the
+read is what makes the binding live while the update runs, and it is an `IO` action
+because a pure reading of the alias could be scheduled before the update, letting
+the alias die first — which would show the tree as exclusively owned and hide the
+copy the shape is about. -/
+def aliasedTreeUpdates (k : Nat) (seed round : UInt64) : Nat →
+    Layout5.State (structTree k) → Nat → IO (Layout5.State (structTree k) × Nat)
+  | 0, t, checksum => return (t, checksum)
+  | ops + 1, t, checksum => do
+    let alias := t
+    let t' := (treeSet k (seed + round + ops.toUInt64) t).1
+    let here ← addressIO alias
+    aliasedTreeUpdates k seed round ops t' (checksum + here.toNat)
+
+/-- The timed updates of the aliased tree shape. -/
+def timeAliasedTree (k : Nat) (seed round : UInt64) : IO (Nat × Nat) := do
+  let t := treeFilled k (seed + round)
+  let t0 ← IO.monoNanosNow
+  let (t', checksum) ← aliasedTreeUpdates k seed round treeOps t 0
+  let t1 ← IO.monoNanosNow
+  return (t1 - t0, checksum + (address t').toNat)
+
+/-- One row of the tree benchmark: an untimed probe of each shape, then the two
+timed runs. -/
+def benchTreeRow (k : Nat) (seed : UInt64) : IO TreeBenchRow := do
+  let probe := treeFilled k (seed + 1)
+  let probeBefore ← addressIO probe
+  let probeAfter ← addressIO (treeSet k (seed + 7) probe).1
+  let aliasedProbe := treeFilled k (seed + 2)
+  let keptProbe := aliasedProbe
+  let aliasedBefore ← addressIO aliasedProbe
+  let aliasedAfter ← addressIO (treeSet k (seed + 7) aliasedProbe).1
+  let mut checksum := 0
+  match SealedStateVar.read? (treePath k) keptProbe with
+  | some (.uint v) => checksum := checksum + v.toNat
+  | _ => pure ()
+  let mut exclusiveTotal := 0
+  let mut aliasedTotal := 0
+  for r in [0:treeReps] do
+    let (exclusive, exclusiveSum) ← timeExclusiveTree k seed r.toUInt64
+    exclusiveTotal := exclusiveTotal + exclusive
+    checksum := checksum + exclusiveSum
+    let (aliased, aliasedSum) ← timeAliasedTree k seed r.toUInt64
+    aliasedTotal := aliasedTotal + aliased
+    checksum := checksum + aliasedSum
+  let rounds := treeReps * treeOps
+  let exclusiveNanos := exclusiveTotal / rounds
+  let aliasedNanos := aliasedTotal / rounds
+  return { depth := k, exclusiveNanos, aliasedNanos, extraNanos := aliasedNanos - exclusiveNanos,
+           inPlace := probeBefore == probeAfter, copied := aliasedBefore != aliasedAfter,
+           checksum }
+
+/-- Print one row of the tree benchmark. -/
+def reportTreeBench (row : TreeBenchRow) : IO Unit :=
+  IO.println s!"bench-tree: depth={row.depth} leaves={2 ^ row.depth} exclusive={row.exclusiveNanos} ns/op aliased={row.aliasedNanos} ns/op extra={row.extraNanos} ns/op ratio={ratioText row.aliasedNanos row.exclusiveNanos} in-place={row.inPlace} copies={row.copied} checksum={row.checksum}"
+
+/-- The benchmark: the two shapes of the array update at each size, then the two
+shapes of the tree update at each depth. The numbers are printed rather than
+asserted, and the run reports what it measured rather than what it must find. -/
+def runBenchmark (seed : Nat) : IO Unit := do
+  IO.println "bench: the array update, exclusive (the caller alone refers to the array) against aliased (a live second reference)"
+  for n in benchSizes do
+    reportArrayBench (← benchArrayRow n seed)
+  IO.println "bench: the tree update, exclusive against aliased; the walk is in both columns, so the extra is the allocation of the cells the update rebuilt"
+  for k in benchDepths do
+    reportTreeBench (← benchTreeRow k seed.toUInt64)
+  IO.println "bench: per-operation times are means over arrayOps (treeOps) updates and arrayReps (treeReps) measurements; a measurement of this program on this toolchain, not a complexity theorem"
+
 /-! ## The entry point -/
 
 
@@ -982,11 +1526,22 @@ def runAll : IO UInt32 := do
     ("layout5-checked-shared", ← checkedLayout5AliasedCase),
     ("layout5-checked-nest", ← checkedLayout5NestCase),
     ("layout5-checked-nest-shared", ← checkedLayout5NestAliasedCase),
-    ("sealed-checked-unique", ← checkedSealedUniqueCase)
+    ("sealed-checked-unique", ← checkedSealedUniqueCase),
+    ("updates-arr-unique", ← updatesArrayUniqueCase "updates-arr-unique" seed),
+    ("updates-arr-shared", ← updatesArraySharedCase "updates-arr-shared" seed),
+    ("updates-nested-unique", ← updatesNestedUniqueCase "updates-nested-unique" seed),
+    ("updates-nested-shared", ← updatesNestedSharedCase "updates-nested-shared" seed),
+    ("updates-tree-unique", ← updatesTreeUniqueCase "updates-tree-unique" seed),
+    ("updates-tree-shared", ← updatesTreeSharedCase "updates-tree-shared" seed),
+    ("updates-arr-checked-unique", ← updatesArrayCheckedUniqueCase),
+    ("updates-nested-checked-unique", ← updatesNestedCheckedUniqueCase),
+    ("updates-tree-checked-unique", ← updatesTreeCheckedUniqueCase)
   ]
   let mut status : UInt32 := 0
   for (name, failures) in cases do
     status := max status (← report name failures)
+  -- The benchmark prints its measurements; it reports no failures of its own.
+  runBenchmark seed
   return status
 
 /-- The child's run of one case: report the switch, then the case. -/
@@ -1007,6 +1562,12 @@ def runChild (command : String) : IO UInt32 := do
   | "layout5-nest" => report "layout5-nest" (← layout5NestCase "layout5-nest" seed)
   | "layout5-nest-shared" => report "layout5-nest-shared" (← layout5NestAliasedCase "layout5-nest-shared" seed)
   | "sealed-unique" => report "sealed-unique" (← sealedUniqueCase "sealed-unique" seed)
+  | "updates-arr-unique" => report "updates-arr-unique" (← updatesArrayUniqueCase "updates-arr-unique" seed)
+  | "updates-arr-shared" => report "updates-arr-shared" (← updatesArraySharedCase "updates-arr-shared" seed)
+  | "updates-nested-unique" => report "updates-nested-unique" (← updatesNestedUniqueCase "updates-nested-unique" seed)
+  | "updates-nested-shared" => report "updates-nested-shared" (← updatesNestedSharedCase "updates-nested-shared" seed)
+  | "updates-tree-unique" => report "updates-tree-unique" (← updatesTreeUniqueCase "updates-tree-unique" seed)
+  | "updates-tree-shared" => report "updates-tree-shared" (← updatesTreeSharedCase "updates-tree-shared" seed)
   | _ => do
     IO.eprintln s!"inplace: unknown command {command}"
     return 2
@@ -1016,5 +1577,5 @@ def main (args : List String) : IO UInt32 := do
   | [] => runAll
   | [command] => runChild command
   | _ => do
-    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure|layout5-unique|layout5-shared|layout5-nest|layout5-nest-shared|sealed-unique]"
+    IO.eprintln "usage: inplace [unique|shared|counter-unique|counter-shared|counter-shared-bump|structured-unique|structured-closure|layout5-unique|layout5-shared|layout5-nest|layout5-nest-shared|sealed-unique|updates-arr-unique|updates-arr-shared|updates-nested-unique|updates-nested-shared|updates-tree-unique|updates-tree-shared]"
     return 2

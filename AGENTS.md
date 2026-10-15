@@ -255,6 +255,21 @@ The compile-time checks live in the check library:
   location beside the shared store copying at the *same* heap and term, each of the
   target's evaluation contexts exercised with a negative control, the refusal of the
   mis-tagged multiplicity pair, and asserted `#print axioms` lists.
+- `ScidoniaTest/Updates.lean` checks the updates of `ScidoniaExamples.Updates` from
+  outside, and the instrument it uses differs per example. The flat array's
+  concrete values are `#guard`s — the kernel cannot reduce `Array`'s primitives —
+  and its two theorems are the primitive's own written-index and frame facts; the
+  nested array's readings and the write's report are `#guard`s, and its
+  read-after-write, snapshot and two frames (a sibling slot of the same inner
+  array, and another inner array) apply the sealed class's theorems with the
+  write's equation as the hypothesis the evaluation establishes; and the struct
+  tree's write, reads, snapshot and frame are closed theorems proved by reduction,
+  because a tree is pairs all the way down — the checks include the library
+  builder's numbering at depth three and a write one level deeper. Its axiom
+  checks print the list of every theorem stated there: the library's
+  path-disjointness, path-leaf and sibling-value facts rest on nothing, the two
+  array theorems and the tree's write equations on `propext`, and the
+  read-after-write, snapshot and frame statements on `propext` and `Quot.sound`.
 
 A program names its object once, on the first primitive that is a read or a
 write, and the rest of the program is typed from it: the interface has more
@@ -308,6 +323,28 @@ and does not show. The sealed write is checked the same way:
 `Array (UInt64 × UInt64)` instance and asserts the array's buffer and the struct
 at the written index are unchanged, and `sealed-checked-unique` is that write in
 a child with the check armed, which must exit zero.
+
+The updates of `ScidoniaExamples.Updates` are checked the same way, and they are
+the cases that put the address measurement on each of the example library's three
+updates: `updates-arr-unique` asserts the flat array's buffer keeps its address
+and `updates-arr-shared` that a live second reference makes it change;
+`updates-nested-unique` asserts that the outer buffer and the focused inner array
+both keep theirs, and `updates-nested-shared` that the aliased inner array's
+changes while the outer buffer's does not; and `updates-tree-unique` asserts that
+every cell on the spine of the written path keeps its address, while
+`updates-tree-shared` holds a live reference to the tree and asserts they all
+change — one rebuilt cell per level, which is what the copy of an aliased update
+allocates. Their `updates-*-checked-unique` children run the three unique updates
+with `SCIDONIA_CHECK_INPLACE=1` and must exit zero; the flat array's update is
+`Array.set!` and the tree has no array, so neither goes through a library check,
+and for those two the child's evidence is that the case runs to completion with
+the check armed while the address assertions are what show the update was in
+place — the nested child is the one whose write runs the library's two checks.
+`bench-array` and `bench-tree` print, rather than assert, the measured nanoseconds
+per update of the exclusive and the aliased shape of each update at increasing
+array sizes and tree depths, with the address relation an untimed probe of each
+shape observed and a checksum over what the updates read; the benchmark section
+of the file states what those numbers do and do not show.
 
 `ScidoniaTest/Structured.lean` checks `Scidonia.FracPerm.Structured` from
 outside, in the same library and the same style. Its behavioural checks are
@@ -675,6 +712,23 @@ variant would have to convert between the two representations on writes; whether
 that costs a copy has not been implemented or measured here. Arrays, nested
 arrays, pairs and the observation universe's leaves are usable, because `State`
 denotes them definitionally.
+
+A nested pair is what a struct tree of depth `k` is, so `ScidoniaExamples.Updates`
+seals one without a user-declared structure: `structTree k` is `k` levels of
+`Layout.struct` over `Layout.leaf .uint`, `State (structTree k)` is a nested pair
+with `2^k` leaves, and the instance's `rep` is `rfl` because that type *is* the
+layout's state type. The library's write at a depth-`k` path then costs what the
+layout's write costs, and the honest statement of it is about *allocation*, not
+about the whole operation: the traversal walks `k` struct cells either way, so it
+is O(depth) = O(log n) whether or not the tree is exclusively owned, and what the
+ownership decides is whether the recursion's reset/reuse pass rewrites each cell
+in place (O(1) allocation) or rebuilds it (O(log n) allocation). `updates-tree-unique`
+and `updates-tree-shared` are the measurements of that difference — every cell on
+the spine keeps its address in the first and changes in the second — and
+`bench-tree` is the timing beside them, which reports both columns as growing with
+the depth and their *difference* as the allocation. The example library also
+carries the flat array (`arrSet`, the `Array.set!` primitive, O(1) in place and
+O(n) on a copy) and the nested array (`nestedSet`, a two-step sealed path write).
 
 ## Writing an instance
 
@@ -1597,6 +1651,7 @@ they are defined, rather than in the appendix, so each is shown once.
 | `ScidoniaTest/Target.lean` | The target's controls — evaluated runs with controls, the owned store keeping its location beside the shared store copying at one heap and term, and asserted axiom lists |
 | `ScidoniaExamples/` | Worked examples of the fractional-permission interface, built as the `ScidoniaExamples` library |
 | `ScidoniaExamples/Structured.lean` | Worked examples of the structured interface |
+| `ScidoniaExamples/Updates.lean` | The example library of updates: a flat array, a nested array and a struct tree of depth `k` |
 | `ScidoniaInPlace/` | The `inplace` executable: run-time checks of the in-place update |
 | `Slides/` | The slide deck's sources: prose series and stepped proofs |
 | `Paper/` | The two papers: their sources and built PDFs, and the tools that keep their quotations to the library |

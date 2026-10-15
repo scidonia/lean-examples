@@ -6,6 +6,7 @@ import ScidoniaTest.Universe
 import ScidoniaTest.Slot
 import ScidoniaTest.Model5
 import ScidoniaTest.Sealed
+import ScidoniaTest.Updates
 import ScidoniaTest.Count
 import ScidoniaTest.Footprint
 import ScidoniaTest.RCHeap
