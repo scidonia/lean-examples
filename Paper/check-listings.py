@@ -262,7 +262,7 @@ def check_counts(here: Path, problems: list[str]) -> int:
 
 
 # The self-test's scratch archive: these scripts, the library gen-laws.py locates
-# its counts in, one source to quote, and two papers.  Probe.lean is the source
+# its counts in, one source to quote, and three papers.  Probe.lean is the source
 # every case quotes: a declaration on its second and third lines and a doc
 # comment on its first, so the one file gives a range that holds code, a range
 # that strips to nothing, and a range its end does not reach.  The archive is a
@@ -465,6 +465,7 @@ def scratch_cases(here: Path, problems: list[str]) -> None:
         (root / "Scidonia/Probe.lean").write_text(SELF_TEST_SOURCE,
                                                   encoding="utf-8")
         (paper / "lowering.tex").write_text("% No panels.\n", encoding="utf-8")
+        (paper / "mutation.tex").write_text("% No panels.\n", encoding="utf-8")
         (paper / "unobservable-effects.tex").write_text(SELF_TEST_COUNTED,
                                                         encoding="utf-8")
         (paper / "probe.tex").write_text(SELF_TEST_PAIRED, encoding="utf-8")

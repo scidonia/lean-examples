@@ -1,0 +1,360 @@
+% A paper skeleton: fast functional mutation via ownership.  The sealed
+% discipline, the count of one, the example updates, and the boundary of what is
+% claimed.
+%
+% Build, from this directory. Highlighting is minted's, so the build needs shell
+% escape and Pygments on PATH:
+%   python3 gen-laws.py     # the law frames and counts.tex, after a library change
+%   python3 gen-frames.py   # the frames themselves: the quoted ranges, comment-free
+%   latexmk -pdf -shell-escape mutation.tex
+% Check that every frame still quotes the library, and that counts.tex holds the
+% count the library gives:
+%   python3 check-listings.py
+%
+% pdflatex: the toolchain's lualatex cannot load its font loader, so the Unicode
+% in the quoted Lean is mapped to font commands by newunicodechar below. A
+% character in a quoted range with no mapping fails the build, which is the
+% signal to add one.
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{newunicodechar}
+% The mappings the quoted ranges and the prose need, one character per line: a
+% character in a quoted range with no mapping fails the build, which is the
+% signal to add one.
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{σ}{\ensuremath{\sigma}}
+\newunicodechar{ρ}{\ensuremath{\rho}}
+\newunicodechar{Γ}{\ensuremath{\Gamma}}
+\newunicodechar{→}{\ensuremath{\to}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{∉}{\ensuremath{\notin}}
+\newunicodechar{∧}{\ensuremath{\wedge}}
+\newunicodechar{∨}{\ensuremath{\vee}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{minted}
+% gruvbox-light: the most hues of the styles that stay legible on white paper.
+\usemintedstyle{gruvbox-light}
+\setminted{fontsize=\footnotesize,frame=single,rulecolor=\color{black!30},
+           framesep=4pt,breaklines=true,baselinestretch=1.0}
+% A quoted frame is written \codeframe[linerange=lo-hi]{../path}: a line range of
+% a library file. The frame itself is generated -- the range with its comments
+% removed, since a frame is code and not documentation -- into frames/<key>.lean
+% by gen-frames.py, and frames/lookup.tex maps the range to that file. A call
+% site therefore names the source it quotes and not the frame, and a range with
+% no generated frame is a build error rather than a silently missing box. A
+% frame is one unbreakable box, so a frame too tall for the space left on a page
+% moves to the next one instead of being split across two.
+\input{frames/lookup.tex}
+% counts.tex holds the numbers the papers in this directory state about the
+% library and about their own panels. This paper's panel count is generated under
+% its own name and read below under \panelcount, so the prose says "panel" and
+% the numeral comes from the file; check-listings.py fails when that file is
+% stale. The other papers' counts keep their own names.
+\input{counts.tex}
+\let\panelcount\mutationpanelcount
+\def\codeframe[linerange=#1-#2]#3{%
+  \edef\cfkey{cf@#3@#1-#2}%
+  \ifcsname\cfkey\endcsname\else
+    \PackageError{paper}{no generated frame for #3:#1-#2}%
+      {Run python3 gen-frames.py in Paper/.}\fi
+  \edef\cffile{frames/\csname\cfkey\endcsname.lean}%
+  \par\smallskip\noindent
+  \begin{minipage}{\linewidth}%
+    \inputminted{lean}{\cffile}%
+  \end{minipage}\par}
+% A path is set with \path so that it may break at its slashes.
+\usepackage{url}\urlstyle{same}
+% A body frame is labelled with the file and lines it quotes:
+\newcommand{\sourceline}[3]{\par\smallskip\noindent\textbf{#1}\hfill
+  {\footnotesize\itshape\path{#2}, lines #3}\par\nobreak}
+% Two sections of this draft are prose rather than quotations.  The marker says
+% what belongs in the space and keeps the space visible in the built paper.
+\newcommand{\stub}[1]{%
+  \par\medskip\noindent
+  \fcolorbox{black!40}{black!4}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule}{#1}}%
+  \par\medskip}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!55!black]{hyperref}
+\usepackage{cleveref}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{Fast functional mutation via ownership\\[2pt]
+\large The sealed discipline, the count of one, the examples, and the boundary}
+\author{Gavin Mendel-Gleason\\\small Scidonia}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\section{The problem}\label{sec:problem}
+
+\stub{Placeholder. The problem is stated here, in prose. This draft marks the
+space it takes and does not fill it; the case for the solution starts at
+\cref{sec:sealed}.}
+
+\section{The solution}\label{sec:solution}
+
+\stub{Placeholder. The solution is stated here, in prose, and the rest of the
+draft is the case for it: the discipline that establishes the condition
+(\cref{sec:sealed}), the count it produces in the model (\cref{sec:count}), the
+updates that work (\cref{sec:examples}), and what is not claimed
+(\cref{sec:boundary}).}
+
+\section{The sealed approach in Lean}\label{sec:sealed}
+
+A write needs exclusive access to the object it writes, and reads may be shared;
+the discipline that arranges this lives in the types and the proofs of the
+program, which the compiler erases.
+Its last step is a class whose instances supply almost nothing: a state type joins
+by naming the layout it is and proving that it is that layout's state type. The
+library defines the read, the write and the encoding of a read result from those
+two fields, so an instance author cannot choose any of the three, and a client of
+a sealed type has no operation that could hand back a mutable part of the state.
+
+\begin{definition}[sealed state variable]
+An instance of \code{SealedStateVar} supplies a layout and an equality, and
+nothing else. Its read is the layout's read, its write is the layout's write, and
+its encoding of a read result is the library's encoding.
+\end{definition}
+
+%!check: class SealedStateVar (σ : Type) where
+\sourceline{The sealed class}{Scidonia/FracPerm/StateVar/Sealed.lean}{55--59}
+\codeframe[linerange=55-59]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+
+The state types that join the class are the shapes a layout denotes: a leaf of a
+closed universe of observations, a binary product of two layouts --- so
+arbitrarily many fields by nesting --- or an array of states.
+
+%!check: abbrev State : Layout → Type
+\sourceline{The shape of a state}{Scidonia/FracPerm/StateVar/Layout5.lean}{122--136}
+\codeframe[linerange=122-136]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+A read is a path whose end is a leaf of the observation universe. The proof field
+is what makes a read name a leaf and nothing else: a path that ends at a
+\code{.struct} or an \code{.arr} has no leaf description, so a whole-array read
+cannot be written down.
+
+%!check: structure ObsPath (d : Layout) where
+\sourceline{The read path}{Scidonia/FracPerm/StateVar/Layout5.lean}{169--175}
+\codeframe[linerange=169-175]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+The write is one function at a path. It decides first whether the path addresses
+anything, rebuilds each struct cell on the path from its updated component, and,
+at an array element, takes the element out, checks it, updates it and puts it
+back: taking it out is what keeps the array from holding the element while the
+update below it runs.
+
+%!check: def setLeaf {d : Layout} (p : ObsPath d) (x : ObsEl p.obs) (s : State d) :
+\sourceline{The path-indexed write}{Scidonia/FracPerm/StateVar/Layout5.lean}{778--782}
+\codeframe[linerange=778-782]{../Scidonia/FracPerm/StateVar/Layout5.lean}
+
+The sealed surface is that write with the state transported into its layout and
+back, reporting what the layout's write reported.
+
+%!check: def setLeaf {σ : Type} [SealedStateVar σ]
+\sourceline{The library's write of a sealed state}{Scidonia/FracPerm/StateVar/Sealed.lean}{85--89}
+\codeframe[linerange=85-89]{../Scidonia/FracPerm/StateVar/Sealed.lean}
+
+Every Lean quotation in this paper is a line range of the library rather than a
+transcription: the \panelcount{} panels here are generated from the source and
+re-checked against it, so a range that has drifted from the declaration it quotes
+fails the check rather than misquoting it silently.
+
+\section{Ownership semantics leads to reference count one}\label{sec:count}
+
+The discipline is a statement about authority: who may write, and who may hold a
+read. The count that decides which of the two implementations of a write runs is a
+count of references, and the bridge between the two is a theorem of the library's
+counted model. A store typed at an environment that counts its subject once, at a
+configuration in the correspondence, is owned by the account and its subject's
+reference is counted once: the typing's count of a \emph{name} becomes the
+account's count of a \emph{reference}.
+
+%!check: theorem bridge {ρ : TEnv} {m : Multi} {Γ : Occs} {y : Var} {r : Ref} {i : Nat} {v : Expr}
+\sourceline{The bridge}{Scidonia/RC/Correspondence.lean}{305--307}
+\codeframe[linerange=305-307]{../Scidonia/RC/Correspondence.lean}
+
+At that count, the update is destructive: the written slot keeps its location and
+holds what was written, and the cell the store replaced is the cell it wrote. It
+is the branch the update takes at a count of one; whether the runtime's own
+exclusivity test agrees at that count is the hypothesis \cref{sec:boundary}
+names.
+
+%!check: theorem store_owned_is_destructive {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi}
+\sourceline{Count one: the store keeps the location}{Scidonia/RC/Ownership.lean}{559--564}
+\codeframe[linerange=559-564]{../Scidonia/RC/Ownership.lean}
+
+At any other count it copies, and the theorem states the copy and not only the
+loss: the written slots land at a location the heap did not list, the old cell
+keeps its slots, and its count drops by one.
+
+%!check: theorem store_shared_copies {c : CHeap} {hs : List Ref} {ρ : TEnv} {m : Multi} {y : Var}
+\sourceline{Any other count: the store copies}{Scidonia/RC/Ownership.lean}{600--606}
+\codeframe[linerange=600-606]{../Scidonia/RC/Ownership.lean}
+
+So the chain in the model is: a sealed surface that cannot hand out an alias, a
+discipline that reaches the write with the object unshared, a bridge that turns
+the account's count of the subject's name into one of the subject's reference, and
+the destructive branch at that count. \Cref{sec:boundary} says what that chain
+does and does not say about the machine.
+
+\section{It actually works: the examples}\label{sec:examples}
+
+Three updates ship with the library, and each is an instance of the same
+discipline rather than an arrangement of its own. The first is the flat array: the
+primitive's own write, with no discipline around it; the updates below reduce to
+it. An index past the end is a caller error rather than
+a no-op --- compiled, \code{Array.set!} panics on it --- and the examples write
+only to slots the array has.
+
+%!check: def arrSet (a : Array UInt64) (i : Nat) (v : UInt64) : Array UInt64 :=
+\sourceline{The flat array}{ScidoniaExamples/Updates.lean}{76--77}
+\codeframe[linerange=76-77]{../ScidoniaExamples/Updates.lean}
+
+The second is a nested array. The type is the layout's state type definitionally,
+so the instance's \code{rep} is \code{rfl}, and the cast a sealed write performs
+erases; the path is two indices, and the take-out, the checks and the put-back at
+both levels are the library's.
+
+%!check: def nestedSet (a : Array (Array UInt64)) (i j : Nat) (v : UInt64) :
+\sourceline{The nested array}{ScidoniaExamples/Updates.lean}{98--100}
+\codeframe[linerange=98-100]{../ScidoniaExamples/Updates.lean}
+
+The third is a family of shapes rather than one shape: the full binary tree of
+structs at depth $k$, whose layout is a recursion and whose state type is a nested
+pair. A write at a leaf walks $k$ struct cells and rewrites one word.
+
+%!check: def structTree : Nat → Layout5.Layout
+\sourceline{The struct tree}{ScidoniaExamples/Updates.lean}{121--123}
+\codeframe[linerange=121-123]{../ScidoniaExamples/Updates.lean}
+
+%!check: def treeSet (k : Nat) (v : UInt64) (t : Layout5.State (structTree k)) :
+\sourceline{A write at a leaf}{ScidoniaExamples/Updates.lean}{194--196}
+\codeframe[linerange=194-196]{../ScidoniaExamples/Updates.lean}
+
+Compiled, the array's two shapes differ by the whole buffer, and the harness
+measures both in one program. The exclusive shape carries the array as a recursive
+call's parameter, so the only reference the update sees is the callee's; the
+aliased shape holds a live second reference across each update, so each one
+replaces the buffer. Before the timed runs, each shape is probed once and the
+address the update kept or moved is reported beside the times.
+
+%!check: def runBenchmark (seed : Nat) : IO Unit := do
+\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1467--1474}
+\codeframe[linerange=1467-1474]{../ScidoniaInPlace/Main.lean}
+
+\textbf{Measured.} The two tables below are one run of \code{nix develop -c lake
+exe inplace} on the machine used here. The times are means over $100$ updates and
+$5$ timed measurements per row for the array, and over $200$ updates and $11$
+measurements per row for the tree; each row's untimed probes reported what the
+columns claim, the exclusive shape keeping the buffer's address and the aliased
+shape moving it. Two runs of the harness on this machine differ in the
+per-operation times --- most of all in the tree's extra column, which is a
+difference of two larger numbers --- so these numerals are one run's, and they are
+read for the shape of the columns rather than for the last digit.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{The array update, measured: nanoseconds per update at four sizes. The
+times are a measurement of this program on this toolchain, not a theorem, and the
+ratio is the ratio of the two measured means.}
+\label{tab:bench-array}
+\begin{tabular}{rrrr}
+\toprule
+$n$ & exclusive (ns/op) & aliased (ns/op) & ratio \\
+\midrule
+$1\,000$ & 30 & 1\,227 & 40.9 \\
+$10\,000$ & 30 & 15\,285 & 509.5 \\
+$100\,000$ & 41 & 218\,500 & 5\,329.2 \\
+$1\,000\,000$ & 41 & 3\,601\,979 & 87\,853.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\small
+\caption{The tree update, measured: nanoseconds per update at four depths, from
+the same run and over the same means as \cref{tab:bench-array}. The walk is in
+both columns, so the extra column --- the difference of the two --- is the
+allocation of the one cell per level the update rebuilds. Measured, not a
+theorem.}
+\label{tab:bench-tree}
+\begin{tabular}{rrrrr}
+\toprule
+depth & leaves & exclusive (ns/op) & aliased (ns/op) & extra (ns/op) \\
+\midrule
+8 & 256 & 589 & 668 & 79 \\
+12 & 4\,096 & 1\,194 & 1\,246 & 52 \\
+16 & 65\,536 & 2\,141 & 2\,197 & 56 \\
+20 & 1\,048\,576 & 2\,743 & 3\,003 & 260 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The array's aliased column is the copy: it grows with the buffer, from about a
+microsecond per update at a thousand elements to $3.6$ milliseconds at a million,
+while the exclusive column is flat across the four sizes, at tens of nanoseconds,
+and the last row's ratio is above eighty thousand.
+
+The tree's two columns both grow with the depth, because each update walks the
+spine either way, and the extra column isolates the allocation: tens to a few
+hundred nanoseconds per update. Neither column is a constant-time operation, and
+nothing in these four rows separates the walk from the allocation by a theorem;
+that separation is in the model, as the allocation of the spine, and
+\cref{sec:boundary} states it as the scoped claim it is.
+
+\section{The honest boundary}\label{sec:boundary}
+
+Three seams separate what is proved here from what the machine does.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+\item \emph{The count is the model's.} \Cref{sec:count} proves that a store at
+the model's count of one keeps its location, and that any other count copies. The
+proof is about the counted heap the library defines and the account the discipline
+produces; it is not a statement about Lean's object graph.
+\item \emph{The model's count is not the machine's test.} For a compiled write to
+be destructive, the runtime's own exclusivity test must accept the object, and the
+step from a model count of one to that test is a hypothesis the library names
+\code{RuntimeAgrees}. It is stated rather than assumed silently, and no instance
+of it is constructed, here or in the checks that accompany the library.
+
+%!check: def RuntimeAgrees (h : Presentation) (handles : List Ref) (r : Ref) (rc : Int32) : Prop :=
+\sourceline{The runtime agreement hypothesis}{Scidonia/FracPerm/StateVar/Footprint.lean}{529--530}
+\codeframe[linerange=529-530]{../Scidonia/FracPerm/StateVar/Footprint.lean}
+
+\item \emph{In-place update is measured.} The evidence that a compiled write
+updates in place is that an executable observed the address the write kept, in
+the cases the harness names and in the probes behind \cref{tab:bench-array}. That
+is an observation of named cases on one toolchain, and no theorem here certifies
+it.
+\end{enumerate}
+
+The complexity claim is scoped the same way. For the tree, an update walks
+\code{depth} struct cells and rewrites one word in both columns, so the traversal
+is $O(\code{depth})$ however the write behaves; what ownership decides is the
+\emph{allocation} of the spine --- $O(1)$ cells rebuilt when the tree is
+exclusively owned, $O(\log n)$ when a live reference makes it shared. The result
+is not an $O(1)$ deep-tree operation.
+
+One limit of the surface belongs beside these, because it bounds what a reader may
+conclude from \cref{sec:sealed}: a type joins the sealed class only when it is
+definitionally the layout's state type, since the class's \code{rep} is an
+equality and not an isomorphism. A user-declared structure would need the
+isomorphism instead, and what a conversion between two representations costs has
+neither been implemented nor measured.
+
+\end{document}

@@ -25,10 +25,12 @@ import framescan
 
 ROOT = Path(__file__).resolve().parent.parent
 PAPER = Path(__file__).resolve().parent
-# The two papers in this directory.  Each states its own panel count, so the
-# counts below are computed per source rather than over both at once.
+# The papers in this directory.  Each counted paper states its own panel count,
+# so the counts below are computed per source rather than over the directory at
+# once.
 COMPANION = "unobservable-effects.tex"
 LOWERING = "lowering.tex"
+MUTATION = "mutation.tex"
 KINDS = "inductive|structure|class|abbrev|def|theorem|lemma"
 ATTR = r"(?:@\[[^\]]*\]\s*)?"
 OPEN, CLOSE = "([{", ")]}"
@@ -260,9 +262,9 @@ def panel_counts(tex_name):
     the rule the checker uses, so a line that carries two calls quotes two panels
     and is counted as two: the number the prose states is the panels, not the
     lines that happen to hold them.  The body's are the ones above `\\appendix`,
-    and the appendix's are the ones below it. Each paper's count is its own: two
-    papers quote the library here, and a count that mixed them would be a numeral
-    neither paper could state.
+    and the appendix's are the ones below it. Each paper's count is its own:
+    three papers quote the library here, and a count that mixed them would be a
+    numeral no one of them could state.
     """
     text = (PAPER / tex_name).read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -281,6 +283,7 @@ def counts():
     """The numbers the papers' prose states, in the order the file writes them."""
     body, appendix = panel_counts(COMPANION)
     lowering, _ = panel_counts(LOWERING)
+    mutation, _ = panel_counts(MUTATION)
     return [
         ("theoremcount", "public theorems under Scidonia/", published_theorems()),
         ("vendoredtheoremcount", "of them vendored from Lean's own model",
@@ -291,6 +294,7 @@ def counts():
         ("refcountframecount", "frames of the reference-count section",
          frames_from(REFCOUNT)),
         ("loweringpanelcount", "panels the lowering paper quotes", lowering),
+        ("mutationpanelcount", "panels the mutation paper quotes", mutation),
     ]
 
 
