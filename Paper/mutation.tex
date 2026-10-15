@@ -257,8 +257,8 @@ replaces the buffer. Before the timed runs, each shape is probed once and the
 address the update kept or moved is reported beside the times.
 
 %!check: def runBenchmark (seed : Nat) : IO Unit := do
-\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1814--1825}
-\codeframe[linerange=1814-1825]{../ScidoniaInPlace/Main.lean}
+\sourceline{The benchmark}{ScidoniaInPlace/Main.lean}{1816--1827}
+\codeframe[linerange=1816-1827]{../ScidoniaInPlace/Main.lean}
 
 \textbf{Measured.} The two tables below are one run of \code{nix develop -c lake
 exe inplace} on the machine used here. The times are means over $100$ updates and
@@ -364,8 +364,8 @@ to both at every step and reads it after that step's writes, which is what makes
 the step's first write meet a buffer another name reaches:
 
 %!check: def unionStepsAliased : Nat → List (Nat × Nat) → Array UInt64 → Array UInt64 →
-\sourceline{The undisciplined shape}{ScidoniaInPlace/Main.lean}{1298--1310}
-\codeframe[linerange=1298-1310]{../ScidoniaInPlace/Main.lean}
+\sourceline{The undisciplined shape}{ScidoniaInPlace/Main.lean}{1300--1312}
+\codeframe[linerange=1300-1312]{../ScidoniaInPlace/Main.lean}
 
 The two compute the same partition --- the semantics does not change, only the cost
 --- and that is checked rather than assumed: \code{ScidoniaTest/UnionFind}

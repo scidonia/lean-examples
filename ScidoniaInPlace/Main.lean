@@ -88,7 +88,8 @@ must copy — and the child processes are what carry
   — the copies — that the reference the writes did not go through still reads the
   arrays the run started from, and the same partition. `uf-checked-shared` is the
   aliased shape in a child with the check armed, which must end the process
-  naming the `Layout5` *array* site, because that is the write about to copy.
+  naming the `Layout5` *array* site, the write about to copy, and not the focus
+  site.
   `uf-checked-focus` is the disciplined shape in a child with the check armed,
   and it is the one case here that does not exit zero: an element of an
   `Array UInt64` is a machine word and not a heap object, `isExclusiveUnsafe`
@@ -1256,10 +1257,11 @@ go through must still read the arrays the run started from, and the partition
 must be the one `uf-unique` found — the two shapes differ in cost and not in
 value. `uf-checked-shared` is the aliased run in a child with the check armed,
 which must end the process naming the `Layout5` array site, that being the write
-about to copy; `uf-checked-focus` is the disciplined run in the same child, which
-stops at the *focus* site instead — an element of a machine-word array is not a
-heap object, so the library's focus guard answers `false` for it — and that case
-pins the stop, the site and the array site's absence.
+about to copy, and not the focus site; `uf-checked-focus` is the disciplined run
+in the same child, which stops at the *focus* site instead — an element of a
+machine-word array is not a heap object, so the library's focus guard answers
+`false` for it — and that case pins the stop, the site and the array site's
+absence.
 
 The loops below are the two shapes at the level a case observes them: a step's
 arrays are the recursion's parameters, and the aliased one reads each alias
